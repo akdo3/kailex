@@ -24,9 +24,22 @@ return function(ctx)
 
         self.Callback = opts.Callback or function() end
 
-        local binding = I.ToBinding(I.SaveManager:Get(saveKey, nil)) or I.ToBinding(opts.Default)
+        local mode = string.lower(tostring(opts.Mode or "press"))
+        if mode ~= "toggle" and mode ~= "hold" then mode = "press" end
+        self.Mode = mode
+        local toggleState = false
+
+        local savedBinding = I.SaveManager:Get(saveKey, nil)
+        local binding
+        if savedBinding == "__none" then
+            binding = nil
+        else
+            binding = I.ToBinding(savedBinding)
+            if binding == nil then
+                binding = I.ToBinding(opts.Default)
+            end
+        end
         local listening = false
-        local suppressClear = false
         local listenToken = 0
 
         table.insert(I.KeybindRegistry, { el = self })
@@ -100,7 +113,7 @@ return function(ctx)
                     setBinding({
                         Kind = "Key",
                         Code = input.KeyCode,
-                        Name = tostring(input.KeyCode):match("%.(.+)$") or tostring(input.KeyCode),
+                        Name = input.KeyCode.Name,
                     })
                     I.PlaySound("Click")
                 elseif opts.MouseButtons
@@ -108,12 +121,10 @@ return function(ctx)
                         or input.UserInputType == Enum.UserInputType.MouseButton3) then
                     listenToken += 1
                     setListening(false)
-                    suppressClear = true
-                    task.defer(function() suppressClear = false end)
                     setBinding({
                         Kind = "Mouse",
                         Code = input.UserInputType,
-                        Name = tostring(input.UserInputType):match("%.(.+)$") or tostring(input.UserInputType),
+                        Name = input.UserInputType.Name,
                     })
                     I.PlaySound("Click")
                 end
@@ -124,10 +135,22 @@ return function(ctx)
             if self._disabled then return end
             if UserInputService:GetFocusedTextBox() ~= nil then return end
             if not binding then return end
+            local matched = false
             if binding.Kind == "Key" and input.KeyCode == binding.Code then
-                I.RunCallback(self.Callback, self.Title, binding.Code)
+                matched = true
             elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code
                 and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                matched = true
+            end
+            if not matched then return end
+            if mode == "toggle" then
+                toggleState = not toggleState
+                self._toggleState = toggleState
+                I.RunCallback(self.Callback, self.Title, binding.Code, toggleState)
+            elseif mode == "hold" then
+                self._holding = true
+                I.RunCallback(self.Callback, self.Title, binding.Code, true)
+            else
                 I.RunCallback(self.Callback, self.Title, binding.Code)
             end
         end
@@ -141,8 +164,26 @@ return function(ctx)
             end
         end)
 
+        if mode == "hold" then
+            self.Maid:Give(UserInputService.InputEnded:Connect(function(input)
+                if self._destroyed or self._holding ~= true then return end
+                if not binding then return end
+                local matched = false
+                if binding.Kind == "Key" and input.KeyCode == binding.Code then
+                    matched = true
+                elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code then
+                    matched = true
+                end
+                if matched then
+                    self._holding = false
+                    I.RunCallback(self.Callback, self.Title, binding.Code, false)
+                end
+            end))
+        end
+
         self.Maid:Give(bindBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if bindBtn:GetAttribute("Dragging") then return end
             I.ApplyRipple(bindBtn)
             I.PlaySound("Click", 0.6)
             if listening then
@@ -160,10 +201,54 @@ return function(ctx)
             end
         end))
 
-        self.Maid:Give(bindBtn.MouseButton2Click:Connect(function()
-            if suppressClear or listening then return end
-            setBinding(nil)
-        end))
+        function self:_contextItems()
+            local items = {}
+            if binding then
+                table.insert(items, {
+                    Text = "Clear keybind",
+                    Callback = function()
+                        setBinding(nil)
+                    end,
+                })
+            end
+            for _, it in ipairs(I.Element._contextItems(self)) do
+                table.insert(items, it)
+            end
+            return items
+        end
+
+        local function showMenu()
+            if self._destroyed or listening then return end
+            local items = self:_contextItems()
+            if #items == 0 then return end
+            local m = UserInputService:GetMouseLocation()
+            I.ContextMenu.Show(items, m.X, m.Y)
+        end
+
+        if I.Device.IsTouch then
+            local token = nil
+            bindBtn.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.Touch then return end
+                local myToken = {}
+                token = myToken
+                task.delay(0.55, function()
+                    if token ~= myToken or listening or self._destroyed then return end
+                    token = nil
+                    bindBtn:SetAttribute("Dragging", true)
+                    showMenu()
+                end)
+            end)
+            bindBtn.InputEnded:Connect(function()
+                token = nil
+                if bindBtn:GetAttribute("Dragging") then
+                    task.defer(function()
+                        bindBtn:SetAttribute("Dragging", nil)
+                    end)
+                end
+            end)
+        else
+            bindBtn.MouseButton2Click:Connect(showMenu)
+        end
 
         function self:Set(v, silent)
             local b = I.ToBinding(v)
@@ -177,11 +262,27 @@ return function(ctx)
         function self:GetName()
             return binding and binding.Name or "None"
         end
+        function self:GetState()
+            if mode == "toggle" then return toggleState end
+            if mode == "hold" then return self._holding == true end
+            return nil
+        end
         function self:CopyValue() return self:GetName() end
+        function self:Reset()
+            if self._destroyed then return end
+            local b = I.ToBinding(opts.Default)
+            if b then
+                setBinding(b)
+            else
+                setBinding(nil)
+            end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
-            local b = I.ToBinding(v)
-            if b then setBinding(b) end
+            if v ~= "__none" then
+                local b = I.ToBinding(v)
+                if b then setBinding(b) end
+            end
         end)
         self.Maid:Give(Kailex.ThemeChanged:Connect(refresh))
         refresh()

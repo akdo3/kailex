@@ -12,7 +12,7 @@ return function(ctx)
 
     local MAX_ACTIVE = I.Device.IsTouch and 3 or 5
     local POOL_CAP = MAX_ACTIVE + 3
-    local TypeColors = { Info = "Accent", Success = "Success", Warning = "Warning", Error = "Error" }
+    local TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" }
     local queue = {}
     local active = 0
     local pool = {}

@@ -444,31 +444,45 @@ Bundle["Core/Interaction/Input"] = function(ctx)
         if type(v) == "string" then
             local kind, name = v:match("^(%a+):(.+)$")
             if kind and kind:lower() ~= "key" then return nil end
-            return Enum.KeyCode[name or v]
+            local key = name or v
+            local ok, item = pcall(function() return Enum.KeyCode[key] end)
+            if ok and item ~= nil then return item end
+            return nil
         end
         return nil
     end
 
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
-            local name = tostring(v):match("%.(.+)$") or tostring(v)
-            if v.EnumType == Enum.KeyCode then return { Kind = "Key", Code = v, Name = name } end
-            if v.EnumType == Enum.UserInputType then return { Kind = "Mouse", Code = v, Name = name } end
-        elseif type(v) == "string" then
+            if v.EnumType == Enum.KeyCode then
+                return { Kind = "Key", Code = v, Name = v.Name }
+            end
+            if v.EnumType == Enum.UserInputType then
+                return { Kind = "Mouse", Code = v, Name = v.Name }
+            end
+            return nil
+        end
+        if type(v) == "string" then
             local kind, name = v:match("^(%a+):(.+)$")
             if kind then
-                local k = kind:sub(1,1):upper() .. kind:sub(2):lower()
+                local k = kind:sub(1, 1):upper() .. kind:sub(2):lower()
                 if k == "Key" then
-                    local kc = Enum.KeyCode[name]
-                    if kc then return { Kind = "Key", Code = kc, Name = name } end
+                    local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+                    if ok and kc ~= nil then
+                        return { Kind = "Key", Code = kc, Name = name }
+                    end
                 elseif k == "Mouse" then
-                    local it = Enum.UserInputType[name]
-                    if it then return { Kind = "Mouse", Code = it, Name = name } end
+                    local ok, it = pcall(function() return Enum.UserInputType[name] end)
+                    if ok and it ~= nil then
+                        return { Kind = "Mouse", Code = it, Name = name }
+                    end
                 end
                 return nil
             end
-            local kc = Enum.KeyCode[v]
-            if kc then return { Kind = "Key", Code = kc, Name = v } end
+            local ok, kc = pcall(function() return Enum.KeyCode[v] end)
+            if ok and kc ~= nil then
+                return { Kind = "Key", Code = kc, Name = v }
+            end
         end
         return nil
     end
@@ -620,6 +634,24 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Accent = RGB(66,113,244),      AccentHover = RGB(90,132,247), OnAccent = RGB(255,255,255),
             Success = RGB(72,163,87),      Warning = RGB(196,142,30),  Error = RGB(219,68,94),
             TabBar = RGB(240,242,247),
+        },
+        Obsidian = {
+            Background = RGB(8,8,10),     Surface = RGB(12,12,15),    SurfaceLight = RGB(17,17,21),
+            Element = RGB(20,20,25),      ElementHover = RGB(27,27,34),
+            Stroke = RGB(32,32,40),       StrokeBright = RGB(50,50,62),
+            Text = RGB(228,230,238),      SubText = RGB(136,140,158),
+            Accent = RGB(124,170,255),    AccentHover = RGB(152,190,255), OnAccent = RGB(8,10,16),
+            Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
+            TabBar = RGB(10,10,12),
+        },
+        Ember = {
+            Background = RGB(20,14,11),   Surface = RGB(27,19,15),    SurfaceLight = RGB(36,25,19),
+            Element = RGB(42,29,22),      ElementHover = RGB(54,38,29),
+            Stroke = RGB(62,44,33),       StrokeBright = RGB(94,67,50),
+            Text = RGB(245,236,229),      SubText = RGB(171,150,136),
+            Accent = RGB(255,149,94),     AccentHover = RGB(255,168,117), OnAccent = RGB(28,13,6),
+            Success = RGB(158,206,106),   Warning = RGB(235,187,120), Error = RGB(247,118,142),
+            TabBar = RGB(23,16,13),
         },
     }
 
@@ -852,6 +884,42 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
             })
             I.Bind(ring, "BackgroundColor3", colorKey)
             bar(2, 6, 0.5, 0.76)
+        elseif kind == "Maximize" then
+            local sq = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(9, 9),
+                BackgroundTransparency = 1,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
+            })
+            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = sq }), "Color", colorKey)
+        elseif kind == "Restore" then
+            local back = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, -2, 0.5, -2),
+                Size = UDim2.fromOffset(7, 7),
+                BackgroundTransparency = 1,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
+            })
+            I.Bind(Create("UIStroke", { Thickness = 1.4, Parent = back }), "Color", colorKey)
+            local front = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 2, 0.5, 2),
+                Size = UDim2.fromOffset(8, 8),
+                BackgroundColor3 = I.CurrentTheme[colorKey],
+                BorderSizePixel = 0,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
+            })
+            I.Bind(front, "BackgroundColor3", colorKey)
+        elseif kind == "Alert" then
+            bar(2, 6, 0.5, 0.40)
+            bar(2, 2, 0.5, 0.76)
+        elseif kind == "Info" then
+            bar(2, 2, 0.5, 0.24)
+            bar(2, 6, 0.5, 0.55)
         end
         return holder
     end
@@ -865,6 +933,7 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         if hoverT == nil then hoverT = baseT end
         local hoverKey = opts.HoverKey or "ElementHover"
         local baseKey  = opts.BaseKey or "Element"
+
         obj.MouseEnter:Connect(function()
             if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") then return end
             I.PlaySound("Hover", 0.12)
@@ -884,6 +953,107 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         end)
     end
 
+    local function AddPress(hit, target)
+        target = target or hit
+        if not hit or not target then return nil end
+        if target:FindFirstChildOfClass("UIScale") then return nil end
+        local scale = Create("UIScale", { Scale = 1, Parent = target })
+        local down = false
+        local function release()
+            if not down then return end
+            down = false
+            I.Tween(scale, "PopSoft", { Scale = 1 })
+        end
+        hit.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if target:GetAttribute("Disabled") then return end
+            down = true
+            scale.Scale = 0.97
+        end)
+        hit.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                release()
+            end
+        end)
+        hit.MouseLeave:Connect(release)
+        return scale
+    end
+
+    local function DropShadow(target, opts)
+        opts = opts or {}
+        if not target or not target.Parent then return nil end
+        local parent = target.Parent
+        local holder = Create("Frame", {
+            Name = "__KailexShadow",
+            BackgroundTransparency = 1,
+            AnchorPoint = target.AnchorPoint,
+            ZIndex = math.max(0, (target.ZIndex or 1) - 1),
+            Visible = target.Visible,
+            Parent = parent,
+        })
+        local radius = opts.Radius or 12
+        local spreads = opts.Spreads or { 2, 5, 9 }
+        local dropY = opts.DropY or 3
+        local layers = {}
+        for i = 1, #spreads do
+            local s = spreads[i]
+            local base = ({ 0.92, 0.945, 0.965 })[i] or 0.965
+            local f = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, dropY),
+                Size = UDim2.new(1, s * 2, 1, s * 2 + dropY),
+                BackgroundColor3 = Color3.new(0, 0, 0),
+                BackgroundTransparency = base,
+                BorderSizePixel = 0,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, radius + s) }) },
+            })
+            layers[i] = { Frame = f, Base = base }
+        end
+
+        local ctrl = {}
+        local function sync()
+            if not target.Parent then return end
+            holder.Position = target.Position
+            holder.Size = target.Size
+            holder.ZIndex = math.max(0, (target.ZIndex or 1) - 1)
+        end
+        function ctrl.SetFade(a)
+            a = a or 0
+            for _, l in ipairs(layers) do
+                l.Frame.BackgroundTransparency = math.min(1, l.Base + (1 - l.Base) * a)
+            end
+        end
+        function ctrl.FadeOut()
+            for _, l in ipairs(layers) do
+                I.Tween(l.Frame, "Vanish", { BackgroundTransparency = 1 })
+            end
+        end
+        function ctrl.Destroy()
+            holder:Destroy()
+        end
+        ctrl.Holder = holder
+
+        local maid = I.Maid.new()
+        maid:Give(target:GetPropertyChangedSignal("Position"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("Size"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("ZIndex"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("Visible"):Connect(function()
+            holder.Visible = target.Visible
+        end))
+        maid:Give(target:GetPropertyChangedSignal("AnchorPoint"):Connect(function()
+            holder.AnchorPoint = target.AnchorPoint
+            sync()
+        end))
+        maid:Give(function() holder:Destroy() end)
+        maid:Give(target.Destroying:Connect(function() maid:Destroy() end))
+        ctrl.Maid = maid
+        sync()
+        return ctrl
+    end
+
     I.TS = TS
     I.ApplyTextScale = ApplyTextScale
     I.Create = Create
@@ -891,6 +1061,8 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
     I.StrokeBind = StrokeBind
     I.Icon = Icon
     I.AddHover = AddHover
+    I.AddPress = AddPress
+    I.DropShadow = DropShadow
 end
 
 
@@ -1033,6 +1205,8 @@ Bundle["Core/Services/Save"] = function(ctx)
     end
 
     local SaveReloadRegistry = {}
+    I.SaveReloadRegistry = SaveReloadRegistry
+
     I.LibMaid:Give(SaveManager.DataChanged:Connect(function()
         for key, fns in pairs(SaveReloadRegistry) do
             local n = #fns
@@ -1047,6 +1221,7 @@ Bundle["Core/Services/Save"] = function(ctx)
 
     I.SaveManager = SaveManager
     I.Configs = Configs
+    Kailex.Configs = Configs
     I.SaveValue = SaveValue
     I.IsInternalKey = IsInternalKey
 end
@@ -1073,10 +1248,18 @@ Bundle["Core/Services/Sound"] = function(ctx)
     local SoundPool = {}
     local SoundInstances = {}
 
+    local LastPlayed = {}
+    local THROTTLE = 0.08
+
     local function PlaySound(kind, scale)
         if not Setting.Sounds then return end
         local a = Audio[kind]
         if type(a) ~= "table" or a.Id == "" then return end
+        if (a.Vol or 0.4) <= 0.08 then
+            local now = os.clock()
+            if LastPlayed[kind] and now - LastPlayed[kind] < THROTTLE then return end
+            LastPlayed[kind] = now
+        end
         pcall(function()
             local pool = SoundPool[a.Id]
             if not pool then pool = {} SoundPool[a.Id] = pool end
@@ -1151,19 +1334,6 @@ Bundle["Core/Misc/Gui"] = function(ctx)
         return RootScale and RootScale.Scale or 1
     end
 
-    local function ClampFloat(inst)
-        local s = GetScale()
-        local w, h = inst.AbsoluteSize.X, inst.AbsoluteSize.Y
-        if w < 1 or h < 1 then return end
-        local x, y = inst.AbsolutePosition.X, inst.AbsolutePosition.Y
-        local nx = math.clamp(x, 8, math.max(8, I.Viewport.X - w - 8))
-        local ny = math.clamp(y, 8, math.max(8, I.Viewport.Y - h - 8))
-        if nx ~= x or ny ~= y then
-            inst.Position = UDim2.fromOffset(nx / s, ny / s)
-        end
-    end
-    I.ClampFloat = ClampFloat
-
     local function UpdateViewport()
         if not Camera then return end
         I.Viewport = Camera.ViewportSize
@@ -1236,6 +1406,13 @@ Bundle["Core/Interaction/Modal"] = function(ctx)
             end
         end
     end
+
+    function ModalManager.CloseTop()
+        local top = ModalManager.Stack[#ModalManager.Stack]
+        if not top then return false end
+        pcall(top.Close)
+        return true
+    end
 end
 
 
@@ -1248,9 +1425,9 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
     local DragManager = { Active = nil }
     I.DragManager = DragManager
 
-    local function ClampWindowToScreen(root)
+    local function ClampToScreen(root, margin)
+        margin = margin or 8
         local s = I.GetScale()
-        local margin = 8
         local w, h = root.AbsoluteSize.X, root.AbsoluteSize.Y
         local x, y = root.AbsolutePosition.X, root.AbsolutePosition.Y
         local nx = math.clamp(x, margin, math.max(margin, I.Viewport.X - w - margin))
@@ -1263,69 +1440,133 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
             )
         end
     end
-    I.ClampWindowToScreen = ClampWindowToScreen
+    I.ClampWindowToScreen = ClampToScreen
+    I.ClampFloat = ClampToScreen
+
+    local function BeginDrag(input, handle, opts)
+        opts = opts or {}
+        if DragManager.Active ~= nil then return nil end
+        local inputType = input.UserInputType
+        if inputType ~= Enum.UserInputType.MouseButton1
+            and inputType ~= Enum.UserInputType.Touch then return nil end
+
+        local key = opts.ManagerKey or handle
+        local threshold = tonumber(opts.Threshold) or 0
+        local useAttr = opts.NoAttr ~= true
+        local moved = threshold <= 0
+        DragManager.Active = key
+        if moved and useAttr then handle:SetAttribute("Dragging", true) end
+
+        if opts.ModalOwner ~= nil then I.ModalManager.CloseAll(opts.ModalOwner) end
+
+        local maid = I.Maid.new()
+        local finished = false
+        local startMouse = UserInputService:GetMouseLocation()
+
+        local function markMoved()
+            if not moved then
+                moved = true
+                if useAttr then handle:SetAttribute("Dragging", true) end
+            end
+        end
+
+        local function finish()
+            if finished then return end
+            finished = true
+            if DragManager.Active == key then DragManager.Active = nil end
+            if useAttr then handle:SetAttribute("Dragging", nil) end
+            maid:Destroy()
+            if opts.OnEnd then I.SafeCall(opts.OnEnd, moved) end
+        end
+
+        if opts.OnStart then I.SafeCall(opts.OnStart) end
+
+        maid:Give(UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1
+                or inp.UserInputType == Enum.UserInputType.Touch then
+                finish()
+            end
+        end))
+        if handle and handle.Destroying then
+            maid:Give(handle.Destroying:Connect(finish))
+        end
+        maid:Give(RunService.Heartbeat:Connect(function()
+            if not I.IsInputDown(inputType) then finish() end
+        end))
+
+        if type(opts.OnFrame) == "function" then
+            maid:Give(RunService.RenderStepped:Connect(function()
+                if finished then return end
+                local mouse = UserInputService:GetMouseLocation()
+                local dx, dy = mouse.X - startMouse.X, mouse.Y - startMouse.Y
+                if threshold > 0 and not moved then
+                    if math.abs(dx) + math.abs(dy) > threshold then markMoved() end
+                    if not moved then return end
+                end
+                opts.OnFrame(mouse, dx, dy)
+            end))
+        end
+
+        if type(opts.OnMove) == "function" then
+            local function tryMove(pos)
+                if threshold > 0 and not moved then
+                    local dx, dy = pos.X - startMouse.X, pos.Y - startMouse.Y
+                    if math.abs(dx) + math.abs(dy) <= threshold then return end
+                    markMoved()
+                end
+                opts.OnMove(pos)
+            end
+            maid:Give(UserInputService.InputChanged:Connect(function(inp)
+                if finished then return end
+                if inp.UserInputType == Enum.UserInputType.MouseMovement
+                    or inp.UserInputType == Enum.UserInputType.Touch then
+                    tryMove(inp.Position)
+                end
+            end))
+            if threshold <= 0 then opts.OnMove(input.Position) end
+        end
+
+        return {
+            Finish = finish,
+            Maid = maid,
+            IsMoved = function() return moved end,
+        }
+    end
+    I.BeginDrag = BeginDrag
 
     local function MakeDraggable(handle, target, opts)
         opts = opts or {}
         local threshold = opts.Threshold or 6
-        local dragging = false
         local maid = I.Maid.new()
 
         maid:Give(handle.InputBegan:Connect(function(input)
-            if dragging or DragManager.Active ~= nil then return end
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-            dragging = true
-            DragManager.Active = target
-
-            if target.AnchorPoint.X ~= 0 or target.AnchorPoint.Y ~= 0 then
-                local s = I.GetScale()
-                target.AnchorPoint = Vector2.new(0, 0)
-                target.Position = UDim2.fromOffset(target.AbsolutePosition.X / s, target.AbsolutePosition.Y / s)
-            end
-
-            if opts.OnStart then I.SafeCall(opts.OnStart, target) end
-
-            local startPos = target.Position
-            local startMouse = UserInputService:GetMouseLocation()
-            local moved = false
-            local dragMaid = I.Maid.new()
-            maid:Give(dragMaid)
-
-            local function finish()
-                if not dragging then return end
-                dragging = false
-                if DragManager.Active == target then DragManager.Active = nil end
-                handle:SetAttribute("Dragging", nil)
-                dragMaid:Destroy()
-                if moved and opts.OnEnd then I.SafeCall(opts.OnEnd) end
-            end
-
-            dragMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            dragMaid:Give(handle.Destroying:Connect(finish))
-            dragMaid:Give(RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
-            dragMaid:Give(RunService.RenderStepped:Connect(function()
-                if not dragging then return end
-                local mouse = UserInputService:GetMouseLocation()
-                local dx, dy = mouse.X - startMouse.X, mouse.Y - startMouse.Y
-                if not moved and math.abs(dx) + math.abs(dy) > threshold then
-                    moved = true
-                    handle:SetAttribute("Dragging", true)
-                end
-                if moved then
+            if DragManager.Active ~= nil then return end
+            local startPos
+            BeginDrag(input, handle, {
+                Threshold = threshold,
+                ModalOwner = opts.ModalOwner,
+                ManagerKey = target,
+                OnStart = function()
+                    if target.AnchorPoint.X ~= 0 or target.AnchorPoint.Y ~= 0 then
+                        local s = I.GetScale()
+                        target.AnchorPoint = Vector2.new(0, 0)
+                        target.Position = UDim2.fromOffset(
+                            target.AbsolutePosition.X / s, target.AbsolutePosition.Y / s)
+                    end
+                    if opts.OnStart then I.SafeCall(opts.OnStart, target) end
+                    startPos = target.Position
+                end,
+                OnEnd = function(moved)
+                    if moved and opts.OnEnd then I.SafeCall(opts.OnEnd) end
+                end,
+                OnFrame = function(_, dx, dy)
+                    if not startPos then return end
                     local s = I.GetScale()
-                    target.Position = UDim2.fromOffset(startPos.X.Offset + dx / s, startPos.Y.Offset + dy / s)
-                    if opts.Clamp then ClampWindowToScreen(target) end
-                end
-            end))
+                    target.Position = UDim2.fromOffset(
+                        startPos.X.Offset + dx / s, startPos.Y.Offset + dy / s)
+                    if opts.Clamp then ClampToScreen(target) end
+                end,
+            })
         end))
 
         I.Once(handle.Destroying, function() maid:Destroy() end)
@@ -1333,7 +1574,7 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
     end
     I.MakeDraggable = MakeDraggable
 
-    UserInputService.InputEnded:Connect(function(input)
+    I.LibMaid:Give(UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
             task.defer(function()
@@ -1345,7 +1586,7 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
                 if not anyDown then DragManager.Active = nil end
             end)
         end
-    end)
+    end))
 end
 
 
@@ -1591,7 +1832,7 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
 
     local MAX_ACTIVE = I.Device.IsTouch and 3 or 5
     local POOL_CAP = MAX_ACTIVE + 3
-    local TypeColors = { Info = "Accent", Success = "Success", Warning = "Warning", Error = "Error" }
+    local TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" }
     local queue = {}
     local active = 0
     local pool = {}
@@ -1953,6 +2194,11 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
         local maid = I.Maid.new()
         maid:Give(function() ModalActive = false end)
 
+        local styleType = string.lower(tostring(data.Type or ""))
+        local isDanger = styleType == "danger" or data.Danger == true
+        local isInfo = styleType == "info"
+        local accentKey = isDanger and "Error" or "Accent"
+
         local dimmer = I.Create("TextButton", {
             Size = UDim2.fromScale(1, 1),
             BackgroundColor3 = Color3.new(0, 0, 0),
@@ -1983,6 +2229,8 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16),
             Parent = card,
         })
+        local shadow = I.DropShadow(card, { Radius = 12 })
+        if shadow then shadow.SetFade(1) end
 
         local title = I.Create("TextLabel", {
             BackgroundTransparency = 1,
@@ -1996,6 +2244,15 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             Parent = card,
         })
         I.Bind(title, "TextColor3", "Text")
+
+        if isDanger or isInfo then
+            local icon = I.Icon(card, isDanger and "Alert" or "Info", isDanger and "Error" or "Accent")
+            icon.AnchorPoint = Vector2.new(0, 0.5)
+            icon.Position = UDim2.new(0, 0, 0, 9)
+            icon.Size = UDim2.fromOffset(15, 15)
+            title.Position = UDim2.new(0, 21, 0, 0)
+            title.Size = UDim2.new(1, -21, 0, 18)
+        end
 
         local bodyText = tostring(data.Text or data.Description or "")
         local b = TextService:GetTextSize(bodyText, I.TS(13), Enum.Font.Gotham, Vector2.new(324, 300))
@@ -2023,29 +2280,34 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             Parent = card,
         })
 
-        local function mkBtn(text, accent, pos)
+        local function mkBtn(text, isAccent, pos)
             local btn = I.Create("TextButton", {
                 Position = pos,
                 Size = UDim2.new(0.48, -4, 1, 0),
-                BackgroundColor3 = accent and I.CurrentTheme.Accent or I.CurrentTheme.Element,
+                BackgroundColor3 = isAccent and I.CurrentTheme[accentKey] or I.CurrentTheme.Element,
                 Text = text,
                 Font = Enum.Font.GothamBold,
                 TextSize = 13,
-                TextColor3 = accent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
+                TextColor3 = isAccent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
                 AutoButtonColor = false,
                 BorderSizePixel = 0,
                 Parent = btnRow,
                 Children = { I.Corner(8) },
             })
-            if accent then
-                I.Bind(btn, "BackgroundColor3", "Accent")
+            if isAccent then
+                I.Bind(btn, "BackgroundColor3", accentKey)
                 I.Bind(btn, "TextColor3", "OnAccent")
-                I.AddHover(btn, { HoverKey = "AccentHover", BaseKey = "Accent" })
+                if isDanger then
+                    I.AddHover(btn, { HoverKey = "Error", BaseKey = "Error", HoverTransparency = 0.15 })
+                else
+                    I.AddHover(btn, { HoverKey = "AccentHover", BaseKey = "Accent" })
+                end
             else
                 I.Bind(btn, "BackgroundColor3", "Element")
                 I.Bind(btn, "TextColor3", "Text")
                 I.AddHover(btn)
             end
+            I.AddPress(btn)
             return btn
         end
 
@@ -2062,6 +2324,7 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             if closed then return end
             closed = true
             I.ModalManager.Remove(modalEntry)
+            if shadow then shadow.FadeOut() end
             I.Tween(dimmer, "Fast", { BackgroundTransparency = 1 })
             I.Tween(scale, "Vanish", { Scale = 0.92 })
             I.Tween(card, "Fast", { GroupTransparency = 1 })
@@ -2099,6 +2362,11 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
         I.Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
         I.Tween(card, "Snappy", { GroupTransparency = 0 })
         I.Tween(scale, "Pop", { Scale = 1 })
+        if shadow then
+            task.delay(0.1, function()
+                if not closed and shadow then shadow.SetFade(0) end
+            end)
+        end
         return card
     end
 end
@@ -2224,7 +2492,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
     local ContextMenu = {}
     I.ContextMenu = ContextMenu
 
-    local frame, catcher
+    local frame, catcher, shadow
     local entry = nil
     local hideToken = 0
 
@@ -2245,6 +2513,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
             },
         })
         I.Bind(frame, "BackgroundColor3", "SurfaceLight")
+        shadow = I.DropShadow(frame, { Radius = 10 })
         catcher = I.Create("TextButton", {
             Size = UDim2.fromScale(1, 1),
             BackgroundTransparency = 1,
@@ -2304,6 +2573,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
                     I.Bind(btn, "TextColor3", "Text")
                 end
                 I.AddHover(btn)
+                I.AddPress(btn)
                 btn.MouseButton1Click:Connect(function()
                     ContextMenu.Hide()
                     if type(item.Callback) == "function" then
@@ -2321,6 +2591,12 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
         frame.Position = UDim2.fromOffset(px / s, py / s)
         frame.Visible = true
         catcher.Visible = true
+        if shadow then
+            shadow.SetFade(1)
+            task.delay(0.08, function()
+                if frame.Visible and shadow then shadow.SetFade(0) end
+            end)
+        end
         I.ModalManager.Remove(entry)
         local tk = hideToken
         entry = I.ModalManager.Push(nil, function()
@@ -2331,6 +2607,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
     function ContextMenu.Hide()
         if frame and frame.Visible then
             hideToken += 1
+            if shadow then shadow.FadeOut() end
             frame.Visible = false
             catcher.Visible = false
         end
@@ -2397,6 +2674,31 @@ Bundle["Elements/Base"] = function(ctx)
         end)
     end
 
+    function Element:EnsureRight()
+        if self._destroyed then return nil end
+        if self.RightContainer then return self.RightContainer end
+        if not self.Row or not self.Row.Parent then return nil end
+        local right = I.Create("Frame", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
+            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.new(0, 0, 1, -4),
+            Parent = self.Row,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, 8),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
+        })
+        self.RightContainer = right
+        self:RecalcWidth()
+        return right
+    end
+
     function Element:SetTitle(text)
         if self._destroyed then return end
         self.Title = tostring(text or "")
@@ -2450,6 +2752,8 @@ Bundle["Elements/Base"] = function(ctx)
         if self._destroyed then return nil end
         local elClass = Elements[className]
         if not elClass then return nil end
+        local rc = self:EnsureRight()
+        if not rc then return nil end
         opts = opts or {}
         local el = elClass.new(self.Tab, opts)
 
@@ -2472,7 +2776,7 @@ Bundle["Elements/Base"] = function(ctx)
             el.RightContainer.Size = UDim2.new(1, 0, 1, 0)
         end
 
-        row.Parent = self.RightContainer
+        row.Parent = rc
         row.LayoutOrder = (#self._extras + 1) + 10
         row.Size = UDim2.new(0, el._width or 0, 0, el._extraH or I.ROW_H)
 
@@ -2534,13 +2838,39 @@ Bundle["Elements/Base"] = function(ctx)
     end
 
     local function HookContextMenu(el, overlay)
-        overlay.MouseButton2Click:Connect(function()
-            if el._destroyed then return end
-            local items = el:_contextItems()
-            if #items == 0 then return end
-            local m = I.UserInputService:GetMouseLocation()
-            I.ContextMenu.Show(items, m.X, m.Y)
-        end)
+        if I.Device.IsTouch then
+            local token = nil
+            overlay.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.Touch then return end
+                local myToken = {}
+                token = myToken
+                task.delay(0.55, function()
+                    if token ~= myToken or el._destroyed then return end
+                    token = nil
+                    local items = el:_contextItems()
+                    if #items == 0 then return end
+                    overlay:SetAttribute("Dragging", true)
+                    local m = I.UserInputService:GetMouseLocation()
+                    I.ContextMenu.Show(items, m.X, m.Y)
+                end)
+            end)
+            overlay.InputEnded:Connect(function()
+                token = nil
+                if overlay:GetAttribute("Dragging") then
+                    task.defer(function()
+                        overlay:SetAttribute("Dragging", nil)
+                    end)
+                end
+            end)
+        else
+            overlay.MouseButton2Click:Connect(function()
+                if el._destroyed then return end
+                local items = el:_contextItems()
+                if #items == 0 then return end
+                local m = I.UserInputService:GetMouseLocation()
+                I.ContextMenu.Show(items, m.X, m.Y)
+            end)
+        end
     end
     I.HookContextMenu = HookContextMenu
 
@@ -2650,22 +2980,25 @@ Bundle["Elements/Base"] = function(ctx)
         end
         I.Bind(title, "TextColor3", "Text")
 
-        local right = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
-            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
-            Size = UDim2.new(0, rightW, 1, -4),
-            Parent = row,
-            Children = {
-                I.Create("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, 8),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }),
-            },
-        })
+        local right
+        if rightW > 0 or opts.ForceRight then
+            right = I.Create("Frame", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
+                Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, rightW, 1, -4),
+                Parent = row,
+                Children = {
+                    I.Create("UIListLayout", {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                        VerticalAlignment = Enum.VerticalAlignment.Center,
+                        Padding = UDim.new(0, 8),
+                        SortOrder = Enum.SortOrder.LayoutOrder,
+                    }),
+                },
+            })
+        end
 
         if not opts.NoHover then
             I.AddHover(row, { StrokeTransparency = 0.65 })
@@ -2934,6 +3267,7 @@ end
 -- [[Elements/Button]]
 Bundle["Elements/Button"] = function(ctx)
     local I = ctx.Internal
+    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Button = I.MakeElementClass()
@@ -2966,6 +3300,7 @@ Bundle["Elements/Button"] = function(ctx)
             ZIndex = 0,
             Parent = row,
         })
+        I.AddPress(overlay, row)
 
         local spinner
         local spinTween
@@ -2999,12 +3334,30 @@ Bundle["Elements/Button"] = function(ctx)
             setSpinner(self._busy)
         end
 
+        function self:HandleAsync(fn)
+            if self._destroyed or self._busy then return end
+            if type(fn) ~= "function" then return end
+            self:SetBusy(true)
+            task.spawn(function()
+                local ok, err = pcall(fn)
+                if not ok then
+                    warn("[Kailex] " .. tostring(err))
+                    Kailex:Notify({
+                        Title = "Task error",
+                        Text = tostring(err),
+                        Type = "Error", Duration = 6,
+                    })
+                end
+                self:SetBusy(false)
+            end)
+        end
+
         local function fire()
             if self._busy or self._disabled then return end
             I.ApplyRipple(overlay)
             I.PlaySound("Click")
             if opts.Confirm then
-                ctx.Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
+                Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
                     I.RunCallback(self.Callback, self.Title)
                 end)
                 return
@@ -3012,7 +3365,10 @@ Bundle["Elements/Button"] = function(ctx)
             I.RunCallback(self.Callback, self.Title)
         end
 
-        self.Maid:Give(overlay.MouseButton1Click:Connect(fire))
+        self.Maid:Give(overlay.MouseButton1Click:Connect(function()
+            if overlay:GetAttribute("Dragging") then return end
+            fire()
+        end))
         I.HookContextMenu(self, overlay)
 
         if hasIcon and right then
@@ -3024,18 +3380,28 @@ Bundle["Elements/Button"] = function(ctx)
                 LayoutOrder = 1,
                 Parent = right,
             })
-            local img = I.Create("ImageLabel", {
-                BackgroundTransparency = 1,
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(16, 16),
-                Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
-                ImageColor3 = I.CurrentTheme.SubText,
-                Parent = iconBtn,
-            })
-            I.Bind(img, "ImageColor3", "SubText")
-            self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
-            self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
+            local raw = tostring(opts.Icon)
+            local isAsset = tonumber(opts.Icon) ~= nil
+                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            if isAsset then
+                local img = I.Create("ImageLabel", {
+                    BackgroundTransparency = 1,
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.fromScale(0.5, 0.5),
+                    Size = UDim2.fromOffset(16, 16),
+                    Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
+                    ImageColor3 = I.CurrentTheme.SubText,
+                    Parent = iconBtn,
+                })
+                I.Bind(img, "ImageColor3", "SubText")
+                self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
+                self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
+            else
+                local holder = I.Icon(iconBtn, raw, "SubText")
+                holder.AnchorPoint = Vector2.new(0.5, 0.5)
+                holder.Position = UDim2.fromScale(0.5, 0.5)
+                holder.Size = UDim2.fromOffset(16, 16)
+            end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 
@@ -3145,6 +3511,7 @@ Bundle["Elements/Toggle"] = function(ctx)
             ZIndex = 0,
             Parent = row,
         })
+        I.AddPress(overlay, row)
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if overlay:GetAttribute("Dragging") then return end
@@ -3187,11 +3554,18 @@ Bundle["Elements/Toggle"] = function(ctx)
         function self:Get() return self.State end
         function self:CopyValue() return tostring(self.State) end
 
+        function self:Reset()
+            if self._destroyed then return end
+            local d = opts.Default
+            if d == nil then d = opts.defaultVal end
+            self:Set(d == true)
+        end
+
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "boolean" then self:Set(v) end
         end)
 
-        if opts.Default ~= nil or hadSaved then
+        if opts.Default ~= nil or opts.defaultVal ~= nil or hadSaved then
             task.defer(function()
                 if not self._destroyed then I.RunCallback(self.Callback, self.Title, self.State) end
             end)
@@ -3364,7 +3738,6 @@ Bundle["Elements/Slider"] = function(ctx)
         end
 
         local dragging = false
-        local dragMaid = nil
         local function snap(f)
             local v = min + (max - min) * f
             if step > 0 then
@@ -3445,42 +3818,12 @@ Bundle["Elements/Slider"] = function(ctx)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
             dragging = true
-            I.DragManager.Active = track
             I.PlaySound("Slider")
             I.Tween(knob, "Spring", { Size = UDim2.fromOffset(18, 18) })
             I.Tween(knobStroke, "Fast", { Transparency = 0 })
             bubble.Visible = true
             bubbleScale.Scale = 0.7
             I.Tween(bubbleScale, "PopSoft", { Scale = 1 })
-
-            local function finish()
-                if not dragging then return end
-                dragging = false
-                if I.DragManager.Active == track then I.DragManager.Active = nil end
-                if dragMaid then dragMaid:Destroy() dragMaid = nil end
-                I.Tween(knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
-                I.Tween(knobStroke, "Fast", { Transparency = 0.35 })
-                I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-                    if not dragging and not self._destroyed then bubble.Visible = false end
-                end)
-                I.SaveValue(saveKey, value)
-                if onRelease then
-                    I.RunCallback(self.Callback, self.Title, value)
-                end
-            end
-
-            dragMaid = I.Maid.new()
-            dragMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            dragMaid:Give(hit.Destroying:Connect(finish))
-            dragMaid:Give(row.Destroying:Connect(finish))
-            dragMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
 
             local function update(x)
                 local ap, as = track.AbsolutePosition, track.AbsoluteSize
@@ -3496,12 +3839,29 @@ Bundle["Elements/Slider"] = function(ctx)
             end
 
             update(input.Position.X)
-            dragMaid:Give(UserInputService.InputChanged:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseMovement
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    update(inp.Position.X)
-                end
-            end))
+
+            local drag = I.BeginDrag(input, hit, {
+                ManagerKey = track,
+                NoAttr = true,
+                OnMove = function(pos)
+                    update(pos.X)
+                end,
+                OnEnd = function()
+                    dragging = false
+                    I.Tween(knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
+                    I.Tween(knobStroke, "Fast", { Transparency = 0.35 })
+                    I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
+                        if not dragging and not self._destroyed then bubble.Visible = false end
+                    end)
+                    I.SaveValue(saveKey, value)
+                    if onRelease then
+                        I.RunCallback(self.Callback, self.Title, value)
+                    end
+                end,
+            })
+            if not drag then
+                dragging = false
+            end
         end)
 
         track.MouseEnter:Connect(function()
@@ -3517,7 +3877,7 @@ Bundle["Elements/Slider"] = function(ctx)
             local t = tostring(box.Text or "")
             if prefix and t:sub(1, #prefix) == prefix then t = t:sub(#prefix + 1) end
             if suffix and #suffix > 0 and t:sub(-#suffix) == suffix then t = t:sub(1, -#suffix - 1) end
-            local num = tonumber(t:gsub(",", "."):gsub("%s", ""))
+            local num = tonumber((t:gsub(",", "."):gsub("%s", "")))
             if num then
                 self:Set(num)
             else
@@ -3599,9 +3959,22 @@ Bundle["Elements/Keybind"] = function(ctx)
 
         self.Callback = opts.Callback or function() end
 
-        local binding = I.ToBinding(I.SaveManager:Get(saveKey, nil)) or I.ToBinding(opts.Default)
+        local mode = string.lower(tostring(opts.Mode or "press"))
+        if mode ~= "toggle" and mode ~= "hold" then mode = "press" end
+        self.Mode = mode
+        local toggleState = false
+
+        local savedBinding = I.SaveManager:Get(saveKey, nil)
+        local binding
+        if savedBinding == "__none" then
+            binding = nil
+        else
+            binding = I.ToBinding(savedBinding)
+            if binding == nil then
+                binding = I.ToBinding(opts.Default)
+            end
+        end
         local listening = false
-        local suppressClear = false
         local listenToken = 0
 
         table.insert(I.KeybindRegistry, { el = self })
@@ -3675,7 +4048,7 @@ Bundle["Elements/Keybind"] = function(ctx)
                     setBinding({
                         Kind = "Key",
                         Code = input.KeyCode,
-                        Name = tostring(input.KeyCode):match("%.(.+)$") or tostring(input.KeyCode),
+                        Name = input.KeyCode.Name,
                     })
                     I.PlaySound("Click")
                 elseif opts.MouseButtons
@@ -3683,12 +4056,10 @@ Bundle["Elements/Keybind"] = function(ctx)
                         or input.UserInputType == Enum.UserInputType.MouseButton3) then
                     listenToken += 1
                     setListening(false)
-                    suppressClear = true
-                    task.defer(function() suppressClear = false end)
                     setBinding({
                         Kind = "Mouse",
                         Code = input.UserInputType,
-                        Name = tostring(input.UserInputType):match("%.(.+)$") or tostring(input.UserInputType),
+                        Name = input.UserInputType.Name,
                     })
                     I.PlaySound("Click")
                 end
@@ -3699,10 +4070,22 @@ Bundle["Elements/Keybind"] = function(ctx)
             if self._disabled then return end
             if UserInputService:GetFocusedTextBox() ~= nil then return end
             if not binding then return end
+            local matched = false
             if binding.Kind == "Key" and input.KeyCode == binding.Code then
-                I.RunCallback(self.Callback, self.Title, binding.Code)
+                matched = true
             elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code
                 and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                matched = true
+            end
+            if not matched then return end
+            if mode == "toggle" then
+                toggleState = not toggleState
+                self._toggleState = toggleState
+                I.RunCallback(self.Callback, self.Title, binding.Code, toggleState)
+            elseif mode == "hold" then
+                self._holding = true
+                I.RunCallback(self.Callback, self.Title, binding.Code, true)
+            else
                 I.RunCallback(self.Callback, self.Title, binding.Code)
             end
         end
@@ -3716,8 +4099,26 @@ Bundle["Elements/Keybind"] = function(ctx)
             end
         end)
 
+        if mode == "hold" then
+            self.Maid:Give(UserInputService.InputEnded:Connect(function(input)
+                if self._destroyed or self._holding ~= true then return end
+                if not binding then return end
+                local matched = false
+                if binding.Kind == "Key" and input.KeyCode == binding.Code then
+                    matched = true
+                elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code then
+                    matched = true
+                end
+                if matched then
+                    self._holding = false
+                    I.RunCallback(self.Callback, self.Title, binding.Code, false)
+                end
+            end))
+        end
+
         self.Maid:Give(bindBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if bindBtn:GetAttribute("Dragging") then return end
             I.ApplyRipple(bindBtn)
             I.PlaySound("Click", 0.6)
             if listening then
@@ -3735,10 +4136,54 @@ Bundle["Elements/Keybind"] = function(ctx)
             end
         end))
 
-        self.Maid:Give(bindBtn.MouseButton2Click:Connect(function()
-            if suppressClear or listening then return end
-            setBinding(nil)
-        end))
+        function self:_contextItems()
+            local items = {}
+            if binding then
+                table.insert(items, {
+                    Text = "Clear keybind",
+                    Callback = function()
+                        setBinding(nil)
+                    end,
+                })
+            end
+            for _, it in ipairs(I.Element._contextItems(self)) do
+                table.insert(items, it)
+            end
+            return items
+        end
+
+        local function showMenu()
+            if self._destroyed or listening then return end
+            local items = self:_contextItems()
+            if #items == 0 then return end
+            local m = UserInputService:GetMouseLocation()
+            I.ContextMenu.Show(items, m.X, m.Y)
+        end
+
+        if I.Device.IsTouch then
+            local token = nil
+            bindBtn.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.Touch then return end
+                local myToken = {}
+                token = myToken
+                task.delay(0.55, function()
+                    if token ~= myToken or listening or self._destroyed then return end
+                    token = nil
+                    bindBtn:SetAttribute("Dragging", true)
+                    showMenu()
+                end)
+            end)
+            bindBtn.InputEnded:Connect(function()
+                token = nil
+                if bindBtn:GetAttribute("Dragging") then
+                    task.defer(function()
+                        bindBtn:SetAttribute("Dragging", nil)
+                    end)
+                end
+            end)
+        else
+            bindBtn.MouseButton2Click:Connect(showMenu)
+        end
 
         function self:Set(v, silent)
             local b = I.ToBinding(v)
@@ -3752,11 +4197,27 @@ Bundle["Elements/Keybind"] = function(ctx)
         function self:GetName()
             return binding and binding.Name or "None"
         end
+        function self:GetState()
+            if mode == "toggle" then return toggleState end
+            if mode == "hold" then return self._holding == true end
+            return nil
+        end
         function self:CopyValue() return self:GetName() end
+        function self:Reset()
+            if self._destroyed then return end
+            local b = I.ToBinding(opts.Default)
+            if b then
+                setBinding(b)
+            else
+                setBinding(nil)
+            end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
-            local b = I.ToBinding(v)
-            if b then setBinding(b) end
+            if v ~= "__none" then
+                local b = I.ToBinding(v)
+                if b then setBinding(b) end
+            end
         end)
         self.Maid:Give(Kailex.ThemeChanged:Connect(refresh))
         refresh()
@@ -3849,7 +4310,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
 
         local function measureWidth()
             local w = 96
-            local cap = math.min(#options, 400)
+            local cap = math.min(#options, 120)
             for i = 1, cap do
                 local text = options[i].Text
                 if #text > 64 then text = text:sub(1, 64) end
@@ -3902,6 +4363,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
             Children = { I.Corner(10), I.StrokeBind(1, "Stroke", 0.2) },
         })
         I.Bind(list, "BackgroundColor3", "SurfaceLight")
+        local shadow = I.DropShadow(list, { Radius = 10 })
 
         local header = I.Create("Frame", {
             BackgroundTransparency = 1,
@@ -4021,6 +4483,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
         local buildOptions
         local refreshOptions
         local refreshLabel
+        local hl = nil
 
         local function paintRec(rec, opt)
             local isSel = opt ~= nil and selSet[opt.Key] == true
@@ -4041,6 +4504,61 @@ Bundle["Elements/Dropdown"] = function(ctx)
             end
         end
 
+        local function recAt(idx)
+            if virtual then
+                return virtualButtons[idx]
+            end
+            return optionButtons[idx]
+        end
+
+        local function paintHl(rec, on)
+            if not rec or not rec.Button then return end
+            local opt = display[rec._idx]
+            local isSel = opt ~= nil and selSet[opt.Key] == true
+            I.Tween(rec.Button, "Instant", {
+                BackgroundColor3 = on and (isSel and I.CurrentTheme.AccentHover or I.CurrentTheme.ElementHover)
+                    or (isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element),
+                BackgroundTransparency = on and (isSel and 0.6 or 0.35) or (isSel and 0.75 or 1),
+            })
+        end
+
+        local function clearHl()
+            if hl == nil then return end
+            local rec = recAt(hl)
+            if rec then paintHl(rec, false) end
+            hl = nil
+        end
+
+        local function setHl(idx)
+            if idx == hl then return end
+            clearHl()
+            if idx == nil or idx < 1 or idx > #display then return end
+            hl = idx
+            local rowStep = optH + pad
+            local target = (idx - 1) * rowStep
+            local viewH = listCanvas.AbsoluteSize.Y
+            local top = listCanvas.CanvasPosition.Y
+            if target < top or target + optH > top + viewH then
+                listCanvas.CanvasPosition = Vector2.new(0, math.max(0, target - math.max(0, (viewH - optH) / 2)))
+            end
+            local rec = recAt(idx)
+            if rec then paintHl(rec, true) end
+        end
+
+        local function moveHl(dir)
+            local n = #display
+            if n == 0 then return end
+            local idx = hl or 0
+            if dir > 0 then
+                idx += 1
+                if idx > n then idx = 1 end
+            else
+                idx -= 1
+                if idx < 1 then idx = n end
+            end
+            setHl(idx)
+        end
+
         refreshOptions = function()
             if virtual then
                 for idx, rec in pairs(virtualButtons) do
@@ -4056,6 +4574,10 @@ Bundle["Elements/Dropdown"] = function(ctx)
                         end
                     end
                 end
+            end
+            if hl ~= nil then
+                local rec = recAt(hl)
+                if rec then paintHl(rec, true) end
             end
         end
 
@@ -4127,6 +4649,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
             end
             btn.MouseEnter:Connect(function()
                 if I.Device.IsTouch or not expanded or not rec._idx then return end
+                hl = rec._idx
                 I.PlaySound("Hover", 0.1)
                 local opt = display[rec._idx]
                 local isSel = opt ~= nil and selSet[opt.Key] == true
@@ -4137,6 +4660,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
             end)
             btn.MouseLeave:Connect(function()
                 if not rec._idx then return end
+                if hl == rec._idx then return end
                 local opt = display[rec._idx]
                 local isSel = opt ~= nil and selSet[opt.Key] == true
                 I.Tween(btn, "HoverOut", {
@@ -4201,6 +4725,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
                     tab._openDropdown()
                 end
                 tab._openDropdown = closeFn
+                I.HotElement = nil
 
                 local sc = I.GetScale()
                 local ap, asz = row.AbsolutePosition, row.AbsoluteSize
@@ -4225,6 +4750,13 @@ Bundle["Elements/Dropdown"] = function(ctx)
                 end
                 local x = math.clamp(rowX, 8, math.max(8, vw - pw - 8))
 
+                hl = nil
+                if not multi then
+                    for i, o in ipairs(display) do
+                        if selSet[o.Key] == true then hl = i break end
+                    end
+                end
+
                 listCanvas.CanvasPosition = Vector2.new(0, 0)
                 listCanvas.Position = UDim2.new(0, 0, 0, headerH)
                 listCanvas.Size = UDim2.new(1, 0, 1, -headerH)
@@ -4232,9 +4764,15 @@ Bundle["Elements/Dropdown"] = function(ctx)
                 list.Position = UDim2.fromOffset(x, y + slideFrom)
                 list.Visible = true
                 catcher.Visible = true
+                if shadow then shadow.SetFade(1) end
                 list.GroupTransparency = 1
                 I.Tween(list, "Snappy", { Size = UDim2.new(0, pw, 0, totalH), GroupTransparency = 0 })
                 I.Tween(list, "Smooth", { Position = UDim2.fromOffset(x, y) })
+                if shadow then
+                    task.delay(0.1, function()
+                        if expanded and shadow then shadow.SetFade(0) end
+                    end)
+                end
 
                 I.ModalManager.Remove(modalEntry)
                 modalEntry = I.ModalManager.Push(tab.Window, closeFn)
@@ -4259,10 +4797,12 @@ Bundle["Elements/Dropdown"] = function(ctx)
                     end
                 end
             else
+                hl = nil
                 if tab._openDropdown == closeFn then tab._openDropdown = nil end
                 I.ModalManager.Remove(modalEntry)
                 modalEntry = nil
                 catcher.Visible = false
+                if shadow then shadow.FadeOut() end
                 I.Tween(list, "Fast", { Size = UDim2.new(0, list.AbsoluteSize.X / I.GetScale(), 0, 0) })
                 I.Tween(list, "Fast", { GroupTransparency = 1 }, function()
                     if not expanded then list.Visible = false end
@@ -4293,6 +4833,21 @@ Bundle["Elements/Dropdown"] = function(ctx)
                 I.RunCallback(self.Callback, self.Title, self:Get())
             end
         end
+
+        local keyHook = I.AddInputHook(function() return not self._destroyed end, function(input)
+            if not expanded then return end
+            if input.KeyCode == Enum.KeyCode.Up then
+                moveHl(-1)
+            elseif input.KeyCode == Enum.KeyCode.Down then
+                moveHl(1)
+            elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+                if hl ~= nil and display[hl] then
+                    local rec = recAt(hl)
+                    selectOption(display[hl], rec and rec.Button or nil)
+                end
+            end
+        end)
+        self.Maid:Give(function() I.RemoveInputHook(keyHook) end)
 
         local function clearButtons()
             for _, rec in ipairs(optionButtons) do
@@ -4362,6 +4917,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
                     end
                     display = out
                 end
+                hl = nil
                 listCanvas.CanvasPosition = Vector2.new(0, 0)
                 buildOptions()
                 refreshOptions()
@@ -4410,6 +4966,7 @@ Bundle["Elements/Dropdown"] = function(ctx)
         })
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if overlay:GetAttribute("Dragging") then return end
             I.ApplyRipple(overlay)
             I.PlaySound("Click", 0.7)
             setExpanded(not expanded)
@@ -4453,7 +5010,32 @@ Bundle["Elements/Dropdown"] = function(ctx)
             local sel = selectedOpts()
             return sel[1] and sel[1].Text or nil
         end
-        function self:CopyValue() return table.concat(self:GetText() or {}, ", ") end
+        function self:CopyValue()
+            local t = self:GetText()
+            if type(t) == "table" then
+                return table.concat(t, ", ")
+            end
+            return tostring(t or "")
+        end
+        function self:Reset()
+            if self._destroyed then return end
+            local defaults
+            if multi then
+                defaults = type(opts.Defaults) == "table" and opts.Defaults or {}
+            else
+                defaults = (opts.Default ~= nil) and { opts.Default } or {}
+            end
+            local ns = {}
+            for _, d in ipairs(defaults) do
+                local o = findOpt(tostring(d))
+                if o then ns[o.Key] = true end
+            end
+            selSet = ns
+            I.SaveValue(saveKey, multi and valuesOf(selectedOpts()) or (selectedOpts()[1] and selectedOpts()[1].Value or nil))
+            refreshOptions()
+            refreshLabel()
+            I.RunCallback(self.Callback, self.Title, self:Get())
+        end
         function self:SetOptions(newOptions)
             if self._destroyed then return end
             options = normalize(newOptions)
@@ -4559,8 +5141,12 @@ Bundle["Elements/TextInput"] = function(ctx)
             I.Tween(boxStroke, "Fast", { Color = I.CurrentTheme.Stroke, Transparency = 0.5 })
             local text = box.Text
             if validator then
-                local ok = validator(text)
-                if ok ~= true then
+                local vok, res = pcall(validator, text)
+                if not vok then
+                    warn("[Kailex] validator error (" .. self.Title .. "): " .. tostring(res))
+                    res = false
+                end
+                if res ~= true then
                     text = value
                     box.Text = text
                     I.PlaySound("Error")
@@ -4594,6 +5180,19 @@ Bundle["Elements/TextInput"] = function(ctx)
         end
         function self:Get() return value end
         function self:CopyValue() return value end
+
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(tostring(opts.Default or ""))
+        end
+
+        function self:SetDisabled(state)
+            I.Element.SetDisabled(self, state)
+            local v = state == true
+            box.TextEditable = not v
+            box.Active = not v
+            if v then pcall(function() box:ReleaseFocus() end) end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "string" then self:Set(v, true) end
@@ -4665,6 +5264,42 @@ Bundle["Elements/ColorPicker"] = function(ctx)
         local closePopup
         local open = false
         local modalEntry
+        local shadow
+        local recentSwatches
+        local recentColors = {}
+
+        local refreshRecents
+        local function pushRecent(hex)
+            hex = tostring(hex or "")
+            if hex == "" then return end
+            local list = I.SaveManager:Get("__recentColors", {})
+            if type(list) ~= "table" then list = {} end
+            local out = { hex }
+            for _, h2 in ipairs(list) do
+                if h2 ~= hex and #out < 8 then
+                    out[#out + 1] = h2
+                end
+            end
+            I.SaveManager:Set("__recentColors", out)
+            if recentSwatches then refreshRecents() end
+        end
+        refreshRecents = function()
+            if not recentSwatches then return end
+            local list = I.SaveManager:Get("__recentColors", {})
+            if type(list) ~= "table" then list = {} end
+            for i = 1, 8 do
+                local sw = recentSwatches[i]
+                local hex = list[i]
+                local c = type(hex) == "string" and I.HexToColor(hex) or nil
+                recentColors[i] = c
+                if c then
+                    sw.BackgroundColor3 = c
+                    sw.Visible = true
+                else
+                    sw.Visible = false
+                end
+            end
+        end
 
         local function apply(nh, ns, nv, notify)
             h, s, v = nh, ns, nv
@@ -4692,6 +5327,7 @@ Bundle["Elements/ColorPicker"] = function(ctx)
             })
             I.Bind(popup, "BackgroundColor3", "Surface")
             pickerScale = I.Create("UIScale", { Scale = 1, Parent = popup })
+            shadow = I.DropShadow(popup, { Radius = 12 })
 
             catcher = I.Create("TextButton", {
                 Size = UDim2.fromScale(1, 1),
@@ -4739,6 +5375,7 @@ Bundle["Elements/ColorPicker"] = function(ctx)
                 local rh, rs, rv = I.RGBtoHSV(default)
                 apply(rh, rs, rv, true)
                 I.SaveValue(saveKey, I.ColorToHex(color))
+                pushRecent(I.ColorToHex(color))
             end)
 
             square = I.Create("Frame", {
@@ -4885,40 +5522,82 @@ Bundle["Elements/ColorPicker"] = function(ctx)
                     local rh, rs, rv = I.RGBtoHSV(c)
                     apply(rh, rs, rv, true)
                     I.SaveValue(saveKey, I.ColorToHex(color))
+                    pushRecent(I.ColorToHex(color))
                 else
                     hexBox.Text = I.ColorToHex(color)
                 end
             end)
+
+            local recentTitle = I.Create("TextLabel", {
+                Position = UDim2.fromOffset(12, 212),
+                Size = UDim2.new(1, -24, 0, 12),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                TextSize = 10,
+                TextColor3 = I.CurrentTheme.SubText,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = "Recent",
+                ZIndex = 31,
+                Parent = popup,
+            })
+            I.Bind(recentTitle, "TextColor3", "SubText")
+            local recentRow = I.Create("Frame", {
+                Position = UDim2.fromOffset(12, 226),
+                Size = UDim2.new(1, -24, 0, 20),
+                BackgroundTransparency = 1,
+                ZIndex = 31,
+                Parent = popup,
+                Children = {
+                    I.Create("UIListLayout", {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        Padding = UDim.new(0, 4),
+                        SortOrder = Enum.SortOrder.LayoutOrder,
+                    }),
+                },
+            })
+            recentSwatches = {}
+            for i = 1, 8 do
+                local idx = i
+                local sw = I.Create("TextButton", {
+                    Size = UDim2.fromOffset(20, 20),
+                    BackgroundColor3 = Color3.new(1, 1, 1),
+                    BorderSizePixel = 0,
+                    Text = "",
+                    AutoButtonColor = false,
+                    LayoutOrder = i,
+                    ZIndex = 31,
+                    Parent = recentRow,
+                    Children = {
+                        I.Corner(5),
+                        I.Create("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0), Transparency = 0.6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
+                    },
+                })
+                recentSwatches[i] = sw
+                sw.MouseButton1Click:Connect(function()
+                    local c = recentColors[idx]
+                    if not c or open ~= true then return end
+                    local rh, rs, rv = I.RGBtoHSV(c)
+                    apply(rh, rs, rv, true)
+                    I.SaveValue(saveKey, I.ColorToHex(color))
+                    pushRecent(I.ColorToHex(color))
+                end)
+            end
+            refreshRecents()
 
             local function dragTracker(handle, onMove)
                 handle.InputBegan:Connect(function(input)
                     if I.DragManager.Active then return end
                     if input.UserInputType ~= Enum.UserInputType.MouseButton1
                         and input.UserInputType ~= Enum.UserInputType.Touch then return end
-                    I.DragManager.Active = handle
-                    local dMaid = I.Maid.new()
-                    local function finish()
-                        if I.DragManager.Active == handle then I.DragManager.Active = nil end
-                        dMaid:Destroy()
-                        I.SaveValue(saveKey, I.ColorToHex(color))
-                    end
-                    dMaid:Give(I.UserInputService.InputEnded:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1
-                            or inp.UserInputType == Enum.UserInputType.Touch then
-                            finish()
-                        end
-                    end))
-                    dMaid:Give(handle.Destroying:Connect(finish))
-                    dMaid:Give(I.RunService.Heartbeat:Connect(function()
-                        if not I.IsInputDown(input.UserInputType) then finish() end
-                    end))
-                    dMaid:Give(I.UserInputService.InputChanged:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseMovement
-                            or inp.UserInputType == Enum.UserInputType.Touch then
-                            onMove(inp.Position)
-                        end
-                    end))
-                    onMove(input.Position)
+                    I.BeginDrag(input, handle, {
+                        ManagerKey = handle,
+                        NoAttr = true,
+                        OnMove = onMove,
+                        OnEnd = function()
+                            I.SaveValue(saveKey, I.ColorToHex(color))
+                            pushRecent(I.ColorToHex(color))
+                        end,
+                    })
                 end)
             end
 
@@ -4939,10 +5618,13 @@ Bundle["Elements/ColorPicker"] = function(ctx)
             if not popup then build() end
             if open then return end
             open = true
+            if shadow then shadow.SetFade(1) end
+            I.HotElement = nil
+            refreshRecents()
             local sc = I.GetScale()
             local ap = swatchBtn.AbsolutePosition
             local asz = swatchBtn.AbsoluteSize
-            local pw, ph = 240 * sc, 216 * sc
+            local pw, ph = 240 * sc, 250 * sc
             local px = ap.X + asz.X + 10
             if px + pw > I.Viewport.X - 8 then px = ap.X - pw - 10 end
             px = math.clamp(px, 8, math.max(8, I.Viewport.X - pw - 8))
@@ -4954,6 +5636,11 @@ Bundle["Elements/ColorPicker"] = function(ctx)
             I.Tween(pickerScale, "Pop", { Scale = 1 })
             popup.GroupTransparency = 1
             I.Tween(popup, "Snappy", { GroupTransparency = 0 })
+            if shadow then
+                task.delay(0.1, function()
+                    if open and shadow then shadow.SetFade(0) end
+                end)
+            end
             I.ModalManager.Remove(modalEntry)
             modalEntry = I.ModalManager.Push(tab.Window, closePopup)
             apply(h, s, v, false)
@@ -4965,6 +5652,7 @@ Bundle["Elements/ColorPicker"] = function(ctx)
             I.ModalManager.Remove(modalEntry)
             modalEntry = nil
             I.SaveValue(saveKey, I.ColorToHex(color))
+            if shadow then shadow.FadeOut() end
             I.Tween(pickerScale, "Vanish", { Scale = 0.95 })
             I.Tween(popup, "Fast", { GroupTransparency = 1 }, function()
                 if not open then
@@ -4976,10 +5664,12 @@ Bundle["Elements/ColorPicker"] = function(ctx)
 
         self.Maid:Give(swatchBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if swatchBtn:GetAttribute("Dragging") then return end
             I.ApplyRipple(swatchBtn)
             I.PlaySound("Click", 0.6)
             if open then closePopup() else openPopup() end
         end))
+        I.HookContextMenu(self, swatchBtn)
         local escHook = I.AddInputHook(function() return not self._destroyed end, function(input, gp)
             if open ~= true then return end
             if input.KeyCode ~= Enum.KeyCode.Escape then return end
@@ -5011,10 +5701,15 @@ Bundle["Elements/ColorPicker"] = function(ctx)
             local rh, rs, rv = I.RGBtoHSV(c)
             apply(rh, rs, rv, false)
             I.SaveValue(saveKey, I.ColorToHex(color))
+            pushRecent(I.ColorToHex(color))
             if not silent then I.RunCallback(self.Callback, self.Title, color) end
         end
         function self:Get() return color end
         function self:CopyValue() return I.ColorToHex(color) end
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(default, false)
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "string" then
@@ -5213,6 +5908,7 @@ Bundle["Elements/Stepper"] = function(ctx)
             I.Bind(b, "BackgroundColor3", "Element")
             I.Bind(b, "TextColor3", "Text")
             I.AddHover(b)
+            I.AddPress(b)
             return b
         end
 
@@ -5249,6 +5945,10 @@ Bundle["Elements/Stepper"] = function(ctx)
         end
         function self:Get() return value end
         function self:CopyValue() return string.format("%." .. decimals .. "f", value) end
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(default)
+        end
 
         local function bindHold(btn, dir)
             btn.InputBegan:Connect(function(input)
@@ -5391,6 +6091,7 @@ Bundle["Elements/Segmented"] = function(ctx)
             I.Bind(b, "BackgroundColor3", "Element")
             I.Bind(b, "TextColor3", "SubText")
             I.AddHover(b)
+            I.AddPress(b)
             buttons[i] = b
             b.MouseButton1Click:Connect(function()
                 if self._disabled then return end
@@ -5435,6 +6136,17 @@ Bundle["Elements/Segmented"] = function(ctx)
         end
         function self:Get() return selected and selected.Value or nil end
         function self:CopyValue() return selected and tostring(selected.Value) or nil end
+        function self:Reset()
+            if self._destroyed then return end
+            if opts.Default ~= nil then
+                self:Set(opts.Default, false)
+            elseif selected then
+                selected = nil
+                paint()
+                I.SaveValue(saveKey, nil)
+                I.RunCallback(self.Callback, self.Title, nil)
+            end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             self:Set(v, true)
@@ -5534,6 +6246,25 @@ Bundle["Elements/Vector3Input"] = function(ctx)
         end
         function self:Get() return value end
         function self:CopyValue() return tostring(value) end
+
+        function self:Reset()
+            if self._destroyed then return end
+            if typeof(opts.Default) == "Vector3" then
+                self:Set(opts.Default)
+            else
+                self:Set(Vector3.new())
+            end
+        end
+
+        function self:SetDisabled(state)
+            I.Element.SetDisabled(self, state)
+            local v = state == true
+            for i = 1, 3 do
+                boxes[i].TextEditable = not v
+                boxes[i].Active = not v
+                if v then pcall(function() boxes[i]:ReleaseFocus() end) end
+            end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "table" then
@@ -6250,10 +6981,10 @@ Bundle["Window/Window"] = function(ctx)
         self.CurrentTab = nil
         self.Minimized = false
         self.Maximized = false
-        self.WrapElements = cfg.Wrap == true or cfg.AdaptiveWidth == true
         self.MinimizedChanged = I.Signal.new()
         self.Closed = I.Signal.new()
         self._hidden = false
+        self._alwaysTop = false
         self.ToggleKey = I.ParseKey(cfg.ToggleKey)
         self._remember = cfg.RememberPosition ~= false
 
@@ -6317,11 +7048,16 @@ Bundle["Window/Window"] = function(ctx)
         }), "Color", "Stroke")
         self._winScale = I.Create("UIScale", { Scale = 0.94, Parent = self.Root })
 
+        local shadow = I.DropShadow(self.Root, { Radius = 14 })
+        self._shadow = shadow
+
         self.Maid = I.Maid.new()
         self.Maid:Link(self.Root)
 
         local introMaid = I.Maid.new()
         self.Maid:Give(introMaid)
+
+        local setMaxIcon
 
         local TITLE_FINAL = UDim2.new(0, 0, 0, 0)
         local BODY_FINAL = UDim2.new(0, 0, 0, 56)
@@ -6348,6 +7084,7 @@ Bundle["Window/Window"] = function(ctx)
             I.Tween(self._winScale, "Instant", { Scale = 1 })
             I.Tween(titleBar, "Instant", { Position = TITLE_FINAL })
             I.Tween(body, "Instant", { Position = BODY_FINAL })
+            if shadow then shadow.SetFade(0) end
             introMaid:Destroy()
         end
 
@@ -6358,6 +7095,7 @@ Bundle["Window/Window"] = function(ctx)
                 if self.Maximized then
                     self.Maximized = false
                     self.ResizeGrip.Visible = not self.Minimized
+                    setMaxIcon("Maximize")
                     if self._restore then
                         local sc = I.GetScale()
                         local m = UserInputService:GetMouseLocation()
@@ -6376,9 +7114,35 @@ Bundle["Window/Window"] = function(ctx)
             OnEnd = function() self:SavePlacement() end,
         })
 
+        local titleX = 14
+        local winIcon
+        if cfg.Icon ~= nil then
+            titleX = 40
+            local raw = tostring(cfg.Icon)
+            local isAsset = tonumber(cfg.Icon) ~= nil
+                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            if isAsset then
+                winIcon = I.Create("ImageLabel", {
+                    Position = UDim2.fromOffset(14, 5),
+                    Size = UDim2.fromOffset(20, 20),
+                    BackgroundTransparency = 1,
+                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
+                    ImageColor3 = I.CurrentTheme.SubText,
+                    Parent = titleBar,
+                })
+                I.Bind(winIcon, "ImageColor3", "SubText")
+            else
+                winIcon = I.Icon(titleBar, raw, "SubText")
+                winIcon.Position = UDim2.fromOffset(14, 5)
+                winIcon.Size = UDim2.fromOffset(20, 20)
+            end
+            self.IconImg = winIcon
+        end
+
+        local titleReserve = 130 + (titleX - 14)
         local titleLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(14, 7),
-            Size = UDim2.new(1, -130, 0, 20),
+            Position = UDim2.fromOffset(titleX, 7),
+            Size = UDim2.new(1, -titleReserve, 0, 20),
             BackgroundTransparency = 1,
             Font = Enum.Font.GothamBold,
             TextSize = 15,
@@ -6390,8 +7154,8 @@ Bundle["Window/Window"] = function(ctx)
         })
         I.Bind(titleLabel, "TextColor3", "Text")
         local subLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(14, 26),
-            Size = UDim2.new(1, -130, 0, 14),
+            Position = UDim2.fromOffset(titleX, 26),
+            Size = UDim2.new(1, -titleReserve, 0, 14),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham,
             TextSize = 11,
@@ -6402,6 +7166,16 @@ Bundle["Window/Window"] = function(ctx)
             Parent = titleBar,
         })
         I.Bind(subLabel, "TextColor3", "SubText")
+
+        local titleDivider = I.Create("Frame", {
+            Position = UDim2.new(0, 0, 1, -1),
+            Size = UDim2.new(1, 0, 0, 1),
+            BackgroundColor3 = I.CurrentTheme.Stroke,
+            BackgroundTransparency = 0.45,
+            BorderSizePixel = 0,
+            Parent = titleBar,
+        })
+        I.Bind(titleDivider, "BackgroundColor3", "Stroke")
 
         local searchBox = I.Create("TextBox", {
             Position = UDim2.fromOffset(14, 11),
@@ -6485,11 +7259,12 @@ Bundle["Window/Window"] = function(ctx)
                 self:ApplyFilter("")
             end
         end
-        self._setSearch = setSearch
+        self._setSearch = function(_, on) setSearch(on) end
 
         self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
             if not searchActive then return end
             if input.KeyCode ~= Enum.KeyCode.Escape then return end
+            if #I.ModalManager.Stack > 0 then return end
             if gp and UserInputService:GetFocusedTextBox() ~= searchBox then return end
             setSearch(false)
         end))
@@ -6510,6 +7285,7 @@ Bundle["Window/Window"] = function(ctx)
             ic.AnchorPoint = Vector2.new(0.5, 0.5)
             ic.Position = UDim2.fromScale(0.5, 0.5)
             ic.Size = UDim2.fromOffset(12, 12)
+            I.AddPress(b)
             return b
         end
 
@@ -6532,14 +7308,30 @@ Bundle["Window/Window"] = function(ctx)
             self:SetMinimized(true)
         end))
 
-        local searchB = titleButton("Search", -78)
+        local maxB = titleButton("Maximize", -78)
+        I.AddHover(maxB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+        local maxIcon
+        setMaxIcon = function(kind)
+            if maxIcon then maxIcon:Destroy() end
+            maxIcon = I.Icon(maxB, kind, "SubText")
+            maxIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+            maxIcon.Position = UDim2.fromScale(0.5, 0.5)
+            maxIcon.Size = UDim2.fromOffset(12, 12)
+        end
+        setMaxIcon("Maximize")
+        self.Maid:Give(maxB.MouseButton1Click:Connect(function()
+            I.PlaySound("Click", 0.5)
+            self:SetMaximized(not self.Maximized)
+        end))
+
+        local searchB = titleButton("Search", -112)
         I.AddHover(searchB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
         self.Maid:Give(searchB.MouseButton1Click:Connect(function()
             I.PlaySound("Click", 0.5)
             setSearch(not searchActive)
         end))
 
-        local _titleButtons = { searchB, minB, closeB }
+        local _titleButtons = { searchB, minB, maxB, closeB }
         self._titleButtons = _titleButtons
 
         self._sidebarWidth = math.clamp(tonumber(I.SaveManager:Get("__sidebarWidth", 152)) or 152, 110, 320)
@@ -6624,30 +7416,19 @@ Bundle["Window/Window"] = function(ctx)
             if self.Minimized or I.DragManager.Active then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            I.DragManager.Active = splitter
-            I.ModalManager.CloseAll(self)
-            local sMaid = I.Maid.new()
-            local function finish()
-                if I.DragManager.Active == splitter then I.DragManager.Active = nil end
-                sMaid:Destroy()
-                I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
-            end
-            sMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            sMaid:Give(splitter.Destroying:Connect(finish))
-            sMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
-            sMaid:Give(I.RunService.RenderStepped:Connect(function()
-                local m = UserInputService:GetMouseLocation()
-                local sc = I.GetScale()
-                local rel = (m.X - body.AbsolutePosition.X) / sc + 4
-                self:SetSidebarWidth(rel)
-            end))
+            I.BeginDrag(input, splitter, {
+                ManagerKey = splitter,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local rel = (mouse.X - body.AbsolutePosition.X) / sc + 4
+                    self:SetSidebarWidth(rel)
+                end,
+                OnEnd = function()
+                    I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
+                end,
+            })
         end)
 
         local grip = I.Create("TextButton", {
@@ -6669,60 +7450,100 @@ Bundle["Window/Window"] = function(ctx)
             if self.Maximized or self.Minimized or I.DragManager.Active then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            I.DragManager.Active = grip
-            I.ModalManager.CloseAll(self)
             local startMouse = UserInputService:GetMouseLocation()
             local startSize = self.Root.AbsoluteSize / I.GetScale()
-            local gMaid = I.Maid.new()
-            local function finish()
-                if I.DragManager.Active == grip then I.DragManager.Active = nil end
-                gMaid:Destroy()
-                I.ClampWindowToScreen(self.Root)
-                self:SavePlacement()
-            end
-            gMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            gMaid:Give(grip.Destroying:Connect(finish))
-            gMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
-            gMaid:Give(I.RunService.RenderStepped:Connect(function()
-                if I.DragManager.Active ~= grip then return end
-                local m = UserInputService:GetMouseLocation()
-                local sc = I.GetScale()
-                local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
-                local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
-                local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
-                local w = math.clamp(startSize.X + (m.X - startMouse.X) / sc, minW, math.max(minW, vw2 - 8))
-                local h = math.clamp(startSize.Y + (m.Y - startMouse.Y) / sc, minH, math.max(minH, vh2 - 8))
-                self.Root.Size = UDim2.fromOffset(w, h)
-            end))
+            I.BeginDrag(input, grip, {
+                ManagerKey = grip,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
+                    local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
+                    local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
+                    local w = math.clamp(startSize.X + (mouse.X - startMouse.X) / sc, minW, math.max(minW, vw2 - 8))
+                    local h = math.clamp(startSize.Y + (mouse.Y - startMouse.Y) / sc, minH, math.max(minH, vh2 - 8))
+                    self.Root.Size = UDim2.fromOffset(w, h)
+                end,
+                OnEnd = function()
+                    I.ClampWindowToScreen(self.Root)
+                    self:SavePlacement()
+                end,
+            })
         end)
 
         local function BringToFront()
             local z = 20
+            local isTop = true
             for _, w in ipairs(Kailex.Windows) do
-                if w ~= self and w.Root and w.Root.ZIndex > z then z = w.Root.ZIndex end
+                if w ~= self and not w._destroyed and w.Root and w.Root.Visible and not w._alwaysTop then
+                    if w.Root.ZIndex >= self.Root.ZIndex then
+                        isTop = false
+                    end
+                    if w.Root.ZIndex > z then
+                        z = w.Root.ZIndex
+                    end
+                end
             end
-            self.Root.ZIndex = z + 1
+            if self._alwaysTop then
+                self.Root.ZIndex = 100
+            elseif not isTop or self.Root.ZIndex >= 100 then
+                self.Root.ZIndex = math.min(99, z + 1)
+            end
+            Kailex._lastActive = self
         end
+        self._focus = BringToFront
 
         local lastClick = 0
         titleBar.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            BringToFront()
-            if I.Device.IsTouch then return end
-            local now = os.clock()
-            if now - lastClick < 0.3 then
-                lastClick = 0
-                self:SetMaximized(not self.Maximized)
-            else
-                lastClick = now
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                BringToFront()
+                if I.Device.IsTouch then return end
+                local now = os.clock()
+                if now - lastClick < 0.3 then
+                    lastClick = 0
+                    self:SetMaximized(not self.Maximized)
+                else
+                    lastClick = now
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                local m = UserInputService:GetMouseLocation()
+                I.ContextMenu.Show({
+                    {
+                        Text = self.Maximized and "Restore" or "Maximize",
+                        Callback = function()
+                            if not self._destroyed then self:SetMaximized(not self.Maximized) end
+                        end,
+                    },
+                    {
+                        Text = self.Minimized and "Expand" or "Minimize",
+                        Callback = function()
+                            if not self._destroyed then self:SetMinimized(not self.Minimized) end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = self._alwaysTop and "Disable always on top" or "Always on top",
+                        Callback = function()
+                            if self._destroyed then return end
+                            self._alwaysTop = not self._alwaysTop
+                            if self._alwaysTop then
+                                self.Root.ZIndex = 100
+                            else
+                                BringToFront()
+                            end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = "Close",
+                        Danger = true,
+                        Callback = function()
+                            if not self._destroyed then self:Close() end
+                        end,
+                    },
+                }, m.X, m.Y)
             end
         end)
 
@@ -6907,13 +7728,13 @@ Bundle["Window/Window"] = function(ctx)
                 pillHit.Visible = true
                 if searchActive then setSearch(false) end
                 local tw = TextService:GetTextSize(self.Title, I.TS(15), Enum.Font.GothamBold, Vector2.new(10000, 100)).X
-                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74, 38) })
+                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74 + (winIcon and 24 or 0), 38) })
             else
                 pillHit.Visible = false
                 expandIcon.Visible = false
                 for _, b in ipairs(_titleButtons) do b.Visible = true end
                 subLabel.Visible = true
-                titleLabel.Size = UDim2.new(1, -130, 0, 20)
+                titleLabel.Size = UDim2.new(1, -titleReserve, 0, 20)
                 I.Tween(self.Root, "Smooth", { Size = self._preMin and self._preMin.Size or UDim2.fromOffset(580, 420) }, function()
                     if not self._destroyed and not self.Minimized then
                         self.Body.Visible = true
@@ -6933,12 +7754,14 @@ Bundle["Window/Window"] = function(ctx)
                 self._restore = { Size = self.Root.Size, X = sp.X, Y = sp.Y }
                 self.Maximized = true
                 self.ResizeGrip.Visible = false
+                setMaxIcon("Restore")
                 self.Root.AnchorPoint = Vector2.new(0.5, 0.5)
                 self.Root.Position = UDim2.fromOffset(I.Viewport.X / (2 * sc), I.Viewport.Y / (2 * sc))
                 I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(I.Viewport.X / sc - 16, I.Viewport.Y / sc - 16) })
             else
                 self.Maximized = false
                 self.ResizeGrip.Visible = true
+                setMaxIcon("Maximize")
                 self.Root.AnchorPoint = Vector2.new(0, 0)
                 if self._restore then
                     self.Root.Position = UDim2.fromOffset(self._restore.X, self._restore.Y)
@@ -7014,6 +7837,7 @@ Bundle["Window/Window"] = function(ctx)
             end
             I.ModalManager.CloseAll(self)
             KillIntroMotion()
+            if shadow then shadow.FadeOut() end
             local root = self.Root
             local done = false
             local function finish()
@@ -7055,6 +7879,12 @@ Bundle["Window/Window"] = function(ctx)
             I.Tween(titleBar, TweenInfo.new(0.46, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = TITLE_FINAL })
             I.Tween(body, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = BODY_FINAL })
 
+            task.delay(0.1, function()
+                if not self._destroyed and shadow then shadow.SetFade(0.55) end
+            end)
+            task.delay(0.24, function()
+                if not self._destroyed and shadow then shadow.SetFade(0) end
+            end)
             task.delay(0.55, function()
                 if not self._destroyed and dim then
                     I.Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()
@@ -7564,7 +8394,10 @@ Bundle["App/ThemeStore"] = function(ctx)
 
     function Kailex:SaveCustomThemes()
         local store = {}
-        local Builtin = { Nocturne = true, Aurora = true, Sakura = true, Daylight = true }
+        local Builtin = {
+            Nocturne = true, Aurora = true, Sakura = true,
+            Daylight = true, Obsidian = true, Ember = true,
+        }
         for name, t in pairs(I.Themes) do
             if not Builtin[name] then store[name] = SerializeTheme(t) end
         end
@@ -7662,7 +8495,7 @@ Bundle["App/SettingsTab"] = function(ctx)
             Default = Setting.ToggleUIKey,
             Callback = function(code)
                 Setting.ToggleUIKey = code
-                I.SaveManager:Set("__toggleKey", code and ("Key:" .. tostring(code):match("%.(.+)$")) or "__none")
+                I.SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
             end,
         })
 
@@ -7716,6 +8549,52 @@ Bundle["App/SettingsTab"] = function(ctx)
                 end
                 I.ApplyTheme(editing.colors)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
+            end,
+        })
+        tab:AddButton({
+            Name = "Export Theme",
+            Description = "Copy the current edits as JSON",
+            Callback = function()
+                local out = {}
+                for _, key in ipairs(I.ThemeKeys) do
+                    out[key] = I.ColorToHex(editing.colors[key])
+                end
+                I.CopyToClipboard(I.HttpService:JSONEncode(out))
+            end,
+        })
+        tab:AddButton({
+            Name = "Import Theme",
+            Description = "Load a theme JSON from the clipboard",
+            Callback = function()
+                local gc = nil
+                local ok, fn = pcall(function() return getclipboard end)
+                if ok and type(fn) == "function" then gc = fn end
+                if type(gc) ~= "function" then
+                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
+                    return
+                end
+                local okRead, raw = pcall(gc)
+                local data = nil
+                if okRead and type(raw) == "string" and raw ~= "" then
+                    local okDecode, decoded = pcall(I.HttpService.JSONDecode, I.HttpService, raw)
+                    if okDecode and type(decoded) == "table" then data = decoded end
+                end
+                if not data then
+                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard does not contain a valid theme.", Type = "Warning" })
+                    return
+                end
+                for _, key in ipairs(I.ThemeKeys) do
+                    local v = data[key]
+                    if type(v) == "string" then
+                        local c = I.HexToColor(v)
+                        if c then editing.colors[key] = c end
+                    end
+                end
+                for _, cp in ipairs(pickers) do
+                    cp:Set(editing.colors[cp.ThemeKey], true)
+                end
+                I.ApplyTheme(editing.colors)
+                Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
             end,
         })
 
@@ -7877,12 +8756,52 @@ Bundle["App/Boot"] = function(ctx)
     end
     I.UpdateViewport()
 
-    I.LibMaid:Give(I.AddInputHook(function() return true end, function(input, gp)
+    local bootHook = I.AddInputHook(function() return true end, function(input, gp)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            local top = I.ModalManager.Stack[#I.ModalManager.Stack]
+            if not (top and top.Owner == nil) then
+                local m = input.Position
+                if m then
+                    local best, bestZ = nil, -1
+                    for _, w in ipairs(Kailex.Windows) do
+                        if not w._destroyed and w.Root and w.Root.Visible and not w._hidden then
+                            local ap, as = w.Root.AbsolutePosition, w.Root.AbsoluteSize
+                            if m.X >= ap.X and m.X <= ap.X + as.X
+                                and m.Y >= ap.Y and m.Y <= ap.Y + as.Y then
+                                if w.Root.ZIndex > bestZ then
+                                    best, bestZ = w, w.Root.ZIndex
+                                end
+                            end
+                        end
+                    end
+                    if best and best._focus then I.SafeCall(best._focus) end
+                end
+            end
+        end
+
+        if input.KeyCode == Enum.KeyCode.Escape then
+            if I.ActiveKeybindListener == nil and I.ModalManager.CloseTop() then
+                return
+            end
+        end
+
         if gp then return end
         local code = input.KeyCode
         if code == Enum.KeyCode.Unknown then return end
         if I.ActiveKeybindListener ~= nil then return end
         if UserInputService:GetFocusedTextBox() ~= nil then return end
+
+        if code == Enum.KeyCode.F
+            and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+                or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
+            local w = Kailex._lastActive
+            if w and not w._destroyed and not w._hidden
+                and not w.Minimized and w._setSearch then
+                w:_setSearch(true)
+            end
+            return
+        end
 
         local key = I.Setting.ToggleUIKey
         if key ~= nil and code == key then
@@ -7903,7 +8822,8 @@ Bundle["App/Boot"] = function(ctx)
             elseif code == Enum.KeyCode.Right or code == Enum.KeyCode.Up then dir = 1 end
             if dir then el:HandleArrow(dir) end
         end
-    end))
+    end)
+    I.LibMaid:Give(function() I.RemoveInputHook(bootHook) end)
 
     I.LibMaid:Give(I.SaveManager.DataChanged:Connect(function()
         I.ApplyPersisted()
@@ -7943,11 +8863,14 @@ end
 
 local function Run(loader)
     local Kailex = {
-        Version = "2.0.0",
+        Version = "2.1.0",
         Windows = {},
     }
     local Internal = {}
     local ctx = { Kailex = Kailex, Internal = Internal }
+    if isStudioModule then
+        Kailex._internal = Internal
+    end
     local missing = {}
     for i = 1, #LoadOrder do
         local name = LoadOrder[i]

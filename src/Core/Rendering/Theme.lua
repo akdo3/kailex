@@ -40,6 +40,24 @@ return function(ctx)
             Success = RGB(72,163,87),      Warning = RGB(196,142,30),  Error = RGB(219,68,94),
             TabBar = RGB(240,242,247),
         },
+        Obsidian = {
+            Background = RGB(8,8,10),     Surface = RGB(12,12,15),    SurfaceLight = RGB(17,17,21),
+            Element = RGB(20,20,25),      ElementHover = RGB(27,27,34),
+            Stroke = RGB(32,32,40),       StrokeBright = RGB(50,50,62),
+            Text = RGB(228,230,238),      SubText = RGB(136,140,158),
+            Accent = RGB(124,170,255),    AccentHover = RGB(152,190,255), OnAccent = RGB(8,10,16),
+            Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
+            TabBar = RGB(10,10,12),
+        },
+        Ember = {
+            Background = RGB(20,14,11),   Surface = RGB(27,19,15),    SurfaceLight = RGB(36,25,19),
+            Element = RGB(42,29,22),      ElementHover = RGB(54,38,29),
+            Stroke = RGB(62,44,33),       StrokeBright = RGB(94,67,50),
+            Text = RGB(245,236,229),      SubText = RGB(171,150,136),
+            Accent = RGB(255,149,94),     AccentHover = RGB(255,168,117), OnAccent = RGB(28,13,6),
+            Success = RGB(158,206,106),   Warning = RGB(235,187,120), Error = RGB(247,118,142),
+            TabBar = RGB(23,16,13),
+        },
     }
 
     local ThemeKeys = {

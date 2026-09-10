@@ -52,6 +52,31 @@ return function(ctx)
         end)
     end
 
+    function Element:EnsureRight()
+        if self._destroyed then return nil end
+        if self.RightContainer then return self.RightContainer end
+        if not self.Row or not self.Row.Parent then return nil end
+        local right = I.Create("Frame", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
+            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.new(0, 0, 1, -4),
+            Parent = self.Row,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, 8),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
+        })
+        self.RightContainer = right
+        self:RecalcWidth()
+        return right
+    end
+
     function Element:SetTitle(text)
         if self._destroyed then return end
         self.Title = tostring(text or "")
@@ -105,6 +130,8 @@ return function(ctx)
         if self._destroyed then return nil end
         local elClass = Elements[className]
         if not elClass then return nil end
+        local rc = self:EnsureRight()
+        if not rc then return nil end
         opts = opts or {}
         local el = elClass.new(self.Tab, opts)
 
@@ -127,7 +154,7 @@ return function(ctx)
             el.RightContainer.Size = UDim2.new(1, 0, 1, 0)
         end
 
-        row.Parent = self.RightContainer
+        row.Parent = rc
         row.LayoutOrder = (#self._extras + 1) + 10
         row.Size = UDim2.new(0, el._width or 0, 0, el._extraH or I.ROW_H)
 
@@ -189,13 +216,39 @@ return function(ctx)
     end
 
     local function HookContextMenu(el, overlay)
-        overlay.MouseButton2Click:Connect(function()
-            if el._destroyed then return end
-            local items = el:_contextItems()
-            if #items == 0 then return end
-            local m = I.UserInputService:GetMouseLocation()
-            I.ContextMenu.Show(items, m.X, m.Y)
-        end)
+        if I.Device.IsTouch then
+            local token = nil
+            overlay.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.Touch then return end
+                local myToken = {}
+                token = myToken
+                task.delay(0.55, function()
+                    if token ~= myToken or el._destroyed then return end
+                    token = nil
+                    local items = el:_contextItems()
+                    if #items == 0 then return end
+                    overlay:SetAttribute("Dragging", true)
+                    local m = I.UserInputService:GetMouseLocation()
+                    I.ContextMenu.Show(items, m.X, m.Y)
+                end)
+            end)
+            overlay.InputEnded:Connect(function()
+                token = nil
+                if overlay:GetAttribute("Dragging") then
+                    task.defer(function()
+                        overlay:SetAttribute("Dragging", nil)
+                    end)
+                end
+            end)
+        else
+            overlay.MouseButton2Click:Connect(function()
+                if el._destroyed then return end
+                local items = el:_contextItems()
+                if #items == 0 then return end
+                local m = I.UserInputService:GetMouseLocation()
+                I.ContextMenu.Show(items, m.X, m.Y)
+            end)
+        end
     end
     I.HookContextMenu = HookContextMenu
 
@@ -305,22 +358,25 @@ return function(ctx)
         end
         I.Bind(title, "TextColor3", "Text")
 
-        local right = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
-            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
-            Size = UDim2.new(0, rightW, 1, -4),
-            Parent = row,
-            Children = {
-                I.Create("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, 8),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }),
-            },
-        })
+        local right
+        if rightW > 0 or opts.ForceRight then
+            right = I.Create("Frame", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
+                Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, rightW, 1, -4),
+                Parent = row,
+                Children = {
+                    I.Create("UIListLayout", {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                        VerticalAlignment = Enum.VerticalAlignment.Center,
+                        Padding = UDim.new(0, 8),
+                        SortOrder = Enum.SortOrder.LayoutOrder,
+                    }),
+                },
+            })
+        end
 
         if not opts.NoHover then
             I.AddHover(row, { StrokeTransparency = 0.65 })

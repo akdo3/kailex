@@ -23,10 +23,20 @@ if not content:find("Elements/Dropdown") then
     os.exit(1)
 end
 
+if content:find("Framework%.Suite") then
+    print("FAIL: test framework leaked into the bundle")
+    os.exit(1)
+end
+
+if content:find("Tests/") then
+    print("FAIL: test modules leaked into the bundle")
+    os.exit(1)
+end
+
 local count = select(2, content:gsub("Bundle%[", ""))
 if count < 48 then
     print("FAIL: expected 48 modules, found " .. count)
     os.exit(1)
 end
 
-print("PASS: " .. #content .. " bytes, " .. count .. " modules")
+print("PASS: " .. #content .. " bytes, " .. count .. " modules, no test leakage")

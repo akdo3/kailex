@@ -153,7 +153,6 @@ return function(ctx)
         end
 
         local dragging = false
-        local dragMaid = nil
         local function snap(f)
             local v = min + (max - min) * f
             if step > 0 then
@@ -234,42 +233,12 @@ return function(ctx)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
             dragging = true
-            I.DragManager.Active = track
             I.PlaySound("Slider")
             I.Tween(knob, "Spring", { Size = UDim2.fromOffset(18, 18) })
             I.Tween(knobStroke, "Fast", { Transparency = 0 })
             bubble.Visible = true
             bubbleScale.Scale = 0.7
             I.Tween(bubbleScale, "PopSoft", { Scale = 1 })
-
-            local function finish()
-                if not dragging then return end
-                dragging = false
-                if I.DragManager.Active == track then I.DragManager.Active = nil end
-                if dragMaid then dragMaid:Destroy() dragMaid = nil end
-                I.Tween(knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
-                I.Tween(knobStroke, "Fast", { Transparency = 0.35 })
-                I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-                    if not dragging and not self._destroyed then bubble.Visible = false end
-                end)
-                I.SaveValue(saveKey, value)
-                if onRelease then
-                    I.RunCallback(self.Callback, self.Title, value)
-                end
-            end
-
-            dragMaid = I.Maid.new()
-            dragMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            dragMaid:Give(hit.Destroying:Connect(finish))
-            dragMaid:Give(row.Destroying:Connect(finish))
-            dragMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
 
             local function update(x)
                 local ap, as = track.AbsolutePosition, track.AbsoluteSize
@@ -285,12 +254,29 @@ return function(ctx)
             end
 
             update(input.Position.X)
-            dragMaid:Give(UserInputService.InputChanged:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseMovement
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    update(inp.Position.X)
-                end
-            end))
+
+            local drag = I.BeginDrag(input, hit, {
+                ManagerKey = track,
+                NoAttr = true,
+                OnMove = function(pos)
+                    update(pos.X)
+                end,
+                OnEnd = function()
+                    dragging = false
+                    I.Tween(knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
+                    I.Tween(knobStroke, "Fast", { Transparency = 0.35 })
+                    I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
+                        if not dragging and not self._destroyed then bubble.Visible = false end
+                    end)
+                    I.SaveValue(saveKey, value)
+                    if onRelease then
+                        I.RunCallback(self.Callback, self.Title, value)
+                    end
+                end,
+            })
+            if not drag then
+                dragging = false
+            end
         end)
 
         track.MouseEnter:Connect(function()
@@ -306,7 +292,7 @@ return function(ctx)
             local t = tostring(box.Text or "")
             if prefix and t:sub(1, #prefix) == prefix then t = t:sub(#prefix + 1) end
             if suffix and #suffix > 0 and t:sub(-#suffix) == suffix then t = t:sub(1, -#suffix - 1) end
-            local num = tonumber(t:gsub(",", "."):gsub("%s", ""))
+            local num = tonumber((t:gsub(",", "."):gsub("%s", "")))
             if num then
                 self:Set(num)
             else

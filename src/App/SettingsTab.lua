@@ -78,7 +78,7 @@ return function(ctx)
             Default = Setting.ToggleUIKey,
             Callback = function(code)
                 Setting.ToggleUIKey = code
-                I.SaveManager:Set("__toggleKey", code and ("Key:" .. tostring(code):match("%.(.+)$")) or "__none")
+                I.SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
             end,
         })
 
@@ -132,6 +132,52 @@ return function(ctx)
                 end
                 I.ApplyTheme(editing.colors)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
+            end,
+        })
+        tab:AddButton({
+            Name = "Export Theme",
+            Description = "Copy the current edits as JSON",
+            Callback = function()
+                local out = {}
+                for _, key in ipairs(I.ThemeKeys) do
+                    out[key] = I.ColorToHex(editing.colors[key])
+                end
+                I.CopyToClipboard(I.HttpService:JSONEncode(out))
+            end,
+        })
+        tab:AddButton({
+            Name = "Import Theme",
+            Description = "Load a theme JSON from the clipboard",
+            Callback = function()
+                local gc = nil
+                local ok, fn = pcall(function() return getclipboard end)
+                if ok and type(fn) == "function" then gc = fn end
+                if type(gc) ~= "function" then
+                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
+                    return
+                end
+                local okRead, raw = pcall(gc)
+                local data = nil
+                if okRead and type(raw) == "string" and raw ~= "" then
+                    local okDecode, decoded = pcall(I.HttpService.JSONDecode, I.HttpService, raw)
+                    if okDecode and type(decoded) == "table" then data = decoded end
+                end
+                if not data then
+                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard does not contain a valid theme.", Type = "Warning" })
+                    return
+                end
+                for _, key in ipairs(I.ThemeKeys) do
+                    local v = data[key]
+                    if type(v) == "string" then
+                        local c = I.HexToColor(v)
+                        if c then editing.colors[key] = c end
+                    end
+                end
+                for _, cp in ipairs(pickers) do
+                    cp:Set(editing.colors[cp.ThemeKey], true)
+                end
+                I.ApplyTheme(editing.colors)
+                Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
             end,
         })
 

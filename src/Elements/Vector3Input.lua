@@ -81,6 +81,25 @@ return function(ctx)
         function self:Get() return value end
         function self:CopyValue() return tostring(value) end
 
+        function self:Reset()
+            if self._destroyed then return end
+            if typeof(opts.Default) == "Vector3" then
+                self:Set(opts.Default)
+            else
+                self:Set(Vector3.new())
+            end
+        end
+
+        function self:SetDisabled(state)
+            I.Element.SetDisabled(self, state)
+            local v = state == true
+            for i = 1, 3 do
+                boxes[i].TextEditable = not v
+                boxes[i].Active = not v
+                if v then pcall(function() boxes[i]:ReleaseFocus() end) end
+            end
+        end
+
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "table" then
                 self:Set(Vector3.new(tonumber(v.X) or 0, tonumber(v.Y) or 0, tonumber(v.Z) or 0), true)

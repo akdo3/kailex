@@ -59,6 +59,7 @@ return function(ctx)
             I.Bind(b, "BackgroundColor3", "Element")
             I.Bind(b, "TextColor3", "Text")
             I.AddHover(b)
+            I.AddPress(b)
             return b
         end
 
@@ -95,6 +96,10 @@ return function(ctx)
         end
         function self:Get() return value end
         function self:CopyValue() return string.format("%." .. decimals .. "f", value) end
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(default)
+        end
 
         local function bindHold(btn, dir)
             btn.InputBegan:Connect(function(input)

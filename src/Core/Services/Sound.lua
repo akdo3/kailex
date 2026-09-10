@@ -18,10 +18,18 @@ return function(ctx)
     local SoundPool = {}
     local SoundInstances = {}
 
+    local LastPlayed = {}
+    local THROTTLE = 0.08
+
     local function PlaySound(kind, scale)
         if not Setting.Sounds then return end
         local a = Audio[kind]
         if type(a) ~= "table" or a.Id == "" then return end
+        if (a.Vol or 0.4) <= 0.08 then
+            local now = os.clock()
+            if LastPlayed[kind] and now - LastPlayed[kind] < THROTTLE then return end
+            LastPlayed[kind] = now
+        end
         pcall(function()
             local pool = SoundPool[a.Id]
             if not pool then pool = {} SoundPool[a.Id] = pool end

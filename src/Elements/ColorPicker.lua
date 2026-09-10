@@ -57,6 +57,42 @@ return function(ctx)
         local closePopup
         local open = false
         local modalEntry
+        local shadow
+        local recentSwatches
+        local recentColors = {}
+
+        local refreshRecents
+        local function pushRecent(hex)
+            hex = tostring(hex or "")
+            if hex == "" then return end
+            local list = I.SaveManager:Get("__recentColors", {})
+            if type(list) ~= "table" then list = {} end
+            local out = { hex }
+            for _, h2 in ipairs(list) do
+                if h2 ~= hex and #out < 8 then
+                    out[#out + 1] = h2
+                end
+            end
+            I.SaveManager:Set("__recentColors", out)
+            if recentSwatches then refreshRecents() end
+        end
+        refreshRecents = function()
+            if not recentSwatches then return end
+            local list = I.SaveManager:Get("__recentColors", {})
+            if type(list) ~= "table" then list = {} end
+            for i = 1, 8 do
+                local sw = recentSwatches[i]
+                local hex = list[i]
+                local c = type(hex) == "string" and I.HexToColor(hex) or nil
+                recentColors[i] = c
+                if c then
+                    sw.BackgroundColor3 = c
+                    sw.Visible = true
+                else
+                    sw.Visible = false
+                end
+            end
+        end
 
         local function apply(nh, ns, nv, notify)
             h, s, v = nh, ns, nv
@@ -84,6 +120,7 @@ return function(ctx)
             })
             I.Bind(popup, "BackgroundColor3", "Surface")
             pickerScale = I.Create("UIScale", { Scale = 1, Parent = popup })
+            shadow = I.DropShadow(popup, { Radius = 12 })
 
             catcher = I.Create("TextButton", {
                 Size = UDim2.fromScale(1, 1),
@@ -131,6 +168,7 @@ return function(ctx)
                 local rh, rs, rv = I.RGBtoHSV(default)
                 apply(rh, rs, rv, true)
                 I.SaveValue(saveKey, I.ColorToHex(color))
+                pushRecent(I.ColorToHex(color))
             end)
 
             square = I.Create("Frame", {
@@ -277,40 +315,82 @@ return function(ctx)
                     local rh, rs, rv = I.RGBtoHSV(c)
                     apply(rh, rs, rv, true)
                     I.SaveValue(saveKey, I.ColorToHex(color))
+                    pushRecent(I.ColorToHex(color))
                 else
                     hexBox.Text = I.ColorToHex(color)
                 end
             end)
+
+            local recentTitle = I.Create("TextLabel", {
+                Position = UDim2.fromOffset(12, 212),
+                Size = UDim2.new(1, -24, 0, 12),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                TextSize = 10,
+                TextColor3 = I.CurrentTheme.SubText,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = "Recent",
+                ZIndex = 31,
+                Parent = popup,
+            })
+            I.Bind(recentTitle, "TextColor3", "SubText")
+            local recentRow = I.Create("Frame", {
+                Position = UDim2.fromOffset(12, 226),
+                Size = UDim2.new(1, -24, 0, 20),
+                BackgroundTransparency = 1,
+                ZIndex = 31,
+                Parent = popup,
+                Children = {
+                    I.Create("UIListLayout", {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        Padding = UDim.new(0, 4),
+                        SortOrder = Enum.SortOrder.LayoutOrder,
+                    }),
+                },
+            })
+            recentSwatches = {}
+            for i = 1, 8 do
+                local idx = i
+                local sw = I.Create("TextButton", {
+                    Size = UDim2.fromOffset(20, 20),
+                    BackgroundColor3 = Color3.new(1, 1, 1),
+                    BorderSizePixel = 0,
+                    Text = "",
+                    AutoButtonColor = false,
+                    LayoutOrder = i,
+                    ZIndex = 31,
+                    Parent = recentRow,
+                    Children = {
+                        I.Corner(5),
+                        I.Create("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0), Transparency = 0.6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
+                    },
+                })
+                recentSwatches[i] = sw
+                sw.MouseButton1Click:Connect(function()
+                    local c = recentColors[idx]
+                    if not c or open ~= true then return end
+                    local rh, rs, rv = I.RGBtoHSV(c)
+                    apply(rh, rs, rv, true)
+                    I.SaveValue(saveKey, I.ColorToHex(color))
+                    pushRecent(I.ColorToHex(color))
+                end)
+            end
+            refreshRecents()
 
             local function dragTracker(handle, onMove)
                 handle.InputBegan:Connect(function(input)
                     if I.DragManager.Active then return end
                     if input.UserInputType ~= Enum.UserInputType.MouseButton1
                         and input.UserInputType ~= Enum.UserInputType.Touch then return end
-                    I.DragManager.Active = handle
-                    local dMaid = I.Maid.new()
-                    local function finish()
-                        if I.DragManager.Active == handle then I.DragManager.Active = nil end
-                        dMaid:Destroy()
-                        I.SaveValue(saveKey, I.ColorToHex(color))
-                    end
-                    dMaid:Give(I.UserInputService.InputEnded:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1
-                            or inp.UserInputType == Enum.UserInputType.Touch then
-                            finish()
-                        end
-                    end))
-                    dMaid:Give(handle.Destroying:Connect(finish))
-                    dMaid:Give(I.RunService.Heartbeat:Connect(function()
-                        if not I.IsInputDown(input.UserInputType) then finish() end
-                    end))
-                    dMaid:Give(I.UserInputService.InputChanged:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseMovement
-                            or inp.UserInputType == Enum.UserInputType.Touch then
-                            onMove(inp.Position)
-                        end
-                    end))
-                    onMove(input.Position)
+                    I.BeginDrag(input, handle, {
+                        ManagerKey = handle,
+                        NoAttr = true,
+                        OnMove = onMove,
+                        OnEnd = function()
+                            I.SaveValue(saveKey, I.ColorToHex(color))
+                            pushRecent(I.ColorToHex(color))
+                        end,
+                    })
                 end)
             end
 
@@ -331,10 +411,13 @@ return function(ctx)
             if not popup then build() end
             if open then return end
             open = true
+            if shadow then shadow.SetFade(1) end
+            I.HotElement = nil
+            refreshRecents()
             local sc = I.GetScale()
             local ap = swatchBtn.AbsolutePosition
             local asz = swatchBtn.AbsoluteSize
-            local pw, ph = 240 * sc, 216 * sc
+            local pw, ph = 240 * sc, 250 * sc
             local px = ap.X + asz.X + 10
             if px + pw > I.Viewport.X - 8 then px = ap.X - pw - 10 end
             px = math.clamp(px, 8, math.max(8, I.Viewport.X - pw - 8))
@@ -346,6 +429,11 @@ return function(ctx)
             I.Tween(pickerScale, "Pop", { Scale = 1 })
             popup.GroupTransparency = 1
             I.Tween(popup, "Snappy", { GroupTransparency = 0 })
+            if shadow then
+                task.delay(0.1, function()
+                    if open and shadow then shadow.SetFade(0) end
+                end)
+            end
             I.ModalManager.Remove(modalEntry)
             modalEntry = I.ModalManager.Push(tab.Window, closePopup)
             apply(h, s, v, false)
@@ -357,6 +445,7 @@ return function(ctx)
             I.ModalManager.Remove(modalEntry)
             modalEntry = nil
             I.SaveValue(saveKey, I.ColorToHex(color))
+            if shadow then shadow.FadeOut() end
             I.Tween(pickerScale, "Vanish", { Scale = 0.95 })
             I.Tween(popup, "Fast", { GroupTransparency = 1 }, function()
                 if not open then
@@ -368,10 +457,12 @@ return function(ctx)
 
         self.Maid:Give(swatchBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if swatchBtn:GetAttribute("Dragging") then return end
             I.ApplyRipple(swatchBtn)
             I.PlaySound("Click", 0.6)
             if open then closePopup() else openPopup() end
         end))
+        I.HookContextMenu(self, swatchBtn)
         local escHook = I.AddInputHook(function() return not self._destroyed end, function(input, gp)
             if open ~= true then return end
             if input.KeyCode ~= Enum.KeyCode.Escape then return end
@@ -403,10 +494,15 @@ return function(ctx)
             local rh, rs, rv = I.RGBtoHSV(c)
             apply(rh, rs, rv, false)
             I.SaveValue(saveKey, I.ColorToHex(color))
+            pushRecent(I.ColorToHex(color))
             if not silent then I.RunCallback(self.Callback, self.Title, color) end
         end
         function self:Get() return color end
         function self:CopyValue() return I.ColorToHex(color) end
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(default, false)
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "string" then

@@ -52,31 +52,45 @@ return function(ctx)
         if type(v) == "string" then
             local kind, name = v:match("^(%a+):(.+)$")
             if kind and kind:lower() ~= "key" then return nil end
-            return Enum.KeyCode[name or v]
+            local key = name or v
+            local ok, item = pcall(function() return Enum.KeyCode[key] end)
+            if ok and item ~= nil then return item end
+            return nil
         end
         return nil
     end
 
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
-            local name = tostring(v):match("%.(.+)$") or tostring(v)
-            if v.EnumType == Enum.KeyCode then return { Kind = "Key", Code = v, Name = name } end
-            if v.EnumType == Enum.UserInputType then return { Kind = "Mouse", Code = v, Name = name } end
-        elseif type(v) == "string" then
+            if v.EnumType == Enum.KeyCode then
+                return { Kind = "Key", Code = v, Name = v.Name }
+            end
+            if v.EnumType == Enum.UserInputType then
+                return { Kind = "Mouse", Code = v, Name = v.Name }
+            end
+            return nil
+        end
+        if type(v) == "string" then
             local kind, name = v:match("^(%a+):(.+)$")
             if kind then
-                local k = kind:sub(1,1):upper() .. kind:sub(2):lower()
+                local k = kind:sub(1, 1):upper() .. kind:sub(2):lower()
                 if k == "Key" then
-                    local kc = Enum.KeyCode[name]
-                    if kc then return { Kind = "Key", Code = kc, Name = name } end
+                    local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+                    if ok and kc ~= nil then
+                        return { Kind = "Key", Code = kc, Name = name }
+                    end
                 elseif k == "Mouse" then
-                    local it = Enum.UserInputType[name]
-                    if it then return { Kind = "Mouse", Code = it, Name = name } end
+                    local ok, it = pcall(function() return Enum.UserInputType[name] end)
+                    if ok and it ~= nil then
+                        return { Kind = "Mouse", Code = it, Name = name }
+                    end
                 end
                 return nil
             end
-            local kc = Enum.KeyCode[v]
-            if kc then return { Kind = "Key", Code = kc, Name = v } end
+            local ok, kc = pcall(function() return Enum.KeyCode[v] end)
+            if ok and kc ~= nil then
+                return { Kind = "Key", Code = kc, Name = v }
+            end
         end
         return nil
     end

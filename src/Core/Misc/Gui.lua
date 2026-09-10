@@ -31,19 +31,6 @@ return function(ctx)
         return RootScale and RootScale.Scale or 1
     end
 
-    local function ClampFloat(inst)
-        local s = GetScale()
-        local w, h = inst.AbsoluteSize.X, inst.AbsoluteSize.Y
-        if w < 1 or h < 1 then return end
-        local x, y = inst.AbsolutePosition.X, inst.AbsolutePosition.Y
-        local nx = math.clamp(x, 8, math.max(8, I.Viewport.X - w - 8))
-        local ny = math.clamp(y, 8, math.max(8, I.Viewport.Y - h - 8))
-        if nx ~= x or ny ~= y then
-            inst.Position = UDim2.fromOffset(nx / s, ny / s)
-        end
-    end
-    I.ClampFloat = ClampFloat
-
     local function UpdateViewport()
         if not Camera then return end
         I.Viewport = Camera.ViewportSize

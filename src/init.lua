@@ -18,11 +18,14 @@ end
 
 local function Run(loader)
     local Kailex = {
-        Version = "2.0.0",
+        Version = "2.1.0",
         Windows = {},
     }
     local Internal = {}
     local ctx = { Kailex = Kailex, Internal = Internal }
+    if isStudioModule then
+        Kailex._internal = Internal
+    end
     local missing = {}
     for i = 1, #LoadOrder do
         local name = LoadOrder[i]

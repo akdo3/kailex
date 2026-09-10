@@ -58,8 +58,12 @@ return function(ctx)
             I.Tween(boxStroke, "Fast", { Color = I.CurrentTheme.Stroke, Transparency = 0.5 })
             local text = box.Text
             if validator then
-                local ok = validator(text)
-                if ok ~= true then
+                local vok, res = pcall(validator, text)
+                if not vok then
+                    warn("[Kailex] validator error (" .. self.Title .. "): " .. tostring(res))
+                    res = false
+                end
+                if res ~= true then
                     text = value
                     box.Text = text
                     I.PlaySound("Error")
@@ -93,6 +97,19 @@ return function(ctx)
         end
         function self:Get() return value end
         function self:CopyValue() return value end
+
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(tostring(opts.Default or ""))
+        end
+
+        function self:SetDisabled(state)
+            I.Element.SetDisabled(self, state)
+            local v = state == true
+            box.TextEditable = not v
+            box.Active = not v
+            if v then pcall(function() box:ReleaseFocus() end) end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "string" then self:Set(v, true) end

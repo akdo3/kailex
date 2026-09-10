@@ -38,7 +38,10 @@ return function(ctx)
 
     function Kailex:SaveCustomThemes()
         local store = {}
-        local Builtin = { Nocturne = true, Aurora = true, Sakura = true, Daylight = true }
+        local Builtin = {
+            Nocturne = true, Aurora = true, Sakura = true,
+            Daylight = true, Obsidian = true, Ember = true,
+        }
         for name, t in pairs(I.Themes) do
             if not Builtin[name] then store[name] = SerializeTheme(t) end
         end

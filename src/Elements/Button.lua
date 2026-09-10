@@ -1,5 +1,6 @@
 return function(ctx)
     local I = ctx.Internal
+    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Button = I.MakeElementClass()
@@ -32,6 +33,7 @@ return function(ctx)
             ZIndex = 0,
             Parent = row,
         })
+        I.AddPress(overlay, row)
 
         local spinner
         local spinTween
@@ -65,12 +67,30 @@ return function(ctx)
             setSpinner(self._busy)
         end
 
+        function self:HandleAsync(fn)
+            if self._destroyed or self._busy then return end
+            if type(fn) ~= "function" then return end
+            self:SetBusy(true)
+            task.spawn(function()
+                local ok, err = pcall(fn)
+                if not ok then
+                    warn("[Kailex] " .. tostring(err))
+                    Kailex:Notify({
+                        Title = "Task error",
+                        Text = tostring(err),
+                        Type = "Error", Duration = 6,
+                    })
+                end
+                self:SetBusy(false)
+            end)
+        end
+
         local function fire()
             if self._busy or self._disabled then return end
             I.ApplyRipple(overlay)
             I.PlaySound("Click")
             if opts.Confirm then
-                ctx.Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
+                Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
                     I.RunCallback(self.Callback, self.Title)
                 end)
                 return
@@ -78,7 +98,10 @@ return function(ctx)
             I.RunCallback(self.Callback, self.Title)
         end
 
-        self.Maid:Give(overlay.MouseButton1Click:Connect(fire))
+        self.Maid:Give(overlay.MouseButton1Click:Connect(function()
+            if overlay:GetAttribute("Dragging") then return end
+            fire()
+        end))
         I.HookContextMenu(self, overlay)
 
         if hasIcon and right then
@@ -90,18 +113,28 @@ return function(ctx)
                 LayoutOrder = 1,
                 Parent = right,
             })
-            local img = I.Create("ImageLabel", {
-                BackgroundTransparency = 1,
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(16, 16),
-                Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
-                ImageColor3 = I.CurrentTheme.SubText,
-                Parent = iconBtn,
-            })
-            I.Bind(img, "ImageColor3", "SubText")
-            self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
-            self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
+            local raw = tostring(opts.Icon)
+            local isAsset = tonumber(opts.Icon) ~= nil
+                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            if isAsset then
+                local img = I.Create("ImageLabel", {
+                    BackgroundTransparency = 1,
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.fromScale(0.5, 0.5),
+                    Size = UDim2.fromOffset(16, 16),
+                    Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
+                    ImageColor3 = I.CurrentTheme.SubText,
+                    Parent = iconBtn,
+                })
+                I.Bind(img, "ImageColor3", "SubText")
+                self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
+                self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
+            else
+                local holder = I.Icon(iconBtn, raw, "SubText")
+                holder.AnchorPoint = Vector2.new(0.5, 0.5)
+                holder.Position = UDim2.fromScale(0.5, 0.5)
+                holder.Size = UDim2.fromOffset(16, 16)
+            end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 

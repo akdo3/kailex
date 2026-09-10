@@ -73,6 +73,7 @@ return function(ctx)
             I.Bind(b, "BackgroundColor3", "Element")
             I.Bind(b, "TextColor3", "SubText")
             I.AddHover(b)
+            I.AddPress(b)
             buttons[i] = b
             b.MouseButton1Click:Connect(function()
                 if self._disabled then return end
@@ -117,6 +118,17 @@ return function(ctx)
         end
         function self:Get() return selected and selected.Value or nil end
         function self:CopyValue() return selected and tostring(selected.Value) or nil end
+        function self:Reset()
+            if self._destroyed then return end
+            if opts.Default ~= nil then
+                self:Set(opts.Default, false)
+            elseif selected then
+                selected = nil
+                paint()
+                I.SaveValue(saveKey, nil)
+                I.RunCallback(self.Callback, self.Title, nil)
+            end
+        end
 
         self:_bindSaveReload(saveKey, function(v)
             self:Set(v, true)

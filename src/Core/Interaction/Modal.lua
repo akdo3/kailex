@@ -29,4 +29,11 @@ return function(ctx)
             end
         end
     end
+
+    function ModalManager.CloseTop()
+        local top = ModalManager.Stack[#ModalManager.Stack]
+        if not top then return false end
+        pcall(top.Close)
+        return true
+    end
 end

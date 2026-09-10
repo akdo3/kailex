@@ -94,6 +94,7 @@ return function(ctx)
             ZIndex = 0,
             Parent = row,
         })
+        I.AddPress(overlay, row)
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if overlay:GetAttribute("Dragging") then return end
@@ -136,11 +137,18 @@ return function(ctx)
         function self:Get() return self.State end
         function self:CopyValue() return tostring(self.State) end
 
+        function self:Reset()
+            if self._destroyed then return end
+            local d = opts.Default
+            if d == nil then d = opts.defaultVal end
+            self:Set(d == true)
+        end
+
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "boolean" then self:Set(v) end
         end)
 
-        if opts.Default ~= nil or hadSaved then
+        if opts.Default ~= nil or opts.defaultVal ~= nil or hadSaved then
             task.defer(function()
                 if not self._destroyed then I.RunCallback(self.Callback, self.Title, self.State) end
             end)

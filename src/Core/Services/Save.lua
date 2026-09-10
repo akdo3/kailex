@@ -136,6 +136,8 @@ return function(ctx)
     end
 
     local SaveReloadRegistry = {}
+    I.SaveReloadRegistry = SaveReloadRegistry
+
     I.LibMaid:Give(SaveManager.DataChanged:Connect(function()
         for key, fns in pairs(SaveReloadRegistry) do
             local n = #fns
@@ -150,6 +152,7 @@ return function(ctx)
 
     I.SaveManager = SaveManager
     I.Configs = Configs
+    Kailex.Configs = Configs
     I.SaveValue = SaveValue
     I.IsInternalKey = IsInternalKey
 end

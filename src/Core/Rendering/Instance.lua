@@ -168,6 +168,42 @@ return function(ctx)
             })
             I.Bind(ring, "BackgroundColor3", colorKey)
             bar(2, 6, 0.5, 0.76)
+        elseif kind == "Maximize" then
+            local sq = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(9, 9),
+                BackgroundTransparency = 1,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
+            })
+            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = sq }), "Color", colorKey)
+        elseif kind == "Restore" then
+            local back = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, -2, 0.5, -2),
+                Size = UDim2.fromOffset(7, 7),
+                BackgroundTransparency = 1,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
+            })
+            I.Bind(Create("UIStroke", { Thickness = 1.4, Parent = back }), "Color", colorKey)
+            local front = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 2, 0.5, 2),
+                Size = UDim2.fromOffset(8, 8),
+                BackgroundColor3 = I.CurrentTheme[colorKey],
+                BorderSizePixel = 0,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
+            })
+            I.Bind(front, "BackgroundColor3", colorKey)
+        elseif kind == "Alert" then
+            bar(2, 6, 0.5, 0.40)
+            bar(2, 2, 0.5, 0.76)
+        elseif kind == "Info" then
+            bar(2, 2, 0.5, 0.24)
+            bar(2, 6, 0.5, 0.55)
         end
         return holder
     end
@@ -181,6 +217,7 @@ return function(ctx)
         if hoverT == nil then hoverT = baseT end
         local hoverKey = opts.HoverKey or "ElementHover"
         local baseKey  = opts.BaseKey or "Element"
+
         obj.MouseEnter:Connect(function()
             if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") then return end
             I.PlaySound("Hover", 0.12)
@@ -200,6 +237,107 @@ return function(ctx)
         end)
     end
 
+    local function AddPress(hit, target)
+        target = target or hit
+        if not hit or not target then return nil end
+        if target:FindFirstChildOfClass("UIScale") then return nil end
+        local scale = Create("UIScale", { Scale = 1, Parent = target })
+        local down = false
+        local function release()
+            if not down then return end
+            down = false
+            I.Tween(scale, "PopSoft", { Scale = 1 })
+        end
+        hit.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if target:GetAttribute("Disabled") then return end
+            down = true
+            scale.Scale = 0.97
+        end)
+        hit.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                release()
+            end
+        end)
+        hit.MouseLeave:Connect(release)
+        return scale
+    end
+
+    local function DropShadow(target, opts)
+        opts = opts or {}
+        if not target or not target.Parent then return nil end
+        local parent = target.Parent
+        local holder = Create("Frame", {
+            Name = "__KailexShadow",
+            BackgroundTransparency = 1,
+            AnchorPoint = target.AnchorPoint,
+            ZIndex = math.max(0, (target.ZIndex or 1) - 1),
+            Visible = target.Visible,
+            Parent = parent,
+        })
+        local radius = opts.Radius or 12
+        local spreads = opts.Spreads or { 2, 5, 9 }
+        local dropY = opts.DropY or 3
+        local layers = {}
+        for i = 1, #spreads do
+            local s = spreads[i]
+            local base = ({ 0.92, 0.945, 0.965 })[i] or 0.965
+            local f = Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, dropY),
+                Size = UDim2.new(1, s * 2, 1, s * 2 + dropY),
+                BackgroundColor3 = Color3.new(0, 0, 0),
+                BackgroundTransparency = base,
+                BorderSizePixel = 0,
+                Parent = holder,
+                Children = { Create("UICorner", { CornerRadius = UDim.new(0, radius + s) }) },
+            })
+            layers[i] = { Frame = f, Base = base }
+        end
+
+        local ctrl = {}
+        local function sync()
+            if not target.Parent then return end
+            holder.Position = target.Position
+            holder.Size = target.Size
+            holder.ZIndex = math.max(0, (target.ZIndex or 1) - 1)
+        end
+        function ctrl.SetFade(a)
+            a = a or 0
+            for _, l in ipairs(layers) do
+                l.Frame.BackgroundTransparency = math.min(1, l.Base + (1 - l.Base) * a)
+            end
+        end
+        function ctrl.FadeOut()
+            for _, l in ipairs(layers) do
+                I.Tween(l.Frame, "Vanish", { BackgroundTransparency = 1 })
+            end
+        end
+        function ctrl.Destroy()
+            holder:Destroy()
+        end
+        ctrl.Holder = holder
+
+        local maid = I.Maid.new()
+        maid:Give(target:GetPropertyChangedSignal("Position"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("Size"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("ZIndex"):Connect(sync))
+        maid:Give(target:GetPropertyChangedSignal("Visible"):Connect(function()
+            holder.Visible = target.Visible
+        end))
+        maid:Give(target:GetPropertyChangedSignal("AnchorPoint"):Connect(function()
+            holder.AnchorPoint = target.AnchorPoint
+            sync()
+        end))
+        maid:Give(function() holder:Destroy() end)
+        maid:Give(target.Destroying:Connect(function() maid:Destroy() end))
+        ctrl.Maid = maid
+        sync()
+        return ctrl
+    end
+
     I.TS = TS
     I.ApplyTextScale = ApplyTextScale
     I.Create = Create
@@ -207,4 +345,6 @@ return function(ctx)
     I.StrokeBind = StrokeBind
     I.Icon = Icon
     I.AddHover = AddHover
+    I.AddPress = AddPress
+    I.DropShadow = DropShadow
 end

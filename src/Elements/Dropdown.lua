@@ -79,7 +79,7 @@ return function(ctx)
 
         local function measureWidth()
             local w = 96
-            local cap = math.min(#options, 400)
+            local cap = math.min(#options, 120)
             for i = 1, cap do
                 local text = options[i].Text
                 if #text > 64 then text = text:sub(1, 64) end
@@ -132,6 +132,7 @@ return function(ctx)
             Children = { I.Corner(10), I.StrokeBind(1, "Stroke", 0.2) },
         })
         I.Bind(list, "BackgroundColor3", "SurfaceLight")
+        local shadow = I.DropShadow(list, { Radius = 10 })
 
         local header = I.Create("Frame", {
             BackgroundTransparency = 1,
@@ -251,6 +252,7 @@ return function(ctx)
         local buildOptions
         local refreshOptions
         local refreshLabel
+        local hl = nil
 
         local function paintRec(rec, opt)
             local isSel = opt ~= nil and selSet[opt.Key] == true
@@ -271,6 +273,61 @@ return function(ctx)
             end
         end
 
+        local function recAt(idx)
+            if virtual then
+                return virtualButtons[idx]
+            end
+            return optionButtons[idx]
+        end
+
+        local function paintHl(rec, on)
+            if not rec or not rec.Button then return end
+            local opt = display[rec._idx]
+            local isSel = opt ~= nil and selSet[opt.Key] == true
+            I.Tween(rec.Button, "Instant", {
+                BackgroundColor3 = on and (isSel and I.CurrentTheme.AccentHover or I.CurrentTheme.ElementHover)
+                    or (isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element),
+                BackgroundTransparency = on and (isSel and 0.6 or 0.35) or (isSel and 0.75 or 1),
+            })
+        end
+
+        local function clearHl()
+            if hl == nil then return end
+            local rec = recAt(hl)
+            if rec then paintHl(rec, false) end
+            hl = nil
+        end
+
+        local function setHl(idx)
+            if idx == hl then return end
+            clearHl()
+            if idx == nil or idx < 1 or idx > #display then return end
+            hl = idx
+            local rowStep = optH + pad
+            local target = (idx - 1) * rowStep
+            local viewH = listCanvas.AbsoluteSize.Y
+            local top = listCanvas.CanvasPosition.Y
+            if target < top or target + optH > top + viewH then
+                listCanvas.CanvasPosition = Vector2.new(0, math.max(0, target - math.max(0, (viewH - optH) / 2)))
+            end
+            local rec = recAt(idx)
+            if rec then paintHl(rec, true) end
+        end
+
+        local function moveHl(dir)
+            local n = #display
+            if n == 0 then return end
+            local idx = hl or 0
+            if dir > 0 then
+                idx += 1
+                if idx > n then idx = 1 end
+            else
+                idx -= 1
+                if idx < 1 then idx = n end
+            end
+            setHl(idx)
+        end
+
         refreshOptions = function()
             if virtual then
                 for idx, rec in pairs(virtualButtons) do
@@ -286,6 +343,10 @@ return function(ctx)
                         end
                     end
                 end
+            end
+            if hl ~= nil then
+                local rec = recAt(hl)
+                if rec then paintHl(rec, true) end
             end
         end
 
@@ -357,6 +418,7 @@ return function(ctx)
             end
             btn.MouseEnter:Connect(function()
                 if I.Device.IsTouch or not expanded or not rec._idx then return end
+                hl = rec._idx
                 I.PlaySound("Hover", 0.1)
                 local opt = display[rec._idx]
                 local isSel = opt ~= nil and selSet[opt.Key] == true
@@ -367,6 +429,7 @@ return function(ctx)
             end)
             btn.MouseLeave:Connect(function()
                 if not rec._idx then return end
+                if hl == rec._idx then return end
                 local opt = display[rec._idx]
                 local isSel = opt ~= nil and selSet[opt.Key] == true
                 I.Tween(btn, "HoverOut", {
@@ -431,6 +494,7 @@ return function(ctx)
                     tab._openDropdown()
                 end
                 tab._openDropdown = closeFn
+                I.HotElement = nil
 
                 local sc = I.GetScale()
                 local ap, asz = row.AbsolutePosition, row.AbsoluteSize
@@ -455,6 +519,13 @@ return function(ctx)
                 end
                 local x = math.clamp(rowX, 8, math.max(8, vw - pw - 8))
 
+                hl = nil
+                if not multi then
+                    for i, o in ipairs(display) do
+                        if selSet[o.Key] == true then hl = i break end
+                    end
+                end
+
                 listCanvas.CanvasPosition = Vector2.new(0, 0)
                 listCanvas.Position = UDim2.new(0, 0, 0, headerH)
                 listCanvas.Size = UDim2.new(1, 0, 1, -headerH)
@@ -462,9 +533,15 @@ return function(ctx)
                 list.Position = UDim2.fromOffset(x, y + slideFrom)
                 list.Visible = true
                 catcher.Visible = true
+                if shadow then shadow.SetFade(1) end
                 list.GroupTransparency = 1
                 I.Tween(list, "Snappy", { Size = UDim2.new(0, pw, 0, totalH), GroupTransparency = 0 })
                 I.Tween(list, "Smooth", { Position = UDim2.fromOffset(x, y) })
+                if shadow then
+                    task.delay(0.1, function()
+                        if expanded and shadow then shadow.SetFade(0) end
+                    end)
+                end
 
                 I.ModalManager.Remove(modalEntry)
                 modalEntry = I.ModalManager.Push(tab.Window, closeFn)
@@ -489,10 +566,12 @@ return function(ctx)
                     end
                 end
             else
+                hl = nil
                 if tab._openDropdown == closeFn then tab._openDropdown = nil end
                 I.ModalManager.Remove(modalEntry)
                 modalEntry = nil
                 catcher.Visible = false
+                if shadow then shadow.FadeOut() end
                 I.Tween(list, "Fast", { Size = UDim2.new(0, list.AbsoluteSize.X / I.GetScale(), 0, 0) })
                 I.Tween(list, "Fast", { GroupTransparency = 1 }, function()
                     if not expanded then list.Visible = false end
@@ -523,6 +602,21 @@ return function(ctx)
                 I.RunCallback(self.Callback, self.Title, self:Get())
             end
         end
+
+        local keyHook = I.AddInputHook(function() return not self._destroyed end, function(input)
+            if not expanded then return end
+            if input.KeyCode == Enum.KeyCode.Up then
+                moveHl(-1)
+            elseif input.KeyCode == Enum.KeyCode.Down then
+                moveHl(1)
+            elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+                if hl ~= nil and display[hl] then
+                    local rec = recAt(hl)
+                    selectOption(display[hl], rec and rec.Button or nil)
+                end
+            end
+        end)
+        self.Maid:Give(function() I.RemoveInputHook(keyHook) end)
 
         local function clearButtons()
             for _, rec in ipairs(optionButtons) do
@@ -592,6 +686,7 @@ return function(ctx)
                     end
                     display = out
                 end
+                hl = nil
                 listCanvas.CanvasPosition = Vector2.new(0, 0)
                 buildOptions()
                 refreshOptions()
@@ -640,6 +735,7 @@ return function(ctx)
         })
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
+            if overlay:GetAttribute("Dragging") then return end
             I.ApplyRipple(overlay)
             I.PlaySound("Click", 0.7)
             setExpanded(not expanded)
@@ -683,7 +779,32 @@ return function(ctx)
             local sel = selectedOpts()
             return sel[1] and sel[1].Text or nil
         end
-        function self:CopyValue() return table.concat(self:GetText() or {}, ", ") end
+        function self:CopyValue()
+            local t = self:GetText()
+            if type(t) == "table" then
+                return table.concat(t, ", ")
+            end
+            return tostring(t or "")
+        end
+        function self:Reset()
+            if self._destroyed then return end
+            local defaults
+            if multi then
+                defaults = type(opts.Defaults) == "table" and opts.Defaults or {}
+            else
+                defaults = (opts.Default ~= nil) and { opts.Default } or {}
+            end
+            local ns = {}
+            for _, d in ipairs(defaults) do
+                local o = findOpt(tostring(d))
+                if o then ns[o.Key] = true end
+            end
+            selSet = ns
+            I.SaveValue(saveKey, multi and valuesOf(selectedOpts()) or (selectedOpts()[1] and selectedOpts()[1].Value or nil))
+            refreshOptions()
+            refreshLabel()
+            I.RunCallback(self.Callback, self.Title, self:Get())
+        end
         function self:SetOptions(newOptions)
             if self._destroyed then return end
             options = normalize(newOptions)

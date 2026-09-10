@@ -21,10 +21,10 @@ return function(ctx)
         self.CurrentTab = nil
         self.Minimized = false
         self.Maximized = false
-        self.WrapElements = cfg.Wrap == true or cfg.AdaptiveWidth == true
         self.MinimizedChanged = I.Signal.new()
         self.Closed = I.Signal.new()
         self._hidden = false
+        self._alwaysTop = false
         self.ToggleKey = I.ParseKey(cfg.ToggleKey)
         self._remember = cfg.RememberPosition ~= false
 
@@ -88,11 +88,16 @@ return function(ctx)
         }), "Color", "Stroke")
         self._winScale = I.Create("UIScale", { Scale = 0.94, Parent = self.Root })
 
+        local shadow = I.DropShadow(self.Root, { Radius = 14 })
+        self._shadow = shadow
+
         self.Maid = I.Maid.new()
         self.Maid:Link(self.Root)
 
         local introMaid = I.Maid.new()
         self.Maid:Give(introMaid)
+
+        local setMaxIcon
 
         local TITLE_FINAL = UDim2.new(0, 0, 0, 0)
         local BODY_FINAL = UDim2.new(0, 0, 0, 56)
@@ -119,6 +124,7 @@ return function(ctx)
             I.Tween(self._winScale, "Instant", { Scale = 1 })
             I.Tween(titleBar, "Instant", { Position = TITLE_FINAL })
             I.Tween(body, "Instant", { Position = BODY_FINAL })
+            if shadow then shadow.SetFade(0) end
             introMaid:Destroy()
         end
 
@@ -129,6 +135,7 @@ return function(ctx)
                 if self.Maximized then
                     self.Maximized = false
                     self.ResizeGrip.Visible = not self.Minimized
+                    setMaxIcon("Maximize")
                     if self._restore then
                         local sc = I.GetScale()
                         local m = UserInputService:GetMouseLocation()
@@ -147,9 +154,35 @@ return function(ctx)
             OnEnd = function() self:SavePlacement() end,
         })
 
+        local titleX = 14
+        local winIcon
+        if cfg.Icon ~= nil then
+            titleX = 40
+            local raw = tostring(cfg.Icon)
+            local isAsset = tonumber(cfg.Icon) ~= nil
+                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            if isAsset then
+                winIcon = I.Create("ImageLabel", {
+                    Position = UDim2.fromOffset(14, 5),
+                    Size = UDim2.fromOffset(20, 20),
+                    BackgroundTransparency = 1,
+                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
+                    ImageColor3 = I.CurrentTheme.SubText,
+                    Parent = titleBar,
+                })
+                I.Bind(winIcon, "ImageColor3", "SubText")
+            else
+                winIcon = I.Icon(titleBar, raw, "SubText")
+                winIcon.Position = UDim2.fromOffset(14, 5)
+                winIcon.Size = UDim2.fromOffset(20, 20)
+            end
+            self.IconImg = winIcon
+        end
+
+        local titleReserve = 130 + (titleX - 14)
         local titleLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(14, 7),
-            Size = UDim2.new(1, -130, 0, 20),
+            Position = UDim2.fromOffset(titleX, 7),
+            Size = UDim2.new(1, -titleReserve, 0, 20),
             BackgroundTransparency = 1,
             Font = Enum.Font.GothamBold,
             TextSize = 15,
@@ -161,8 +194,8 @@ return function(ctx)
         })
         I.Bind(titleLabel, "TextColor3", "Text")
         local subLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(14, 26),
-            Size = UDim2.new(1, -130, 0, 14),
+            Position = UDim2.fromOffset(titleX, 26),
+            Size = UDim2.new(1, -titleReserve, 0, 14),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham,
             TextSize = 11,
@@ -173,6 +206,16 @@ return function(ctx)
             Parent = titleBar,
         })
         I.Bind(subLabel, "TextColor3", "SubText")
+
+        local titleDivider = I.Create("Frame", {
+            Position = UDim2.new(0, 0, 1, -1),
+            Size = UDim2.new(1, 0, 0, 1),
+            BackgroundColor3 = I.CurrentTheme.Stroke,
+            BackgroundTransparency = 0.45,
+            BorderSizePixel = 0,
+            Parent = titleBar,
+        })
+        I.Bind(titleDivider, "BackgroundColor3", "Stroke")
 
         local searchBox = I.Create("TextBox", {
             Position = UDim2.fromOffset(14, 11),
@@ -256,11 +299,12 @@ return function(ctx)
                 self:ApplyFilter("")
             end
         end
-        self._setSearch = setSearch
+        self._setSearch = function(_, on) setSearch(on) end
 
         self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
             if not searchActive then return end
             if input.KeyCode ~= Enum.KeyCode.Escape then return end
+            if #I.ModalManager.Stack > 0 then return end
             if gp and UserInputService:GetFocusedTextBox() ~= searchBox then return end
             setSearch(false)
         end))
@@ -281,6 +325,7 @@ return function(ctx)
             ic.AnchorPoint = Vector2.new(0.5, 0.5)
             ic.Position = UDim2.fromScale(0.5, 0.5)
             ic.Size = UDim2.fromOffset(12, 12)
+            I.AddPress(b)
             return b
         end
 
@@ -303,14 +348,30 @@ return function(ctx)
             self:SetMinimized(true)
         end))
 
-        local searchB = titleButton("Search", -78)
+        local maxB = titleButton("Maximize", -78)
+        I.AddHover(maxB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+        local maxIcon
+        setMaxIcon = function(kind)
+            if maxIcon then maxIcon:Destroy() end
+            maxIcon = I.Icon(maxB, kind, "SubText")
+            maxIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+            maxIcon.Position = UDim2.fromScale(0.5, 0.5)
+            maxIcon.Size = UDim2.fromOffset(12, 12)
+        end
+        setMaxIcon("Maximize")
+        self.Maid:Give(maxB.MouseButton1Click:Connect(function()
+            I.PlaySound("Click", 0.5)
+            self:SetMaximized(not self.Maximized)
+        end))
+
+        local searchB = titleButton("Search", -112)
         I.AddHover(searchB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
         self.Maid:Give(searchB.MouseButton1Click:Connect(function()
             I.PlaySound("Click", 0.5)
             setSearch(not searchActive)
         end))
 
-        local _titleButtons = { searchB, minB, closeB }
+        local _titleButtons = { searchB, minB, maxB, closeB }
         self._titleButtons = _titleButtons
 
         self._sidebarWidth = math.clamp(tonumber(I.SaveManager:Get("__sidebarWidth", 152)) or 152, 110, 320)
@@ -395,30 +456,19 @@ return function(ctx)
             if self.Minimized or I.DragManager.Active then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            I.DragManager.Active = splitter
-            I.ModalManager.CloseAll(self)
-            local sMaid = I.Maid.new()
-            local function finish()
-                if I.DragManager.Active == splitter then I.DragManager.Active = nil end
-                sMaid:Destroy()
-                I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
-            end
-            sMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            sMaid:Give(splitter.Destroying:Connect(finish))
-            sMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
-            sMaid:Give(I.RunService.RenderStepped:Connect(function()
-                local m = UserInputService:GetMouseLocation()
-                local sc = I.GetScale()
-                local rel = (m.X - body.AbsolutePosition.X) / sc + 4
-                self:SetSidebarWidth(rel)
-            end))
+            I.BeginDrag(input, splitter, {
+                ManagerKey = splitter,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local rel = (mouse.X - body.AbsolutePosition.X) / sc + 4
+                    self:SetSidebarWidth(rel)
+                end,
+                OnEnd = function()
+                    I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
+                end,
+            })
         end)
 
         local grip = I.Create("TextButton", {
@@ -440,60 +490,100 @@ return function(ctx)
             if self.Maximized or self.Minimized or I.DragManager.Active then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            I.DragManager.Active = grip
-            I.ModalManager.CloseAll(self)
             local startMouse = UserInputService:GetMouseLocation()
             local startSize = self.Root.AbsoluteSize / I.GetScale()
-            local gMaid = I.Maid.new()
-            local function finish()
-                if I.DragManager.Active == grip then I.DragManager.Active = nil end
-                gMaid:Destroy()
-                I.ClampWindowToScreen(self.Root)
-                self:SavePlacement()
-            end
-            gMaid:Give(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                    or inp.UserInputType == Enum.UserInputType.Touch then
-                    finish()
-                end
-            end))
-            gMaid:Give(grip.Destroying:Connect(finish))
-            gMaid:Give(I.RunService.Heartbeat:Connect(function()
-                if not I.IsInputDown(input.UserInputType) then finish() end
-            end))
-            gMaid:Give(I.RunService.RenderStepped:Connect(function()
-                if I.DragManager.Active ~= grip then return end
-                local m = UserInputService:GetMouseLocation()
-                local sc = I.GetScale()
-                local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
-                local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
-                local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
-                local w = math.clamp(startSize.X + (m.X - startMouse.X) / sc, minW, math.max(minW, vw2 - 8))
-                local h = math.clamp(startSize.Y + (m.Y - startMouse.Y) / sc, minH, math.max(minH, vh2 - 8))
-                self.Root.Size = UDim2.fromOffset(w, h)
-            end))
+            I.BeginDrag(input, grip, {
+                ManagerKey = grip,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
+                    local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
+                    local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
+                    local w = math.clamp(startSize.X + (mouse.X - startMouse.X) / sc, minW, math.max(minW, vw2 - 8))
+                    local h = math.clamp(startSize.Y + (mouse.Y - startMouse.Y) / sc, minH, math.max(minH, vh2 - 8))
+                    self.Root.Size = UDim2.fromOffset(w, h)
+                end,
+                OnEnd = function()
+                    I.ClampWindowToScreen(self.Root)
+                    self:SavePlacement()
+                end,
+            })
         end)
 
         local function BringToFront()
             local z = 20
+            local isTop = true
             for _, w in ipairs(Kailex.Windows) do
-                if w ~= self and w.Root and w.Root.ZIndex > z then z = w.Root.ZIndex end
+                if w ~= self and not w._destroyed and w.Root and w.Root.Visible and not w._alwaysTop then
+                    if w.Root.ZIndex >= self.Root.ZIndex then
+                        isTop = false
+                    end
+                    if w.Root.ZIndex > z then
+                        z = w.Root.ZIndex
+                    end
+                end
             end
-            self.Root.ZIndex = z + 1
+            if self._alwaysTop then
+                self.Root.ZIndex = 100
+            elseif not isTop or self.Root.ZIndex >= 100 then
+                self.Root.ZIndex = math.min(99, z + 1)
+            end
+            Kailex._lastActive = self
         end
+        self._focus = BringToFront
 
         local lastClick = 0
         titleBar.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            BringToFront()
-            if I.Device.IsTouch then return end
-            local now = os.clock()
-            if now - lastClick < 0.3 then
-                lastClick = 0
-                self:SetMaximized(not self.Maximized)
-            else
-                lastClick = now
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                BringToFront()
+                if I.Device.IsTouch then return end
+                local now = os.clock()
+                if now - lastClick < 0.3 then
+                    lastClick = 0
+                    self:SetMaximized(not self.Maximized)
+                else
+                    lastClick = now
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                local m = UserInputService:GetMouseLocation()
+                I.ContextMenu.Show({
+                    {
+                        Text = self.Maximized and "Restore" or "Maximize",
+                        Callback = function()
+                            if not self._destroyed then self:SetMaximized(not self.Maximized) end
+                        end,
+                    },
+                    {
+                        Text = self.Minimized and "Expand" or "Minimize",
+                        Callback = function()
+                            if not self._destroyed then self:SetMinimized(not self.Minimized) end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = self._alwaysTop and "Disable always on top" or "Always on top",
+                        Callback = function()
+                            if self._destroyed then return end
+                            self._alwaysTop = not self._alwaysTop
+                            if self._alwaysTop then
+                                self.Root.ZIndex = 100
+                            else
+                                BringToFront()
+                            end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = "Close",
+                        Danger = true,
+                        Callback = function()
+                            if not self._destroyed then self:Close() end
+                        end,
+                    },
+                }, m.X, m.Y)
             end
         end)
 
@@ -678,13 +768,13 @@ return function(ctx)
                 pillHit.Visible = true
                 if searchActive then setSearch(false) end
                 local tw = TextService:GetTextSize(self.Title, I.TS(15), Enum.Font.GothamBold, Vector2.new(10000, 100)).X
-                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74, 38) })
+                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74 + (winIcon and 24 or 0), 38) })
             else
                 pillHit.Visible = false
                 expandIcon.Visible = false
                 for _, b in ipairs(_titleButtons) do b.Visible = true end
                 subLabel.Visible = true
-                titleLabel.Size = UDim2.new(1, -130, 0, 20)
+                titleLabel.Size = UDim2.new(1, -titleReserve, 0, 20)
                 I.Tween(self.Root, "Smooth", { Size = self._preMin and self._preMin.Size or UDim2.fromOffset(580, 420) }, function()
                     if not self._destroyed and not self.Minimized then
                         self.Body.Visible = true
@@ -704,12 +794,14 @@ return function(ctx)
                 self._restore = { Size = self.Root.Size, X = sp.X, Y = sp.Y }
                 self.Maximized = true
                 self.ResizeGrip.Visible = false
+                setMaxIcon("Restore")
                 self.Root.AnchorPoint = Vector2.new(0.5, 0.5)
                 self.Root.Position = UDim2.fromOffset(I.Viewport.X / (2 * sc), I.Viewport.Y / (2 * sc))
                 I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(I.Viewport.X / sc - 16, I.Viewport.Y / sc - 16) })
             else
                 self.Maximized = false
                 self.ResizeGrip.Visible = true
+                setMaxIcon("Maximize")
                 self.Root.AnchorPoint = Vector2.new(0, 0)
                 if self._restore then
                     self.Root.Position = UDim2.fromOffset(self._restore.X, self._restore.Y)
@@ -785,6 +877,7 @@ return function(ctx)
             end
             I.ModalManager.CloseAll(self)
             KillIntroMotion()
+            if shadow then shadow.FadeOut() end
             local root = self.Root
             local done = false
             local function finish()
@@ -826,6 +919,12 @@ return function(ctx)
             I.Tween(titleBar, TweenInfo.new(0.46, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = TITLE_FINAL })
             I.Tween(body, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = BODY_FINAL })
 
+            task.delay(0.1, function()
+                if not self._destroyed and shadow then shadow.SetFade(0.55) end
+            end)
+            task.delay(0.24, function()
+                if not self._destroyed and shadow then shadow.SetFade(0) end
+            end)
             task.delay(0.55, function()
                 if not self._destroyed and dim then
                     I.Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()

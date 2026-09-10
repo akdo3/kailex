@@ -5,7 +5,7 @@ return function(ctx)
     local ContextMenu = {}
     I.ContextMenu = ContextMenu
 
-    local frame, catcher
+    local frame, catcher, shadow
     local entry = nil
     local hideToken = 0
 
@@ -26,6 +26,7 @@ return function(ctx)
             },
         })
         I.Bind(frame, "BackgroundColor3", "SurfaceLight")
+        shadow = I.DropShadow(frame, { Radius = 10 })
         catcher = I.Create("TextButton", {
             Size = UDim2.fromScale(1, 1),
             BackgroundTransparency = 1,
@@ -85,6 +86,7 @@ return function(ctx)
                     I.Bind(btn, "TextColor3", "Text")
                 end
                 I.AddHover(btn)
+                I.AddPress(btn)
                 btn.MouseButton1Click:Connect(function()
                     ContextMenu.Hide()
                     if type(item.Callback) == "function" then
@@ -102,6 +104,12 @@ return function(ctx)
         frame.Position = UDim2.fromOffset(px / s, py / s)
         frame.Visible = true
         catcher.Visible = true
+        if shadow then
+            shadow.SetFade(1)
+            task.delay(0.08, function()
+                if frame.Visible and shadow then shadow.SetFade(0) end
+            end)
+        end
         I.ModalManager.Remove(entry)
         local tk = hideToken
         entry = I.ModalManager.Push(nil, function()
@@ -112,6 +120,7 @@ return function(ctx)
     function ContextMenu.Hide()
         if frame and frame.Visible then
             hideToken += 1
+            if shadow then shadow.FadeOut() end
             frame.Visible = false
             catcher.Visible = false
         end
