@@ -1,0 +1,12 @@
+{
+    "name": "KailexUI",
+    "tree": {
+        "$className": "DataModel",
+        "ReplicatedStorage": {
+            "$className": "ReplicatedStorage",
+            "Kailex": {
+                "$path": "src"
+            }
+        }
+    }
+}
