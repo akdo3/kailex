@@ -1,6 +1,5 @@
 return function(ctx)
     local I = ctx.Internal
-    local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
 
     local InputHooks = {}
@@ -8,8 +7,7 @@ return function(ctx)
 
     local function RemoveInputHook(rec)
         rec._removed = true
-        local idx = table.find(InputHooks, rec)
-        if idx then table.remove(InputHooks, idx) end
+        I.RemoveFrom(InputHooks, rec)
     end
 
     local function AddInputHook(alive, fn)
@@ -52,6 +50,13 @@ return function(ctx)
     I.ActiveKeybindListener = nil
     I.HotElement = nil
 
+    local function enumOf(enum, name)
+        local ok, v = pcall(function() return enum[name] end)
+        if ok and v ~= nil then return v end
+    end
+
+    local ENUMS = { Key = Enum.KeyCode, Mouse = Enum.UserInputType }
+
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
             if v.EnumType == Enum.KeyCode then
@@ -66,23 +71,13 @@ return function(ctx)
             local kind, name = v:match("^(%a+):(.+)$")
             if kind then
                 local k = kind:sub(1, 1):upper() .. kind:sub(2):lower()
-                if k == "Key" then
-                    local ok, kc = pcall(function() return Enum.KeyCode[name] end)
-                    if ok and kc ~= nil then
-                        return { Kind = "Key", Code = kc, Name = name }
-                    end
-                elseif k == "Mouse" then
-                    local ok, it = pcall(function() return Enum.UserInputType[name] end)
-                    if ok and it ~= nil then
-                        return { Kind = "Mouse", Code = it, Name = name }
-                    end
-                end
+                local e = ENUMS[k]
+                local c = e and enumOf(e, name)
+                if c then return { Kind = k, Code = c, Name = name } end
                 return nil
             end
-            local ok, kc = pcall(function() return Enum.KeyCode[v] end)
-            if ok and kc ~= nil then
-                return { Kind = "Key", Code = kc, Name = v }
-            end
+            local kc = enumOf(Enum.KeyCode, v)
+            if kc then return { Kind = "Key", Code = kc, Name = v } end
         end
         return nil
     end
@@ -98,11 +93,8 @@ return function(ctx)
             if el ~= self and not el._destroyed then
                 local ob = el._getBinding and el:_getBinding()
                 if ob and ob.Kind == b.Kind and ob.Code == b.Code then
-                    Kailex:Notify({
-                        Title = "Keybind conflict",
-                        Text = "\"" .. b.Name .. "\" is also bound in \"" .. el.Title .. "\".",
-                        Type = "Warning", Duration = 5,
-                    })
+                    I.Note("Keybind conflict",
+                        "\"" .. b.Name .. "\" is also bound in \"" .. el.Title .. "\".", "Warning", 5)
                     return
                 end
             end

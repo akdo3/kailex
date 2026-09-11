@@ -46,7 +46,7 @@ return function(ctx)
 
         self._setSearch = function(_, on) setSearch(on) end
 
-        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        self.Maid:Give(searchBox:GetPropertyChangedSignal("Text"):Connect(function()
             local text = searchBox.Text
             if searchDebounce then pcall(task.cancel, searchDebounce) end
             if text == "" then
@@ -55,14 +55,15 @@ return function(ctx)
                 return
             end
             searchDebounce = task.delay(0.15, function()
+                if self._destroyed then return end
                 self._filterQuery = text
                 self:ApplyFilter(text)
             end)
-        end)
+        end))
 
-        searchBox.FocusLost:Connect(function(enter)
+        self.Maid:Give(searchBox.FocusLost:Connect(function(enter)
             if not enter and searchBox.Text == "" then setSearch(false) end
-        end)
+        end))
 
         self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
             if not self._searchActive then return end

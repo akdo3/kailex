@@ -1,7 +1,10 @@
 return function(ctx)
     local I = ctx.Internal
     local UserInputService = I.UserInputService
-    local Window = I.WindowClass
+
+    local Window = {}
+    Window.__index = Window
+    I.WindowClass = Window
 
     local Chrome = {}
 
@@ -32,7 +35,7 @@ return function(ctx)
 
         local body = I.Create("Frame", {
             Position = UDim2.new(0, 0, 0, 56),
-            Size = UDim2.new(1, 0, 1, -46),
+            Size = UDim2.new(1, 0, 1, -56),
             BackgroundTransparency = 1,
             Parent = self.Root,
         })
@@ -41,23 +44,10 @@ return function(ctx)
         local titleX = 14
         if cfg.Icon ~= nil then
             titleX = 40
-            local raw = tostring(cfg.Icon)
-            local isAsset = I.IsAssetId(cfg.Icon)
-            if isAsset then
-                self.IconImg = I.Create("ImageLabel", {
-                    Position = UDim2.fromOffset(14, 5),
-                    Size = UDim2.fromOffset(20, 20),
-                    BackgroundTransparency = 1,
-                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = titleBar,
-                })
-                I.Bind(self.IconImg, "ImageColor3", "SubText")
-            else
-                self.IconImg = I.Icon(titleBar, raw, "SubText")
-                self.IconImg.Position = UDim2.fromOffset(14, 5)
-                self.IconImg.Size = UDim2.fromOffset(20, 20)
-            end
+            self.IconImg = I.MkIcon(titleBar, cfg.Icon, {
+                Position = UDim2.fromOffset(14, 5),
+                Size = UDim2.fromOffset(20, 20),
+            })
         end
 
         self._titleReserve = 130 + (titleX - 14)

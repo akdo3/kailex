@@ -24,12 +24,15 @@ return function(ctx)
     I.ClampWindowToScreen = ClampToScreen
     I.ClampFloat = ClampToScreen
 
+    local function isPrimary(t)
+        return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+    end
+
     local function BeginDrag(input, handle, opts)
         opts = opts or {}
         if DragManager.Active ~= nil then return nil end
         local inputType = input.UserInputType
-        if inputType ~= Enum.UserInputType.MouseButton1
-            and inputType ~= Enum.UserInputType.Touch then return nil end
+        if not isPrimary(inputType) then return nil end
 
         local key = opts.ManagerKey or handle
         local threshold = tonumber(opts.Threshold) or 0
@@ -67,8 +70,9 @@ return function(ctx)
         if opts.OnStart then I.SafeCall(opts.OnStart) end
 
         maid:Give(UserInputService.InputEnded:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1
-                or inp.UserInputType == Enum.UserInputType.Touch then
+            if inp == input
+                or (inputType == Enum.UserInputType.MouseButton1
+                    and inp.UserInputType == Enum.UserInputType.MouseButton1) then
                 finish()
             end
         end))
@@ -76,7 +80,7 @@ return function(ctx)
             maid:Give(handle.Destroying:Connect(finish))
         end
         maid:Give(RunService.Heartbeat:Connect(function()
-            if not I.IsInputDown(inputType) then finish() end
+            if not I.IsInputDown(input) then finish() end
         end))
 
         if type(opts.OnFrame) == "function" then
@@ -103,11 +107,15 @@ return function(ctx)
             end
             maid:Give(UserInputService.InputChanged:Connect(function(inp)
                 if finished then return end
-                if inp.UserInputType == Enum.UserInputType.MouseMovement
-                    or inp.UserInputType == Enum.UserInputType.Touch then
+                if inp.UserInputType == Enum.UserInputType.MouseMovement then
                     tryMove(inp.Position)
                 end
             end))
+            if inputType == Enum.UserInputType.Touch then
+                maid:Give(input.Changed:Connect(function()
+                    if not finished then tryMove(input.Position) end
+                end))
+            end
             if threshold <= 0 then opts.OnMove(input.Position) end
         end
 

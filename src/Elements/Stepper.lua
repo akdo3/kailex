@@ -9,11 +9,11 @@ return function(ctx)
         opts = opts or {}
         local self = setmetatable({}, Elements.Stepper)
         local saveKey = tab:GetSaveKey(opts)
-        local min, max, step, decimals = I.NumSpec(opts, 0, 10, 1)
+        local min, max, step, decimals, snap = I.NumSpec(opts, 0, 10, 1)
         local default = tonumber(opts.Default or min) or min
         local value = I.SaveManager:Get(saveKey, default)
         if type(value) ~= "number" then value = default end
-        value = math.clamp(value, min, max)
+        value = snap(value)
 
         local fmt = opts.Format
         if type(fmt) ~= "function" then
@@ -34,12 +34,7 @@ return function(ctx)
             labelW = math.clamp(math.floor(w + 0.5) + 10, 48, 170)
         end
         local rightW = 68 + labelW
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Stepper", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Stepper", rightW)
         self.Callback = opts.Callback or function() end
 
         local function mkStepBtn(text, order)
@@ -91,7 +86,7 @@ return function(ctx)
         end
 
         local function bindHold(btn, dir)
-            btn.InputBegan:Connect(function(input)
+            self.Maid:Give(btn.InputBegan:Connect(function(input)
                 if input.UserInputType ~= Enum.UserInputType.MouseButton1
                     and input.UserInputType ~= Enum.UserInputType.Touch then return end
                 if self._disabled then return end
@@ -110,7 +105,7 @@ return function(ctx)
                 end))
                 hMaid:Give(btn.Destroying:Connect(stop))
                 hMaid:Give(I.RunService.Heartbeat:Connect(function()
-                    if not I.IsInputDown(input.UserInputType) then stop() end
+                    if not I.IsInputDown(input) then stop() end
                 end))
                 task.delay(0.45, function()
                     if not holding then return end
@@ -119,7 +114,7 @@ return function(ctx)
                         task.wait(0.09)
                     end
                 end)
-            end)
+            end))
         end
         bindHold(minus, -1)
         bindHold(plus, 1)

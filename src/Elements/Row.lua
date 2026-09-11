@@ -31,20 +31,21 @@ return function(ctx)
             Size = UDim2.new(1, -rightW, 1, 0),
             Parent = row,
         })
-        local title
+
+        local title = I.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = desc and UDim2.new(1, -4, 0, 15) or UDim2.new(1, -4, 1, 0),
+            Position = desc and UDim2.new(0, 0, 0, 2) or UDim2.fromOffset(0, 0),
+            Font = Enum.Font.GothamMedium,
+            TextSize = 13,
+            TextColor3 = I.CurrentTheme.Text,
+            TextXAlignment = I.XAlign(),
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = opts.Name or "",
+            Parent = leftFrame,
+        })
+
         if desc then
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 0, 15),
-                Position = UDim2.new(0, 0, 0, 2),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = I.XAlign(),
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
             local descLabel = I.Create("TextLabel", {
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, -4, 0, 13),
@@ -58,21 +59,9 @@ return function(ctx)
                 Text = desc,
                 Parent = leftFrame,
             })
+
             descLabel.Name = "__desc"
             I.Bind(descLabel, "TextColor3", "SubText")
-        else
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 1, 0),
-                Position = UDim2.fromOffset(0, 0),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = I.XAlign(),
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
         end
         I.Bind(title, "TextColor3", "Text")
 

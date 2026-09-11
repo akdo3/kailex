@@ -2,15 +2,16 @@ return function(ctx)
     local I = ctx.Internal
     local UserInputService = I.UserInputService
 
-    local function IsInputDown(inputType)
-        if inputType == Enum.UserInputType.Touch then
-            local ok, touches = pcall(UserInputService.GetTouches, UserInputService)
-            return ok and #touches > 0 or false
+    local function IsInputDown(inp)
+        local t = inp.UserInputType
+        if t == Enum.UserInputType.Touch then
+            local st = inp.UserInputState
+            return st == Enum.UserInputState.Begin or st == Enum.UserInputState.Change
         end
-        if inputType == Enum.UserInputType.MouseButton1
-            or inputType == Enum.UserInputType.MouseButton2
-            or inputType == Enum.UserInputType.MouseButton3 then
-            return UserInputService:IsMouseButtonPressed(inputType)
+        if t == Enum.UserInputType.MouseButton1
+            or t == Enum.UserInputType.MouseButton2
+            or t == Enum.UserInputType.MouseButton3 then
+            return UserInputService:IsMouseButtonPressed(t)
         end
         return true
     end
@@ -36,6 +37,7 @@ return function(ctx)
         local s = tostring(text or "")
         s = s:gsub('[%c/\\:"<>|*?]', "")
         s = s:gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:sub(1, 64)
         if s == "" then s = "Untitled" end
         return s
     end
@@ -55,6 +57,24 @@ return function(ctx)
         local r, g, b = tonumber(h:sub(1,2), 16), tonumber(h:sub(3,4), 16), tonumber(h:sub(5,6), 16)
         if r and g and b then return Color3.fromRGB(r, g, b) end
         return nil
+    end
+
+    local function RemoveFrom(list, item)
+        local idx = table.find(list, item)
+        if idx then table.remove(list, idx) end
+    end
+
+    local function Trim(s)
+        return tostring(s):match("^%s*(.-)%s*$")
+    end
+
+    local function SetBoxDisabled(boxes, state)
+        local v = state == true
+        for _, b in ipairs(boxes) do
+            b.TextEditable = not v
+            b.Active = not v
+            if v then pcall(function() b:ReleaseFocus() end) end
+        end
     end
 
     local function RGBtoHSV(c)
@@ -160,6 +180,9 @@ return function(ctx)
     I.ColorToHex = ColorToHex
     I.HexToColor = HexToColor
     I.RGBtoHSV = RGBtoHSV
+    I.RemoveFrom = RemoveFrom
+    I.Trim = Trim
+    I.SetBoxDisabled = SetBoxDisabled
     local function XAlign()
         return I.Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left
     end

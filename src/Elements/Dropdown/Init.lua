@@ -47,9 +47,7 @@ return function(ctx)
         function self:Set(v, silent)
             if self._destroyed then return end
             View.setSelection(S, (S.multi and type(v) == "table") and v or { v })
-            View.saveSelection(S)
-            View.refreshOptions(S)
-            View.refreshLabel(S)
+            S.commitSel()
             if not silent then I.RunCallback(self.Callback, self.Title, self:Get()) end
         end
 
@@ -86,9 +84,7 @@ return function(ctx)
                 defaults = (opts.Default ~= nil) and { opts.Default } or {}
             end
             View.setSelection(S, defaults)
-            View.saveSelection(S)
-            View.refreshOptions(S)
-            View.refreshLabel(S)
+            S.commitSel()
             I.RunCallback(self.Callback, self.Title, self:Get())
         end
 

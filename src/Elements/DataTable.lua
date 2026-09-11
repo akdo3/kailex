@@ -17,12 +17,7 @@ return function(ctx)
         end
 
         local bodyH = tonumber(opts.Height) or 200
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Table", Height = bodyH, RightWidth = 0, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, 0, 0)
+        local _, _, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
@@ -72,7 +67,7 @@ return function(ctx)
                         local an, bn = tonumber(av), tonumber(bv)
                         if asc then return an < bn else return an > bn end
                     end
-                    av, bv = tostring(av), tostring(bv)
+                    av, bv = tostring(av or ""), tostring(bv or "")
                     if asc then return av < bv else return av > bv end
                 end)
             end

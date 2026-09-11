@@ -40,8 +40,7 @@ return function(ctx)
         local x, y = m.X + 14, m.Y + 18
         if x + tipW > I.Viewport.X - 8 then x = m.X - tipW - 14 end
         if y + tipH > I.Viewport.Y - 8 then y = m.Y - tipH - 16 end
-        if x < 8 then x = 8 end
-        if y < 8 then y = 8 end
+        x, y = math.max(x, 8), math.max(y, 8)
         frame.Position = UDim2.fromOffset(x / s, y / s)
     end
 
@@ -100,11 +99,7 @@ return function(ctx)
                 Tooltip.Hide()
             end)
         else
-            obj.MouseEnter:Connect(function()
-                local text = getText()
-                if not text or text == "" then return end
-                Tooltip.Show(text)
-            end)
+            obj.MouseEnter:Connect(function() Tooltip.Show(getText()) end)
             obj.MouseLeave:Connect(Tooltip.Hide)
         end
         obj.Destroying:Connect(Tooltip.Hide)

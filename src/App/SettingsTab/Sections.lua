@@ -34,10 +34,13 @@ return function(ctx)
             Callback = function()
                 local n = themeNameInput:Get()
                 if n == "" then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Enter a theme name first.", Type = "Warning" })
+                    I.Note("Theme Editor", "Enter a theme name first.", "Warning")
                     return
                 end
-                Kailex:RegisterTheme(n, editing.colors)
+                if not Kailex:RegisterTheme(n, editing.colors) then
+                    I.Note("Theme Editor", "Built-in theme names cannot be overwritten.", "Warning")
+                    return
+                end
                 Kailex:SaveCustomThemes()
                 Setting.Theme = n
                 I.SaveManager:Set("__theme", n)
@@ -56,7 +59,7 @@ return function(ctx)
                     cp:Set(editing.colors[cp.ThemeKey], true)
                 end
                 I.ApplyTheme(editing.colors)
-                Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
+                I.Note("Theme Editor", "Edits reverted to \"" .. Setting.Theme .. "\".")
             end,
         })
 
@@ -78,7 +81,7 @@ return function(ctx)
             Callback = function()
                 local raw = I.ReadClipboard()
                 if not raw then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
+                    I.Note("Theme Editor", "Clipboard is not available on this executor.", "Error")
                     return
                 end
                 local data = nil
@@ -87,7 +90,7 @@ return function(ctx)
                     if okDecode and type(decoded) == "table" then data = decoded end
                 end
                 if not data then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard does not contain a valid theme.", Type = "Warning" })
+                    I.Note("Theme Editor", "Clipboard does not contain a valid theme.", "Warning")
                     return
                 end
                 for _, key in ipairs(I.ThemeKeys) do
@@ -101,7 +104,7 @@ return function(ctx)
                     cp:Set(editing.colors[cp.ThemeKey], true)
                 end
                 I.ApplyTheme(editing.colors)
-                Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
+                I.Note("Theme Editor", "Theme imported from clipboard.", "Success")
             end,
         })
     end
@@ -119,16 +122,16 @@ return function(ctx)
             Callback = function()
                 local n = nameInput:Get()
                 if n == "" then
-                    Kailex:Notify({ Title = "Profiles", Text = "Enter a profile name first.", Type = "Warning" })
+                    I.Note("Profiles", "Enter a profile name first.", "Warning")
                     return
                 end
                 I.SaveManager:Flush()
                 if I.Configs:Save(n) then
                     refreshProfiles()
                     profDrop:Set(n, true)
-                    Kailex:Notify({ Title = "Profiles", Text = "Saved \"" .. n .. "\".", Type = "Success" })
+                    I.Note("Profiles", "Saved \"" .. n .. "\".", "Success")
                 else
-                    Kailex:Notify({ Title = "Profiles", Text = "Saving files is not supported here.", Type = "Error" })
+                    I.Note("Profiles", "Saving files is not supported here.", "Error")
                 end
             end,
         })
@@ -139,9 +142,9 @@ return function(ctx)
                 local n = profDrop:Get()
                 if not n then return end
                 if I.Configs:Load(n) then
-                    Kailex:Notify({ Title = "Profiles", Text = "Loaded \"" .. n .. "\".", Type = "Success" })
+                    I.Note("Profiles", "Loaded \"" .. n .. "\".", "Success")
                 else
-                    Kailex:Notify({ Title = "Profiles", Text = "Could not load that profile.", Type = "Error" })
+                    I.Note("Profiles", "Could not load that profile.", "Error")
                 end
             end,
         })
@@ -157,7 +160,7 @@ return function(ctx)
                 }, function()
                     I.Configs:Delete(n)
                     refreshProfiles()
-                    Kailex:Notify({ Title = "Profiles", Text = "Deleted \"" .. n .. "\"." })
+                    I.Note("Profiles", "Deleted \"" .. n .. "\".")
                 end)
             end,
         })

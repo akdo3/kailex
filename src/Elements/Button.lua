@@ -12,12 +12,7 @@ return function(ctx)
         local rightW = 0
         if hasIcon then rightW += 26 end
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Button", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW, 0)
+        local row, _, right = I.MkRow(self, tab, opts, "Button", rightW, nil, 0)
         self.Callback = opts.Callback or function() end
 
         local overlay = I.Create("TextButton", {
@@ -30,10 +25,10 @@ return function(ctx)
 
         local function fire()
             if self._disabled then return end
-                I.ApplyRipple(overlay)
-                I.PlaySound("Click")
-                I.RunCallback(self.Callback, self.Title)
-            end
+            I.ApplyRipple(overlay)
+            I.PlaySound("Click")
+            I.RunCallback(self.Callback, self.Title)
+        end
 
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if overlay:GetAttribute("Dragging") then return end
@@ -50,24 +45,15 @@ return function(ctx)
                 LayoutOrder = 1,
                 Parent = right,
             })
-            local raw = tostring(opts.Icon)
-            local isAsset = I.IsAssetId(opts.Icon)
-            if isAsset then
-                local img = I.Create("ImageLabel", {
-                    BackgroundTransparency = 1,
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.fromScale(0.5, 0.5),
-                    Size = UDim2.fromOffset(16, 16),
-                    Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = iconBtn,
-                })
-                I.Bind(img, "ImageColor3", "SubText")
+            local img = I.MkIcon(iconBtn, opts.Icon, {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(16, 16),
+            })
+            if img:IsA("ImageLabel") then
                 self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
                 self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
-                else
-                    I.Icon(iconBtn, raw, "SubText", 16)
-                end
+            end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 

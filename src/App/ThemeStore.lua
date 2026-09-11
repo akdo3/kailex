@@ -10,7 +10,7 @@ return function(ctx)
 
     function Kailex:RegisterTheme(name, colors)
         name = tostring(name or "")
-        if name == "" then return nil end
+        if name == "" or I.BuiltinThemes[name] then return nil end
         local t = table.clone(I.Themes[name] or I.Themes.Nocturne)
         for _, k in ipairs(I.ThemeKeys) do
             local c = colors and colors[k]
@@ -27,7 +27,7 @@ return function(ctx)
 
     function Kailex:RemoveTheme(name)
         name = tostring(name)
-        if I.Themes[name] then
+        if I.Themes[name] and not I.BuiltinThemes[name] then
             I.Themes[name] = nil
             if I.Setting.Theme == name then
                 I.Setting.Theme = "Nocturne"

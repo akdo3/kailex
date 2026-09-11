@@ -64,12 +64,7 @@ return function(ctx)
         I.Tween(h.Dimmer, "Normal", { BackgroundTransparency = 0.5 })
         I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
         I.Tween(h.Scale, "Pop", { Scale = 1 })
-        if h.Shadow then
-            h.Shadow.SetFade(1)
-            task.delay(0.1, function()
-                if not closed and h.Shadow then h.Shadow.SetFade(0) end
-            end)
-        end
+        I.ShadowIn(h.Shadow, function() return not closed end)
         return h
     end
 
@@ -128,12 +123,7 @@ return function(ctx)
             if h.Scale then h.Scale.Scale = 0.94 end
             I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
             if h.Scale then I.Tween(h.Scale, "Pop", { Scale = 1 }) end
-            if h.Shadow then
-                h.Shadow.SetFade(1)
-                task.delay(0.1, function()
-                    if open and h.Shadow then h.Shadow.SetFade(0) end
-                end)
-            end
+            I.ShadowIn(h.Shadow, function() return open end)
             h.Entry = I.ModalManager.Push(cfg.Owner, cfg.Closer or h.Hide)
         end
 
@@ -144,7 +134,7 @@ return function(ctx)
             h.Catcher.Visible = false
             if h.Shadow then h.Shadow.FadeOut() end
             if h.Scale then I.Tween(h.Scale, "Vanish", { Scale = 0.95 }) end
-        I.Tween(h.Card, "Fast", { GroupTransparency = 1 }, function()
+            I.Tween(h.Card, "Fast", { GroupTransparency = 1 }, function()
                 if not open then h.Card.Visible = false end
             end)
         end

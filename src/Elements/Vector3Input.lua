@@ -10,12 +10,7 @@ return function(ctx)
         local saveKey = tab:GetSaveKey(opts)
         local rightW = 196
         local rowH = 60
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Vector3", RightWidth = rightW, Width = opts.Width,
-            Height = rowH, Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local _, _, right = I.MkRow(self, tab, opts, "Vector3", rightW, rowH)
         self.Callback = opts.Callback or function() end
 
         local function load()
@@ -50,7 +45,7 @@ return function(ctx)
             I.Bind(b, "BackgroundColor3", "SurfaceLight")
             I.Bind(b, "TextColor3", "Text")
             boxes[i] = b
-            b.FocusLost:Connect(function()
+            self.Maid:Give(b.FocusLost:Connect(function()
                 local n = tonumber((b.Text:gsub(",", ".")))
                 if n then
                     local c = { value.X, value.Y, value.Z }
@@ -59,7 +54,7 @@ return function(ctx)
                 else
                     b.Text = string.format("%.2f", ({value.X, value.Y, value.Z})[i])
                 end
-            end)
+            end))
         end
 
         function self:Set(v, silent)
@@ -88,12 +83,7 @@ return function(ctx)
 
         function self:SetDisabled(state)
             I.Element.SetDisabled(self, state)
-            local v = state == true
-            for i = 1, 3 do
-                boxes[i].TextEditable = not v
-                boxes[i].Active = not v
-                if v then pcall(function() boxes[i]:ReleaseFocus() end) end
-            end
+            I.SetBoxDisabled(boxes, state)
         end
 
         self:_bindSaveReload(saveKey, function(v)

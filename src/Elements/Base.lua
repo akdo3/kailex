@@ -1,6 +1,5 @@
 return function(ctx)
     local I = ctx.Internal
-    local Setting = I.Setting
     local UserInputService = I.UserInputService
 
     local Elements = {}
@@ -10,10 +9,19 @@ return function(ctx)
     Element.__index = Element
     I.Element = Element
 
-    local function removeFrom(list, item)
-        local idx = table.find(list, item)
-        if idx then table.remove(list, idx) end
+    local function MkRow(self, tab, opts, name, rightW, height, width)
+        local cfg = {
+            Name = opts.Name or name, RightWidth = rightW, Width = opts.Width,
+            Description = opts.Description,
+        }
+        if height then cfg.Height = height end
+        local row, title, right, left = I.CreateRow(tab.Content, cfg)
+        self:_init(row, opts, tab)
+        self:_initRow(title, right, left, rightW, width)
+        return row, title, right, left
     end
+
+    local removeFrom = I.RemoveFrom
 
     function Element:_init(row, opts, tab)
         opts = opts or {}
@@ -63,31 +71,6 @@ return function(ctx)
         task.defer(function()
             if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
         end)
-    end
-
-    function Element:EnsureRight()
-        if self._destroyed then return nil end
-        if self.RightContainer then return self.RightContainer end
-        if not self.Row or not self.Row.Parent then return nil end
-        local right = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
-            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
-            Size = UDim2.new(0, 0, 1, -4),
-            Parent = self.Row,
-            Children = {
-                I.Create("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = I.HAlign(),
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, 8),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }),
-            },
-        })
-        self.RightContainer = right
-        self:RecalcWidth()
-        return right
     end
 
     function Element:SetTitle(text)
@@ -144,78 +127,6 @@ return function(ctx)
         end
     end
 
-    function Element:AddExtra(className, opts)
-        if self._destroyed then return nil end
-        if not self.Tab then return nil end
-        local elClass = Elements[className]
-        if not elClass then return nil end
-        local rc = self:EnsureRight()
-        if not rc then return nil end
-        opts = opts or {}
-        if self.Tab and self.Tab._pendingKeyRelease then
-            self.Tab._pendingKeyRelease = nil
-        end
-        local el = elClass.new(self.Tab, opts)
-        if self.Tab and self.Tab._consumeKeyRelease then
-            self.Tab:_consumeKeyRelease(el)
-        end
-
-        local row = el.Row
-        local pad = row:FindFirstChildOfClass("UIPadding")
-        if pad then pad:Destroy() end
-        row.BackgroundTransparency = 1
-        row:SetAttribute("NoHoverFX", true)
-        local rowStroke = row:FindFirstChildOfClass("UIStroke")
-        if rowStroke then rowStroke.Transparency = 1 end
-        if el.LeftFrame then
-            el.LeftFrame.Size = UDim2.new(0, 0, 1, 0)
-        end
-        if el.TitleLabel and el.TitleLabel:IsA("TextLabel") then
-            el.TitleLabel.Visible = false
-        end
-        if el.RightContainer then
-            el.RightContainer.AnchorPoint = Vector2.new(0, 0.5)
-            el.RightContainer.Position = UDim2.new(0, 0, 0.5, 0)
-            el.RightContainer.Size = UDim2.new(1, 0, 1, 0)
-        end
-
-        row.Parent = rc
-        row.LayoutOrder = (#self._extras + 1) + 10
-        row.Size = UDim2.new(0, el._width or 0, 0, el._extraH or I.ROW_H)
-
-        removeFrom(self.Tab.Elements, el)
-        if el.Section then
-            removeFrom(el.Section.Elements, el)
-            el.Section = nil
-        end
-
-        table.insert(self._extras, el)
-        self._extraW = (self._extraW or 0) + (el._width or 0)
-        self:RecalcWidth()
-
-        el.Maid:Give(function()
-            if self._destroyed then return end
-            removeFrom(self._extras, el)
-            self._extraW = math.max(0, (self._extraW or 0) - (el._width or 0))
-            self:RecalcWidth()
-        end)
-
-        return el
-    end
-
-    function Element:AddToggle(opts)
-        if self._destroyed then return nil end
-        if self.AttachedToggle then return self.AttachedToggle end
-        opts = opts or {}
-        local tg = self:AddExtra("Toggle", opts)
-        if not tg then return nil end
-        self.AttachedToggle = tg
-        self.Enabled = tg.Changed
-        function self:IsEnabled() return tg:Get() == true end
-        function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
-        return tg
-    end
-
     function Element:_contextItems()
         local items = {}
         if self.CopyValue then
@@ -234,14 +145,14 @@ return function(ctx)
         return items
     end
 
-    local function HookContextMenu(el, overlay)
+    local function HookContextMenu(el, overlay, alive)
         local function open()
             local items = el:_contextItems()
             if #items == 0 then return false end
             local m = UserInputService:GetMouseLocation()
             I.ContextMenu.Show(items, m.X, m.Y)
         end
-        I.OnLongPress(overlay, function() return not el._destroyed end, open)
+        I.OnLongPress(overlay, alive or function() return not el._destroyed end, open)
     end
     I.HookContextMenu = HookContextMenu
 
@@ -249,13 +160,13 @@ return function(ctx)
         if self._destroyed then return end
         self._destroyed = true
         if I.HotElement == self then I.HotElement = nil end
-            local tab = self.Tab
-            if tab then
-                removeFrom(tab.Elements, self)
-                if self.Section then
-                    removeFrom(self.Section.Elements, self)
-                end
+        local tab = self.Tab
+        if tab then
+            removeFrom(tab.Elements, self)
+            if self.Section then
+                removeFrom(self.Section.Elements, self)
             end
+        end
         for _, ex in ipairs(self._extras) do
             if not ex._destroyed then ex:Destroy() end
         end
@@ -280,4 +191,5 @@ return function(ctx)
         return class
     end
     I.MakeElementClass = MakeElementClass
+    I.MkRow = MkRow
 end

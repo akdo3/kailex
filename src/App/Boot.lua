@@ -2,6 +2,7 @@ return function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
+    local genv = I.Getgenv()
     local unloaded = false
 
     function Kailex:Unload()
@@ -10,17 +11,18 @@ return function(ctx)
         pcall(function() I.SaveManager:Flush() end)
         I.ModalManager.CloseAll()
         pcall(function() I.ContextMenu.Hide() end)
-        for el in pairs(I.QuickWidgets.Active) do I.QuickWidgets.Destroy(el) end
+        for el in pairs(I.QuickWidgets.Active) do
+            pcall(I.QuickWidgets.Destroy, el)
+        end
         for i = #Kailex.Windows, 1, -1 do
             local w = Kailex.Windows[i]
             if w and w.Destroy then pcall(w.Destroy, w) end
         end
-        I.Tooltip.Hide()
+        pcall(function() I.Tooltip.Hide() end)
         I.HotElement = nil
         I.ActiveKeybindListener = nil
         I.LibMaid:Destroy()
         pcall(function() I.ScreenGui:Destroy() end)
-        local genv = I.Getgenv()
         if genv and genv.kailex == Kailex then genv.kailex = nil end
     end
 
@@ -94,6 +96,5 @@ return function(ctx)
         I.LibMaid:Destroy()
     end))
 
-    local genv = I.Getgenv()
     if genv then genv.kailex = Kailex end
 end

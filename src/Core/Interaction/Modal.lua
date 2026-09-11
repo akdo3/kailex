@@ -11,13 +11,8 @@ return function(ctx)
     end
 
     function ModalManager.Remove(entry)
-        if not entry then return end
-        for i = #ModalManager.Stack, 1, -1 do
-            if ModalManager.Stack[i] == entry then
-                table.remove(ModalManager.Stack, i)
-                return
-            end
-        end
+        local idx = table.find(ModalManager.Stack, entry)
+        if idx then table.remove(ModalManager.Stack, idx) end
     end
 
     function ModalManager.CloseAll(owner)

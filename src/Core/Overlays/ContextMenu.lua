@@ -15,11 +15,10 @@ return function(ctx)
     local function paintHl(idx, on)
         local b = buttons[idx]
         if not b then return end
-        if on then
-            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.ElementHover, BackgroundTransparency = 0.4 })
-        else
-            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.Element, BackgroundTransparency = 1 })
-        end
+        I.Tween(b, "Instant", {
+            BackgroundColor3 = on and I.CurrentTheme.ElementHover or I.CurrentTheme.Element,
+            BackgroundTransparency = on and 0.4 or 1,
+        })
     end
 
     local function setHl(idx)
@@ -147,10 +146,7 @@ return function(ctx)
                 actions[idx] = item.Callback
                 btn.MouseEnter:Connect(function() setHl(idx) end)
                 btn.MouseButton1Click:Connect(function()
-                    ContextMenu.Hide()
-                    if type(item.Callback) == "function" then
-                        task.defer(function() I.SafeCall(item.Callback) end)
-                    end
+                    activate(idx)
                 end)
                 totalH += 28
             end
@@ -163,12 +159,7 @@ return function(ctx)
         frame.Position = UDim2.fromOffset(px / s, py / s)
         frame.Visible = true
         catcher.Visible = true
-        if shadow then
-            shadow.SetFade(1)
-            task.delay(0.08, function()
-                if frame.Visible and shadow then shadow.SetFade(0) end
-            end)
-        end
+        I.ShadowIn(shadow, function() return frame.Visible end, 0.08)
         I.ModalManager.Remove(entry)
         local tk = hideToken
         entry = I.ModalManager.Push(nil, function()

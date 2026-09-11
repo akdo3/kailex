@@ -32,9 +32,7 @@ return function(ctx)
                 Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
             })
             I.Once(r.Destroying, function()
-                for i, x in ipairs(RipplePool) do
-                    if x == r then table.remove(RipplePool, i) break end
-                end
+                I.RemoveFrom(RipplePool, r)
             end)
             table.insert(RipplePool, r)
             return r
@@ -47,9 +45,7 @@ return function(ctx)
         if not rpl then rpl = newRipple() end
 
         if not pcall(function() rpl.Parent = target end) then
-            for i, r in ipairs(RipplePool) do
-                if r == rpl then table.remove(RipplePool, i) break end
-            end
+            I.RemoveFrom(RipplePool, rpl)
             rpl = newRipple()
             rpl.Parent = target
         end

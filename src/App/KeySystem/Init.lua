@@ -9,11 +9,8 @@ return function(ctx)
         local opts = K.options
 
         if Logic.inList(K, opts.Blacklist, opts.CheckBlacklist) then
-            Kailex:Notify({
-                Title = "Access Denied",
-                Text = tostring(opts.BlacklistMessage or "You are not allowed to use this script."),
-                Type = "Error", Duration = 7,
-            })
+            I.Note("Access Denied",
+                tostring(opts.BlacklistMessage or "You are not allowed to use this script."), "Error", 7)
             if K.onBlacklisted then I.SafeCall(K.onBlacklisted, K.lpName) end
             Logic.handleDecline(K)
             return nil
@@ -21,11 +18,7 @@ return function(ctx)
 
         if Logic.inList(K, opts.Whitelist, opts.CheckWhitelist) then
             if opts.Silent ~= true then
-                Kailex:Notify({
-                    Title = "Key System",
-                    Text = "Welcome, " .. K.lpName .. " - you are whitelisted.",
-                    Type = "Success",
-                })
+                I.Note("Key System", "Welcome, " .. K.lpName .. " - you are whitelisted.", "Success")
             end
             I.SafeCall(K.onComplete, "WHITELISTED")
             return nil
@@ -36,11 +29,7 @@ return function(ctx)
             if type(savedKey) == "string" and savedKey ~= ""
                 and Logic.validateKey(K, savedKey) then
                 if opts.Silent ~= true then
-                    Kailex:Notify({
-                        Title = "Key System",
-                        Text = "Saved key accepted - welcome back.",
-                        Type = "Success",
-                    })
+                    I.Note("Key System", "Saved key accepted - welcome back.", "Success")
                 end
                 I.SafeCall(K.onComplete, savedKey)
                 return nil
@@ -103,7 +92,7 @@ return function(ctx)
 
         local function verify()
             if not K.alive then return end
-            local val = K.inputBox.Text:match("^%s*(.-)%s*$")
+            local val = I.Trim(K.inputBox.Text)
             if val ~= "" and Logic.validateKey(K, val) then
                 grantAccess(val)
             else
@@ -130,10 +119,14 @@ return function(ctx)
                 I.PlaySound("Click", 0.5)
                 local setc = I.GetClipboardSetter()
                 if setc then
-                    pcall(setc, tostring(K.link))
-                    View.setStatus(K, "Link copied to clipboard - get your key, then paste it.", "Success")
+                    if pcall(setc, tostring(K.link)) then
+                        View.setStatus(K, "Link copied to clipboard - get your key, then paste it.", "Success")
+                    else
+                        I.Note(K.title, tostring(K.link), nil, 10)
+                        View.setStatus(K, "Could not copy - the link is shown in the notifications.", "Error")
+                    end
                 else
-                    Kailex:Notify({ Title = K.title, Text = tostring(K.link), Duration = 10 })
+                    I.Note(K.title, tostring(K.link), nil, 10)
                     View.setStatus(K, "Link is shown in the notifications.")
                 end
             end))

@@ -16,15 +16,11 @@ return function(ctx)
             else
                 S.selSet[opt.Key] = true
             end
-            View.refreshOptions(S)
-            View.refreshLabel(S)
-            View.saveSelection(S)
+            S.commitSel()
             I.RunCallback(self.Callback, self.Title, self:Get())
         else
             S.selSet = { [opt.Key] = true }
-            View.refreshOptions(S)
-            View.refreshLabel(S)
-            I.SaveValue(S.saveKey, opt.Value)
+            S.commitSel()
             Actions.setExpanded(S, false)
             I.RunCallback(self.Callback, self.Title, self:Get())
         end
@@ -135,9 +131,22 @@ return function(ctx)
         end
         S.closeFn = function() Actions.setExpanded(S, false) end
 
+        S.commitSel = function()
+            View.saveSelection(S)
+            View.refreshOptions(S)
+            View.refreshLabel(S)
+        end
+
         S.keyHandler = function(input, gp)
             if not S.expanded then return end
-            if gp then return end
+            if gp then
+                local kc = input.KeyCode
+                if kc ~= Enum.KeyCode.Up and kc ~= Enum.KeyCode.Down
+                    and kc ~= Enum.KeyCode.Return and kc ~= Enum.KeyCode.KeypadEnter then
+                    return
+                end
+                if not S.searchBox or I.UserInputService:GetFocusedTextBox() ~= S.searchBox then return end
+            end
             if input.KeyCode == Enum.KeyCode.Up then
                 View.moveHl(S, -1)
             elseif input.KeyCode == Enum.KeyCode.Down then

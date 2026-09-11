@@ -18,12 +18,7 @@ return function(ctx)
         local usePin = opts.Pin == true
         local rightW = switchW + (usePin and 30 or 0)
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Toggle", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Toggle", rightW)
         self._extraH = switchH
 
         self.Callback = opts.Callback or function() end

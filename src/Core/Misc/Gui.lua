@@ -23,7 +23,7 @@ return function(ctx)
     I.LayerPersistent = LayerPersistent
 
     local RootScale = I.Create("UIScale", { Parent = ScreenGui })
-    local Camera = Workspace.CurrentCamera
+    local Camera = nil
     I.Viewport = Vector2.new(1920, 1080)
 
     local ViewportHooks = {}
@@ -53,6 +53,7 @@ return function(ctx)
         Camera = cam
         if cam then
             CameraConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateViewport)
+            UpdateViewport()
         end
     end
     BindCamera(Workspace.CurrentCamera)
@@ -68,6 +69,7 @@ return function(ctx)
     I.LayerOverlay = LayerOverlay
     I.LayerNotify = LayerNotify
     I.LayerTooltip = LayerTooltip
+    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerNotify, LayerTooltip }
     I.GetScale = GetScale
     I.UpdateViewport = UpdateViewport
 end

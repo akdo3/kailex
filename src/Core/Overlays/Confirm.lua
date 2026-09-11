@@ -44,17 +44,26 @@ return function(ctx)
             if closed then return end
 
             closed = true
-            h.Close()
+            if h then h.Close() end
 
-            if accepted then I.RunCallback(data.OnAccept, data.Title or "Confirm", true) end
-            if not accepted then I.RunCallback(data.OnDecline, data.Title or "Confirm", false) end
+            I.RunCallback(accepted and data.OnAccept or data.OnDecline, data.Title or "Confirm", accepted)
         end
 
-        h = I.ModalCard.OpenCenter({
+        local ok
+        ok, h = pcall(I.ModalCard.OpenCenter, {
             Size = UDim2.fromOffset(360, cardH),
             OnDimmerClick = function() close(false) end,
             Closer = function() close(false) end,
         })
+        if not ok then
+            warn("[Kailex] " .. tostring(h))
+            h = nil
+        end
+        if not h then
+            ModalActive = false
+            tryRunNext()
+            return nil
+        end
 
         local card = h.Card
         h.Maid:Give(function()
@@ -122,29 +131,17 @@ return function(ctx)
         })
 
         local function mkBtn(text, accent, order)
-            local b = I.Create("TextButton", {
+            return I.MkButton(btnRow, {
                 Size = UDim2.new(0.5, -4, 1, 0),
-                BackgroundColor3 = accent and I.CurrentTheme.Accent or I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = text,
                 Font = Enum.Font.GothamBold,
                 TextSize = 12,
-                TextColor3 = accent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
-                AutoButtonColor = false,
                 LayoutOrder = order,
-                ZIndex = 42, Parent = btnRow,
-                Children = { I.Corner(8) },
-            })
-            if accent then
-                I.Bind(b, "BackgroundColor3", "Accent")
-                I.Bind(b, "TextColor3", "OnAccent")
-                I.AddHover(b, { HoverKey = "AccentHover", BaseKey = "Accent" })
-            else
-                I.Bind(b, "BackgroundColor3", "Element")
-                I.Bind(b, "TextColor3", "Text")
-                I.AddHover(b)
-            end
-            return b
+                ZIndex = 42,
+            }, accent and {
+                Bg = "Accent", Text = "OnAccent",
+                Hover = { HoverKey = "AccentHover", BaseKey = "Accent" },
+            } or nil)
         end
 
         local decline = mkBtn(data.DeclineText or data.CancelText or "Cancel", false, 1)

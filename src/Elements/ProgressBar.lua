@@ -12,13 +12,9 @@ return function(ctx)
         local showText = opts.ShowText ~= false
         local rightW = barW + (showText and 36 or 0)
         local maxValue = tonumber(opts.Max) or 1
+        if maxValue <= 0 then maxValue = 1 end
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Progress", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local _, _, right = I.MkRow(self, tab, opts, "Progress", rightW)
         self.Callback = opts.Callback or nil
 
         local track = I.Create("Frame", {

@@ -1,7 +1,7 @@
 return function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
-    local RGB = function(r, g, b) return Color3.fromRGB(r, g, b) end
+    local RGB = Color3.fromRGB
 
     local Themes = {
         Nocturne = {

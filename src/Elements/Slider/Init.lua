@@ -24,7 +24,7 @@ return function(ctx)
 
         local value = I.SaveManager:Get(S.saveKey, default)
         if type(value) ~= "number" then value = default end
-        S.value = math.clamp(value, min, max)
+        S.value = snapValue(value)
 
         S.prefix = opts.Prefix and tostring(opts.Prefix) or nil
         S.suffix = opts.Suffix and tostring(opts.Suffix) or nil
@@ -95,7 +95,7 @@ return function(ctx)
         self.Maid:Give(S.hit.MouseButton2Click:Connect(resetToDefault))
         function self:Reset() resetToDefault() end
 
-        S.hit.InputBegan:Connect(function(input)
+        self.Maid:Give(S.hit.InputBegan:Connect(function(input)
             if S.dragging or I.DragManager.Active then return end
             if self._disabled then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
@@ -145,14 +145,14 @@ return function(ctx)
             if not drag then
                 S.dragging = false
             end
-        end)
+        end))
 
-        S.track.MouseEnter:Connect(function()
+        self.Maid:Give(S.track.MouseEnter:Connect(function()
             if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(16, 16) }) end
-        end)
-        S.track.MouseLeave:Connect(function()
+        end))
+        self.Maid:Give(S.track.MouseLeave:Connect(function()
             if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(14, 14) }) end
-        end)
+        end))
 
         self.Maid:Give(S.box.FocusLost:Connect(function()
             local t = tostring(S.box.Text or "")

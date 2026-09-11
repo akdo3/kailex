@@ -36,9 +36,7 @@ return function(ctx)
     local function Tween(inst, preset, props, done)
         if not inst or not inst.Parent then return nil end
         if type(props) ~= "table" then return nil end
-        local info = Tweens[preset]
-        if typeof(preset) == "TweenInfo" then info = preset end
-        info = ScaledInfo(info)
+        local info = ScaledInfo(typeof(preset) == "TweenInfo" and preset or Tweens[preset])
 
         local book = ActiveTweens[inst]
         if not book then book = {} ActiveTweens[inst] = book end

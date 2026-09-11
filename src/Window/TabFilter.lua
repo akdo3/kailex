@@ -86,7 +86,7 @@ return function(ctx)
                     secVis = secMatch or childMatch > 0
                 end
                 sec.Row.Visible = secVis
-                matches += childMatch
+                matches += childMatch + (secMatch and 1 or 0)
             end
         end
         self:_syncGridFrames()
@@ -97,7 +97,8 @@ return function(ctx)
         if not q or q == "" then return 0 end
         local n = 0
         for _, el in ipairs(self.Elements) do
-            if not el._destroyed and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
+            if not el._destroyed and el.Section == nil
+                and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
         end
         for _, sec in ipairs(self.Sections) do
             if not sec._destroyed then

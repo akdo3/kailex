@@ -5,21 +5,21 @@ return {
     "Core/Services/Env",
     "Core/Primitives/Signal", "Core/Primitives/Maid", "Core/Primitives/Root", "Core/Primitives/Utils",
     "Core/Interaction/Input",
-    "Core/Rendering/Tween", "Core/Rendering/Theme", "Core/Rendering/Instance", "Core/Rendering/Icon",
+    "Core/Rendering/Tween", "Core/Rendering/Theme", "Core/Rendering/Instance", "Core/Rendering/Decor", "Core/Rendering/Icon",
     "Core/Services/Save", "Core/Services/Sound", "Core/Misc/Gui",
     "Core/Interaction/Modal", "Core/Interaction/Drag", "Core/Interaction/Ripple", "Core/Rendering/FX",
-    "Core/Overlays/Tooltip", "Core/Overlays/Notify", "Core/Overlays/NotifyCards", "Core/Misc/Callbacks",
+    "Core/Overlays/Tooltip", "Core/Overlays/Notify", "Core/Overlays/NotifyProcess", "Core/Overlays/NotifyCards", "Core/Misc/Callbacks",
     "Core/Overlays/ModalCard",
     "Core/Overlays/Confirm", "Core/Misc/QuickWidgets", "Core/Overlays/ContextMenu",
-    "Elements/Base", "Elements/Row",
+    "Elements/Base", "Elements/Extras", "Elements/Row",
     "Elements/Label", "Elements/Paragraph", "Elements/Divider", "Elements/Section", "Elements/Button", "Elements/Toggle",
-    "Elements/Slider/View", "Elements/Slider/Init", "Elements/Keybind",
-    "Elements/Dropdown/View", "Elements/Dropdown/Virtual", "Elements/Dropdown/Actions", "Elements/Dropdown/Init",
+    "Elements/Slider/View", "Elements/Slider/Init", "Elements/Keybind/Input", "Elements/Keybind/Init",
+    "Elements/Dropdown/View", "Elements/Dropdown/Paint", "Elements/Dropdown/Virtual", "Elements/Dropdown/Actions", "Elements/Dropdown/Init",
     "Elements/TextInput",
     "Elements/ColorPicker/View", "Elements/ColorPicker/Init",
     "Elements/ProgressBar", "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
-    "Window/Class", "Window/Chrome", "Window/Search", "Window/Layout", "Window/State", "Window/Placement",
-    "Window/GridRow", "Window/Tab", "Window/TabFilter", "Window/Init",
+    "Window/Chrome", "Window/Search", "Window/Layout", "Window/State", "Window/Placement",
+    "Window/GridRow", "Window/Tab", "Window/TabTrack", "Window/TabFilter", "Window/Create", "Window/Init",
     "App/MobileButton",
     "App/KeySystem/Logic", "App/KeySystem/View", "App/KeySystem/Init",
     "App/ThemeStore",
@@ -313,15 +313,16 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
     local I = ctx.Internal
     local UserInputService = I.UserInputService
 
-    local function IsInputDown(inputType)
-        if inputType == Enum.UserInputType.Touch then
-            local ok, touches = pcall(UserInputService.GetTouches, UserInputService)
-            return ok and #touches > 0 or false
+    local function IsInputDown(inp)
+        local t = inp.UserInputType
+        if t == Enum.UserInputType.Touch then
+            local st = inp.UserInputState
+            return st == Enum.UserInputState.Begin or st == Enum.UserInputState.Change
         end
-        if inputType == Enum.UserInputType.MouseButton1
-            or inputType == Enum.UserInputType.MouseButton2
-            or inputType == Enum.UserInputType.MouseButton3 then
-            return UserInputService:IsMouseButtonPressed(inputType)
+        if t == Enum.UserInputType.MouseButton1
+            or t == Enum.UserInputType.MouseButton2
+            or t == Enum.UserInputType.MouseButton3 then
+            return UserInputService:IsMouseButtonPressed(t)
         end
         return true
     end
@@ -347,6 +348,7 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
         local s = tostring(text or "")
         s = s:gsub('[%c/\\:"<>|*?]', "")
         s = s:gsub("^%s+", ""):gsub("%s+$", "")
+        s = s:sub(1, 64)
         if s == "" then s = "Untitled" end
         return s
     end
@@ -366,6 +368,24 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
         local r, g, b = tonumber(h:sub(1,2), 16), tonumber(h:sub(3,4), 16), tonumber(h:sub(5,6), 16)
         if r and g and b then return Color3.fromRGB(r, g, b) end
         return nil
+    end
+
+    local function RemoveFrom(list, item)
+        local idx = table.find(list, item)
+        if idx then table.remove(list, idx) end
+    end
+
+    local function Trim(s)
+        return tostring(s):match("^%s*(.-)%s*$")
+    end
+
+    local function SetBoxDisabled(boxes, state)
+        local v = state == true
+        for _, b in ipairs(boxes) do
+            b.TextEditable = not v
+            b.Active = not v
+            if v then pcall(function() b:ReleaseFocus() end) end
+        end
     end
 
     local function RGBtoHSV(c)
@@ -471,6 +491,9 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
     I.ColorToHex = ColorToHex
     I.HexToColor = HexToColor
     I.RGBtoHSV = RGBtoHSV
+    I.RemoveFrom = RemoveFrom
+    I.Trim = Trim
+    I.SetBoxDisabled = SetBoxDisabled
     local function XAlign()
         return I.Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left
     end
@@ -552,7 +575,6 @@ end
 -- [[Core/Interaction/Input]]
 Bundle["Core/Interaction/Input"] = function(ctx)
     local I = ctx.Internal
-    local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
 
     local InputHooks = {}
@@ -560,8 +582,7 @@ Bundle["Core/Interaction/Input"] = function(ctx)
 
     local function RemoveInputHook(rec)
         rec._removed = true
-        local idx = table.find(InputHooks, rec)
-        if idx then table.remove(InputHooks, idx) end
+        I.RemoveFrom(InputHooks, rec)
     end
 
     local function AddInputHook(alive, fn)
@@ -604,6 +625,13 @@ Bundle["Core/Interaction/Input"] = function(ctx)
     I.ActiveKeybindListener = nil
     I.HotElement = nil
 
+    local function enumOf(enum, name)
+        local ok, v = pcall(function() return enum[name] end)
+        if ok and v ~= nil then return v end
+    end
+
+    local ENUMS = { Key = Enum.KeyCode, Mouse = Enum.UserInputType }
+
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
             if v.EnumType == Enum.KeyCode then
@@ -618,23 +646,13 @@ Bundle["Core/Interaction/Input"] = function(ctx)
             local kind, name = v:match("^(%a+):(.+)$")
             if kind then
                 local k = kind:sub(1, 1):upper() .. kind:sub(2):lower()
-                if k == "Key" then
-                    local ok, kc = pcall(function() return Enum.KeyCode[name] end)
-                    if ok and kc ~= nil then
-                        return { Kind = "Key", Code = kc, Name = name }
-                    end
-                elseif k == "Mouse" then
-                    local ok, it = pcall(function() return Enum.UserInputType[name] end)
-                    if ok and it ~= nil then
-                        return { Kind = "Mouse", Code = it, Name = name }
-                    end
-                end
+                local e = ENUMS[k]
+                local c = e and enumOf(e, name)
+                if c then return { Kind = k, Code = c, Name = name } end
                 return nil
             end
-            local ok, kc = pcall(function() return Enum.KeyCode[v] end)
-            if ok and kc ~= nil then
-                return { Kind = "Key", Code = kc, Name = v }
-            end
+            local kc = enumOf(Enum.KeyCode, v)
+            if kc then return { Kind = "Key", Code = kc, Name = v } end
         end
         return nil
     end
@@ -650,11 +668,8 @@ Bundle["Core/Interaction/Input"] = function(ctx)
             if el ~= self and not el._destroyed then
                 local ob = el._getBinding and el:_getBinding()
                 if ob and ob.Kind == b.Kind and ob.Code == b.Code then
-                    Kailex:Notify({
-                        Title = "Keybind conflict",
-                        Text = "\"" .. b.Name .. "\" is also bound in \"" .. el.Title .. "\".",
-                        Type = "Warning", Duration = 5,
-                    })
+                    I.Note("Keybind conflict",
+                        "\"" .. b.Name .. "\" is also bound in \"" .. el.Title .. "\".", "Warning", 5)
                     return
                 end
             end
@@ -708,9 +723,7 @@ Bundle["Core/Rendering/Tween"] = function(ctx)
     local function Tween(inst, preset, props, done)
         if not inst or not inst.Parent then return nil end
         if type(props) ~= "table" then return nil end
-        local info = Tweens[preset]
-        if typeof(preset) == "TweenInfo" then info = preset end
-        info = ScaledInfo(info)
+        local info = ScaledInfo(typeof(preset) == "TweenInfo" and preset or Tweens[preset])
 
         local book = ActiveTweens[inst]
         if not book then book = {} ActiveTweens[inst] = book end
@@ -753,7 +766,7 @@ end
 Bundle["Core/Rendering/Theme"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
-    local RGB = function(r, g, b) return Color3.fromRGB(r, g, b) end
+    local RGB = Color3.fromRGB
 
     local Themes = {
         Nocturne = {
@@ -934,12 +947,22 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         return inst
     end
 
+    I.TS = TS
+    I.ApplyTextScale = ApplyTextScale
+    I.Create = Create
+end
+
+
+-- [[Core/Rendering/Decor]]
+Bundle["Core/Rendering/Decor"] = function(ctx)
+    local I = ctx.Internal
+
     local function Corner(radius)
-        return Create("UICorner", { CornerRadius = UDim.new(0, radius or 8) })
+        return I.Create("UICorner", { CornerRadius = UDim.new(0, radius or 8) })
     end
 
     local function StrokeBind(thickness, key, transparency)
-        local s = Create("UIStroke", {
+        local s = I.Create("UIStroke", {
             Thickness = thickness or 1,
             Transparency = transparency or 0.6,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -980,7 +1003,7 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         opts = opts or {}
         if not target or not target.Parent then return nil end
         local parent = target.Parent
-        local holder = Create("Frame", {
+        local holder = I.Create("Frame", {
             Name = "__KailexShadow",
             BackgroundTransparency = 1,
             AnchorPoint = target.AnchorPoint,
@@ -993,7 +1016,7 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         local layers = {}
         for i, def in ipairs(defs) do
             local s, base = def[1], def[2]
-            local f = Create("Frame", {
+            local f = I.Create("Frame", {
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5),
                 Size = UDim2.new(1, s * 2, 1, s * 2),
@@ -1001,7 +1024,7 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
                 BackgroundTransparency = base,
                 BorderSizePixel = 0,
                 Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, radius + s) }) },
+                Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, radius + s) }) },
             })
             layers[i] = { Frame = f, Base = base }
         end
@@ -1040,6 +1063,12 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
             holder.AnchorPoint = target.AnchorPoint
             sync()
         end))
+        maid:Give(target.AncestryChanged:Connect(function()
+            if target.Parent then
+                holder.Parent = target.Parent
+                sync()
+            end
+        end))
         maid:Give(function() holder:Destroy() end)
         maid:Give(target.Destroying:Connect(function() maid:Destroy() end))
         ctrl.Maid = maid
@@ -1047,13 +1076,19 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         return ctrl
     end
 
-    I.TS = TS
-    I.ApplyTextScale = ApplyTextScale
-    I.Create = Create
+    local function ShadowIn(shadow, alive, delay)
+        if not shadow then return end
+        shadow.SetFade(1)
+        task.delay(delay or 0.1, function()
+            if alive() and shadow then shadow.SetFade(0) end
+        end)
+    end
+
     I.Corner = Corner
     I.StrokeBind = StrokeBind
     I.AddHover = AddHover
     I.DropShadow = DropShadow
+    I.ShadowIn = ShadowIn
 end
 
 
@@ -1160,7 +1195,28 @@ Bundle["Core/Rendering/Icon"] = function(ctx)
         return holder
     end
 
+    local function MkIcon(parent, val, props)
+        local url = tonumber(val) and ("rbxassetid://" .. val) or (I.IsAssetId(val) and val) or nil
+        local inst
+        if url then
+            props = table.clone(props or {})
+            props.Image = url
+            props.ImageColor3 = I.CurrentTheme.SubText
+            props.BackgroundTransparency = props.BackgroundTransparency or 1
+            props.Parent = parent
+            inst = I.Create("ImageLabel", props)
+            I.Bind(inst, "ImageColor3", "SubText")
+        else
+            inst = Icon(parent, tostring(val or ""), "SubText")
+            if props then
+                for k, v in pairs(props) do inst[k] = v end
+            end
+        end
+        return inst
+    end
+
     I.Icon = Icon
+    I.MkIcon = MkIcon
 end
 
 
@@ -1437,7 +1493,7 @@ Bundle["Core/Misc/Gui"] = function(ctx)
     I.LayerPersistent = LayerPersistent
 
     local RootScale = I.Create("UIScale", { Parent = ScreenGui })
-    local Camera = Workspace.CurrentCamera
+    local Camera = nil
     I.Viewport = Vector2.new(1920, 1080)
 
     local ViewportHooks = {}
@@ -1467,6 +1523,7 @@ Bundle["Core/Misc/Gui"] = function(ctx)
         Camera = cam
         if cam then
             CameraConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateViewport)
+            UpdateViewport()
         end
     end
     BindCamera(Workspace.CurrentCamera)
@@ -1482,6 +1539,7 @@ Bundle["Core/Misc/Gui"] = function(ctx)
     I.LayerOverlay = LayerOverlay
     I.LayerNotify = LayerNotify
     I.LayerTooltip = LayerTooltip
+    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerNotify, LayerTooltip }
     I.GetScale = GetScale
     I.UpdateViewport = UpdateViewport
 end
@@ -1501,13 +1559,8 @@ Bundle["Core/Interaction/Modal"] = function(ctx)
     end
 
     function ModalManager.Remove(entry)
-        if not entry then return end
-        for i = #ModalManager.Stack, 1, -1 do
-            if ModalManager.Stack[i] == entry then
-                table.remove(ModalManager.Stack, i)
-                return
-            end
-        end
+        local idx = table.find(ModalManager.Stack, entry)
+        if idx then table.remove(ModalManager.Stack, idx) end
     end
 
     function ModalManager.CloseAll(owner)
@@ -1557,12 +1610,15 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
     I.ClampWindowToScreen = ClampToScreen
     I.ClampFloat = ClampToScreen
 
+    local function isPrimary(t)
+        return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+    end
+
     local function BeginDrag(input, handle, opts)
         opts = opts or {}
         if DragManager.Active ~= nil then return nil end
         local inputType = input.UserInputType
-        if inputType ~= Enum.UserInputType.MouseButton1
-            and inputType ~= Enum.UserInputType.Touch then return nil end
+        if not isPrimary(inputType) then return nil end
 
         local key = opts.ManagerKey or handle
         local threshold = tonumber(opts.Threshold) or 0
@@ -1600,8 +1656,9 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
         if opts.OnStart then I.SafeCall(opts.OnStart) end
 
         maid:Give(UserInputService.InputEnded:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1
-                or inp.UserInputType == Enum.UserInputType.Touch then
+            if inp == input
+                or (inputType == Enum.UserInputType.MouseButton1
+                    and inp.UserInputType == Enum.UserInputType.MouseButton1) then
                 finish()
             end
         end))
@@ -1609,7 +1666,7 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
             maid:Give(handle.Destroying:Connect(finish))
         end
         maid:Give(RunService.Heartbeat:Connect(function()
-            if not I.IsInputDown(inputType) then finish() end
+            if not I.IsInputDown(input) then finish() end
         end))
 
         if type(opts.OnFrame) == "function" then
@@ -1636,11 +1693,15 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
             end
             maid:Give(UserInputService.InputChanged:Connect(function(inp)
                 if finished then return end
-                if inp.UserInputType == Enum.UserInputType.MouseMovement
-                    or inp.UserInputType == Enum.UserInputType.Touch then
+                if inp.UserInputType == Enum.UserInputType.MouseMovement then
                     tryMove(inp.Position)
                 end
             end))
+            if inputType == Enum.UserInputType.Touch then
+                maid:Give(input.Changed:Connect(function()
+                    if not finished then tryMove(input.Position) end
+                end))
+            end
             if threshold <= 0 then opts.OnMove(input.Position) end
         end
 
@@ -1741,9 +1802,7 @@ Bundle["Core/Interaction/Ripple"] = function(ctx)
                 Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
             })
             I.Once(r.Destroying, function()
-                for i, x in ipairs(RipplePool) do
-                    if x == r then table.remove(RipplePool, i) break end
-                end
+                I.RemoveFrom(RipplePool, r)
             end)
             table.insert(RipplePool, r)
             return r
@@ -1756,9 +1815,7 @@ Bundle["Core/Interaction/Ripple"] = function(ctx)
         if not rpl then rpl = newRipple() end
 
         if not pcall(function() rpl.Parent = target end) then
-            for i, r in ipairs(RipplePool) do
-                if r == rpl then table.remove(RipplePool, i) break end
-            end
+            I.RemoveFrom(RipplePool, rpl)
             rpl = newRipple()
             rpl.Parent = target
         end
@@ -1813,15 +1870,15 @@ Bundle["Core/Rendering/FX"] = function(ctx)
         task.delay(1, function()
             pcall(function() inst:SetAttribute("__shaking", nil) end)
         end)
-        local orig = inst.Position
-        local d = dist or 8
-        I.Tween(inst, "Fast", { Position = orig + UDim2.fromOffset(d, 0) }, function()
-            I.Tween(inst, "Fast", { Position = orig + UDim2.fromOffset(-d * 0.7, 0) }, function()
-                I.Tween(inst, "Fast", { Position = orig + UDim2.fromOffset(d * 0.35, 0) }, function()
-                    I.Tween(inst, "Snappy", { Position = orig })
-                end)
-            end)
-        end)
+        local orig, d = inst.Position, dist or 8
+        local steps = { d, -d * 0.7, d * 0.35, 0 }
+        local function run(i)
+            if i > 1 and inst.Position ~= orig + UDim2.fromOffset(steps[i - 1], 0) then return end
+            I.Tween(inst, i < #steps and "Fast" or "Snappy",
+                { Position = orig + UDim2.fromOffset(steps[i], 0) },
+                i < #steps and function() run(i + 1) end or nil)
+        end
+        run(1)
     end
 
     I.FX = FX
@@ -1871,8 +1928,7 @@ Bundle["Core/Overlays/Tooltip"] = function(ctx)
         local x, y = m.X + 14, m.Y + 18
         if x + tipW > I.Viewport.X - 8 then x = m.X - tipW - 14 end
         if y + tipH > I.Viewport.Y - 8 then y = m.Y - tipH - 16 end
-        if x < 8 then x = 8 end
-        if y < 8 then y = 8 end
+        x, y = math.max(x, 8), math.max(y, 8)
         frame.Position = UDim2.fromOffset(x / s, y / s)
     end
 
@@ -1931,11 +1987,7 @@ Bundle["Core/Overlays/Tooltip"] = function(ctx)
                 Tooltip.Hide()
             end)
         else
-            obj.MouseEnter:Connect(function()
-                local text = getText()
-                if not text or text == "" then return end
-                Tooltip.Show(text)
-            end)
+            obj.MouseEnter:Connect(function() Tooltip.Show(getText()) end)
             obj.MouseLeave:Connect(Tooltip.Hide)
         end
         obj.Destroying:Connect(Tooltip.Hide)
@@ -1953,7 +2005,6 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local Setting = I.Setting
-    local TextService = I.TextService
 
     local N = {
         LOG_CAP = 50,
@@ -1989,6 +2040,50 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
             }),
         },
     })
+
+    function Kailex:Notify(data)
+        if type(data) == "string" then data = { Text = data } end
+        data = data or {}
+        local t = string.lower(tostring(data.Type or "info"))
+        if not N.TypeColors[t] then t = "info" end
+        local actions
+        if type(data.Actions) == "table" then
+            actions = {}
+            for _, a in ipairs(data.Actions) do
+                if type(a) == "table" and a.Text then
+                    actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
+                end
+            end
+        end
+        local entry = {
+            Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
+            Text = tostring(data.Text or data.Description or ""),
+            Duration = data.Duration,
+            Type = t,
+            Actions = actions,
+        }
+        table.insert(N.Log, { Title = entry.Title, Text = entry.Text, Type = t, Time = os.time() })
+        while #N.Log > N.LOG_CAP do table.remove(N.Log, 1) end
+        table.insert(N.queue, entry)
+        if #N.queue > 30 then table.remove(N.queue, 1) end
+        N.process()
+    end
+
+    I.LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+        for _, m in ipairs(N.pool) do
+            if m.InUse and m.ThemeKey then
+                m.Progress.BackgroundColor3 = I.CurrentTheme[m.ThemeKey] or I.CurrentTheme.Accent
+            end
+        end
+    end))
+end
+
+
+-- [[Core/Overlays/NotifyProcess]]
+Bundle["Core/Overlays/NotifyProcess"] = function(ctx)
+    local I = ctx.Internal
+    local TextService = I.TextService
+    local N = I.NotifyState
 
     function N.process()
         while N.active < N.MAX_ACTIVE and #N.queue > 0 do
@@ -2111,42 +2206,6 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
             meta.Maid:Give(meta.Hit.MouseButton1Click:Connect(function() N.dismiss(meta) end))
         end
     end
-
-    function Kailex:Notify(data)
-        if type(data) == "string" then data = { Text = data } end
-        data = data or {}
-        local t = string.lower(tostring(data.Type or "info"))
-        if not N.TypeColors[t] then t = "info" end
-        local actions
-        if type(data.Actions) == "table" then
-            actions = {}
-            for _, a in ipairs(data.Actions) do
-                if type(a) == "table" and a.Text then
-                    actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
-                end
-            end
-        end
-        local entry = {
-            Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
-            Text = tostring(data.Text or data.Description or ""),
-            Duration = data.Duration,
-            Type = t,
-            Actions = actions,
-        }
-        table.insert(N.Log, { Title = entry.Title, Text = entry.Text, Type = t, Time = os.time() })
-        while #N.Log > N.LOG_CAP do table.remove(N.Log, 1) end
-        table.insert(N.queue, entry)
-        if #N.queue > 30 then table.remove(N.queue, 1) end
-        N.process()
-    end
-
-    I.LibMaid:Give(Kailex.ThemeChanged:Connect(function()
-        for _, m in ipairs(N.pool) do
-            if m.InUse and m.ThemeKey then
-                m.Progress.BackgroundColor3 = I.CurrentTheme[m.ThemeKey] or I.CurrentTheme.Accent
-            end
-        end
-    end))
 end
 
 
@@ -2277,16 +2336,17 @@ Bundle["Core/Misc/Callbacks"] = function(ctx)
     local Kailex = ctx.Kailex
     local Setting = I.Setting
 
+    local function Note(title, text, typ, dur)
+        Kailex:Notify({ Title = title, Text = text, Type = typ, Duration = dur })
+    end
+
     local lastErrMsg, lastErrAt = nil, 0
     local function ReportError(ctxName, err)
         local msg, now = tostring(err), os.clock()
         warn("[Kailex] " .. msg)
         if msg == lastErrMsg and (now - lastErrAt) < 1 then return end
         lastErrMsg, lastErrAt = msg, now
-        Kailex:Notify({
-            Title = "Callback error" .. (ctxName and (" - " .. ctxName) or ""),
-            Text = msg, Type = "Error", Duration = 6,
-        })
+        Note("Callback error" .. (ctxName and (" - " .. ctxName) or ""), msg, "Error", 6)
     end
 
     local function RunCallback(fn, ctxName, ...)
@@ -2306,15 +2366,19 @@ Bundle["Core/Misc/Callbacks"] = function(ctx)
     local function CopyToClipboard(text)
         local setc = I.GetClipboardSetter()
         if setc then
-            pcall(setc, tostring(text))
-            Kailex:Notify({ Title = "Copied", Text = tostring(text), Type = "Success", Duration = 2 })
+            if pcall(setc, tostring(text)) then
+                Note("Copied", tostring(text), "Success", 2)
+            else
+                Note("Copy failed", tostring(text))
+            end
         else
-            Kailex:Notify({ Title = "Copy", Text = tostring(text), Duration = 6 })
+            Note("Copy", tostring(text))
         end
     end
 
     I.RunCallback = RunCallback
     I.CopyToClipboard = CopyToClipboard
+    I.Note = Note
 end
 
 
@@ -2385,12 +2449,7 @@ Bundle["Core/Overlays/ModalCard"] = function(ctx)
         I.Tween(h.Dimmer, "Normal", { BackgroundTransparency = 0.5 })
         I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
         I.Tween(h.Scale, "Pop", { Scale = 1 })
-        if h.Shadow then
-            h.Shadow.SetFade(1)
-            task.delay(0.1, function()
-                if not closed and h.Shadow then h.Shadow.SetFade(0) end
-            end)
-        end
+        I.ShadowIn(h.Shadow, function() return not closed end)
         return h
     end
 
@@ -2449,12 +2508,7 @@ Bundle["Core/Overlays/ModalCard"] = function(ctx)
             if h.Scale then h.Scale.Scale = 0.94 end
             I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
             if h.Scale then I.Tween(h.Scale, "Pop", { Scale = 1 }) end
-            if h.Shadow then
-                h.Shadow.SetFade(1)
-                task.delay(0.1, function()
-                    if open and h.Shadow then h.Shadow.SetFade(0) end
-                end)
-            end
+            I.ShadowIn(h.Shadow, function() return open end)
             h.Entry = I.ModalManager.Push(cfg.Owner, cfg.Closer or h.Hide)
         end
 
@@ -2465,7 +2519,7 @@ Bundle["Core/Overlays/ModalCard"] = function(ctx)
             h.Catcher.Visible = false
             if h.Shadow then h.Shadow.FadeOut() end
             if h.Scale then I.Tween(h.Scale, "Vanish", { Scale = 0.95 }) end
-        I.Tween(h.Card, "Fast", { GroupTransparency = 1 }, function()
+            I.Tween(h.Card, "Fast", { GroupTransparency = 1 }, function()
                 if not open then h.Card.Visible = false end
             end)
         end
@@ -2526,17 +2580,26 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             if closed then return end
 
             closed = true
-            h.Close()
+            if h then h.Close() end
 
-            if accepted then I.RunCallback(data.OnAccept, data.Title or "Confirm", true) end
-            if not accepted then I.RunCallback(data.OnDecline, data.Title or "Confirm", false) end
+            I.RunCallback(accepted and data.OnAccept or data.OnDecline, data.Title or "Confirm", accepted)
         end
 
-        h = I.ModalCard.OpenCenter({
+        local ok
+        ok, h = pcall(I.ModalCard.OpenCenter, {
             Size = UDim2.fromOffset(360, cardH),
             OnDimmerClick = function() close(false) end,
             Closer = function() close(false) end,
         })
+        if not ok then
+            warn("[Kailex] " .. tostring(h))
+            h = nil
+        end
+        if not h then
+            ModalActive = false
+            tryRunNext()
+            return nil
+        end
 
         local card = h.Card
         h.Maid:Give(function()
@@ -2604,29 +2667,17 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
         })
 
         local function mkBtn(text, accent, order)
-            local b = I.Create("TextButton", {
+            return I.MkButton(btnRow, {
                 Size = UDim2.new(0.5, -4, 1, 0),
-                BackgroundColor3 = accent and I.CurrentTheme.Accent or I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = text,
                 Font = Enum.Font.GothamBold,
                 TextSize = 12,
-                TextColor3 = accent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
-                AutoButtonColor = false,
                 LayoutOrder = order,
-                ZIndex = 42, Parent = btnRow,
-                Children = { I.Corner(8) },
-            })
-            if accent then
-                I.Bind(b, "BackgroundColor3", "Accent")
-                I.Bind(b, "TextColor3", "OnAccent")
-                I.AddHover(b, { HoverKey = "AccentHover", BaseKey = "Accent" })
-            else
-                I.Bind(b, "BackgroundColor3", "Element")
-                I.Bind(b, "TextColor3", "Text")
-                I.AddHover(b)
-            end
-            return b
+                ZIndex = 42,
+            }, accent and {
+                Bg = "Accent", Text = "OnAccent",
+                Hover = { HoverKey = "AccentHover", BaseKey = "Accent" },
+            } or nil)
         end
 
         local decline = mkBtn(data.DeclineText or data.CancelText or "Cancel", false, 1)
@@ -2792,11 +2843,10 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
     local function paintHl(idx, on)
         local b = buttons[idx]
         if not b then return end
-        if on then
-            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.ElementHover, BackgroundTransparency = 0.4 })
-        else
-            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.Element, BackgroundTransparency = 1 })
-        end
+        I.Tween(b, "Instant", {
+            BackgroundColor3 = on and I.CurrentTheme.ElementHover or I.CurrentTheme.Element,
+            BackgroundTransparency = on and 0.4 or 1,
+        })
     end
 
     local function setHl(idx)
@@ -2924,10 +2974,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
                 actions[idx] = item.Callback
                 btn.MouseEnter:Connect(function() setHl(idx) end)
                 btn.MouseButton1Click:Connect(function()
-                    ContextMenu.Hide()
-                    if type(item.Callback) == "function" then
-                        task.defer(function() I.SafeCall(item.Callback) end)
-                    end
+                    activate(idx)
                 end)
                 totalH += 28
             end
@@ -2940,12 +2987,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
         frame.Position = UDim2.fromOffset(px / s, py / s)
         frame.Visible = true
         catcher.Visible = true
-        if shadow then
-            shadow.SetFade(1)
-            task.delay(0.08, function()
-                if frame.Visible and shadow then shadow.SetFade(0) end
-            end)
-        end
+        I.ShadowIn(shadow, function() return frame.Visible end, 0.08)
         I.ModalManager.Remove(entry)
         local tk = hideToken
         entry = I.ModalManager.Push(nil, function()
@@ -2972,7 +3014,6 @@ end
 -- [[Elements/Base]]
 Bundle["Elements/Base"] = function(ctx)
     local I = ctx.Internal
-    local Setting = I.Setting
     local UserInputService = I.UserInputService
 
     local Elements = {}
@@ -2982,10 +3023,19 @@ Bundle["Elements/Base"] = function(ctx)
     Element.__index = Element
     I.Element = Element
 
-    local function removeFrom(list, item)
-        local idx = table.find(list, item)
-        if idx then table.remove(list, idx) end
+    local function MkRow(self, tab, opts, name, rightW, height, width)
+        local cfg = {
+            Name = opts.Name or name, RightWidth = rightW, Width = opts.Width,
+            Description = opts.Description,
+        }
+        if height then cfg.Height = height end
+        local row, title, right, left = I.CreateRow(tab.Content, cfg)
+        self:_init(row, opts, tab)
+        self:_initRow(title, right, left, rightW, width)
+        return row, title, right, left
     end
+
+    local removeFrom = I.RemoveFrom
 
     function Element:_init(row, opts, tab)
         opts = opts or {}
@@ -3035,31 +3085,6 @@ Bundle["Elements/Base"] = function(ctx)
         task.defer(function()
             if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
         end)
-    end
-
-    function Element:EnsureRight()
-        if self._destroyed then return nil end
-        if self.RightContainer then return self.RightContainer end
-        if not self.Row or not self.Row.Parent then return nil end
-        local right = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
-            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
-            Size = UDim2.new(0, 0, 1, -4),
-            Parent = self.Row,
-            Children = {
-                I.Create("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = I.HAlign(),
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, 8),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }),
-            },
-        })
-        self.RightContainer = right
-        self:RecalcWidth()
-        return right
     end
 
     function Element:SetTitle(text)
@@ -3114,6 +3139,107 @@ Bundle["Elements/Base"] = function(ctx)
         if self.LeftFrame then
             self.LeftFrame.Size = UDim2.new(1, -w, 1, 0)
         end
+    end
+
+    function Element:_contextItems()
+        local items = {}
+        if self.CopyValue then
+            table.insert(items, { Text = "Copy value", Callback = function()
+                local v = self:CopyValue()
+                if v ~= nil then I.CopyToClipboard(v) end
+            end })
+        end
+        if self.Reset then
+            table.insert(items, { Text = "Reset to default", Callback = function() self:Reset() end })
+        end
+        table.insert(items, {
+            Text = self._disabled and "Enable" or "Disable",
+            Callback = function() self:SetDisabled(not self._disabled) end,
+        })
+        return items
+    end
+
+    local function HookContextMenu(el, overlay, alive)
+        local function open()
+            local items = el:_contextItems()
+            if #items == 0 then return false end
+            local m = UserInputService:GetMouseLocation()
+            I.ContextMenu.Show(items, m.X, m.Y)
+        end
+        I.OnLongPress(overlay, alive or function() return not el._destroyed end, open)
+    end
+    I.HookContextMenu = HookContextMenu
+
+    function Element:Destroy()
+        if self._destroyed then return end
+        self._destroyed = true
+        if I.HotElement == self then I.HotElement = nil end
+        local tab = self.Tab
+        if tab then
+            removeFrom(tab.Elements, self)
+            if self.Section then
+                removeFrom(self.Section.Elements, self)
+            end
+        end
+        for _, ex in ipairs(self._extras) do
+            if not ex._destroyed then ex:Destroy() end
+        end
+        if self.Changed then self.Changed:Destroy() end
+        if self.Maid then self.Maid:Destroy() end
+        if self.Row then self.Row:Destroy() end
+        self.Row, self.Maid, self.Tab, self.Section = nil, nil, nil, nil
+    end
+
+    function Element:_initRow(title, right, left, baseW, width)
+        self.TitleLabel = title
+        self.LeftFrame = left
+        self.RightContainer = right
+        self._baseRightW = baseW
+        self._width = width or baseW
+    end
+
+    local function MakeElementClass()
+        local class = {}
+        class.__index = class
+        setmetatable(class, { __index = Element })
+        return class
+    end
+    I.MakeElementClass = MakeElementClass
+    I.MkRow = MkRow
+end
+
+
+-- [[Elements/Extras]]
+Bundle["Elements/Extras"] = function(ctx)
+    local I = ctx.Internal
+    local Setting = I.Setting
+    local Elements = I.Elements
+    local Element = I.Element
+    local removeFrom = I.RemoveFrom
+
+    function Element:EnsureRight()
+        if self._destroyed then return nil end
+        if self.RightContainer then return self.RightContainer end
+        if not self.Row or not self.Row.Parent then return nil end
+        local right = I.Create("Frame", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
+            Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.new(0, 0, 1, -4),
+            Parent = self.Row,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = I.HAlign(),
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, 8),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
+        })
+        self.RightContainer = right
+        self:RecalcWidth()
+        return right
     end
 
     function Element:AddExtra(className, opts)
@@ -3187,71 +3313,6 @@ Bundle["Elements/Base"] = function(ctx)
         function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
         return tg
     end
-
-    function Element:_contextItems()
-        local items = {}
-        if self.CopyValue then
-            table.insert(items, { Text = "Copy value", Callback = function()
-                local v = self:CopyValue()
-                if v ~= nil then I.CopyToClipboard(v) end
-            end })
-        end
-        if self.Reset then
-            table.insert(items, { Text = "Reset to default", Callback = function() self:Reset() end })
-        end
-        table.insert(items, {
-            Text = self._disabled and "Enable" or "Disable",
-            Callback = function() self:SetDisabled(not self._disabled) end,
-        })
-        return items
-    end
-
-    local function HookContextMenu(el, overlay)
-        local function open()
-            local items = el:_contextItems()
-            if #items == 0 then return false end
-            local m = UserInputService:GetMouseLocation()
-            I.ContextMenu.Show(items, m.X, m.Y)
-        end
-        I.OnLongPress(overlay, function() return not el._destroyed end, open)
-    end
-    I.HookContextMenu = HookContextMenu
-
-    function Element:Destroy()
-        if self._destroyed then return end
-        self._destroyed = true
-        if I.HotElement == self then I.HotElement = nil end
-            local tab = self.Tab
-            if tab then
-                removeFrom(tab.Elements, self)
-                if self.Section then
-                    removeFrom(self.Section.Elements, self)
-                end
-            end
-        for _, ex in ipairs(self._extras) do
-            if not ex._destroyed then ex:Destroy() end
-        end
-        if self.Changed then self.Changed:Destroy() end
-        if self.Maid then self.Maid:Destroy() end
-        if self.Row then self.Row:Destroy() end
-        self.Row, self.Maid, self.Tab, self.Section = nil, nil, nil, nil
-    end
-
-    function Element:_initRow(title, right, left, baseW, width)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = baseW
-        self._width = width or baseW
-    end
-
-    local function MakeElementClass()
-        local class = {}
-        class.__index = class
-        setmetatable(class, { __index = Element })
-        return class
-    end
-    I.MakeElementClass = MakeElementClass
 end
 
 
@@ -3289,20 +3350,21 @@ Bundle["Elements/Row"] = function(ctx)
             Size = UDim2.new(1, -rightW, 1, 0),
             Parent = row,
         })
-        local title
+
+        local title = I.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = desc and UDim2.new(1, -4, 0, 15) or UDim2.new(1, -4, 1, 0),
+            Position = desc and UDim2.new(0, 0, 0, 2) or UDim2.fromOffset(0, 0),
+            Font = Enum.Font.GothamMedium,
+            TextSize = 13,
+            TextColor3 = I.CurrentTheme.Text,
+            TextXAlignment = I.XAlign(),
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = opts.Name or "",
+            Parent = leftFrame,
+        })
+
         if desc then
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 0, 15),
-                Position = UDim2.new(0, 0, 0, 2),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = I.XAlign(),
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
             local descLabel = I.Create("TextLabel", {
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, -4, 0, 13),
@@ -3316,21 +3378,9 @@ Bundle["Elements/Row"] = function(ctx)
                 Text = desc,
                 Parent = leftFrame,
             })
+
             descLabel.Name = "__desc"
             I.Bind(descLabel, "TextColor3", "SubText")
-        else
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 1, 0),
-                Position = UDim2.fromOffset(0, 0),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = I.XAlign(),
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
         end
         I.Bind(title, "TextColor3", "Text")
 
@@ -3636,12 +3686,7 @@ Bundle["Elements/Button"] = function(ctx)
         local rightW = 0
         if hasIcon then rightW += 26 end
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Button", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW, 0)
+        local row, _, right = I.MkRow(self, tab, opts, "Button", rightW, nil, 0)
         self.Callback = opts.Callback or function() end
 
         local overlay = I.Create("TextButton", {
@@ -3654,10 +3699,10 @@ Bundle["Elements/Button"] = function(ctx)
 
         local function fire()
             if self._disabled then return end
-                I.ApplyRipple(overlay)
-                I.PlaySound("Click")
-                I.RunCallback(self.Callback, self.Title)
-            end
+            I.ApplyRipple(overlay)
+            I.PlaySound("Click")
+            I.RunCallback(self.Callback, self.Title)
+        end
 
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if overlay:GetAttribute("Dragging") then return end
@@ -3674,24 +3719,15 @@ Bundle["Elements/Button"] = function(ctx)
                 LayoutOrder = 1,
                 Parent = right,
             })
-            local raw = tostring(opts.Icon)
-            local isAsset = I.IsAssetId(opts.Icon)
-            if isAsset then
-                local img = I.Create("ImageLabel", {
-                    BackgroundTransparency = 1,
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.fromScale(0.5, 0.5),
-                    Size = UDim2.fromOffset(16, 16),
-                    Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = iconBtn,
-                })
-                I.Bind(img, "ImageColor3", "SubText")
+            local img = I.MkIcon(iconBtn, opts.Icon, {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(16, 16),
+            })
+            if img:IsA("ImageLabel") then
                 self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
                 self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
-                else
-                    I.Icon(iconBtn, raw, "SubText", 16)
-                end
+            end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 
@@ -3725,12 +3761,7 @@ Bundle["Elements/Toggle"] = function(ctx)
         local usePin = opts.Pin == true
         local rightW = switchW + (usePin and 30 or 0)
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Toggle", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Toggle", rightW)
         self._extraH = switchH
 
         self.Callback = opts.Callback or function() end
@@ -4003,6 +4034,8 @@ Bundle["Elements/Slider/View"] = function(ctx)
         local bx = frac
         if trackW > 48 then
             bx = math.clamp(frac * trackW, 24, trackW - 24) / trackW
+        elseif trackW > 0 then
+            bx = 0.5
         end
         S.bubble.Position = UDim2.new(bx, 0, 0, S.fullH - 26)
         S.bubble.Text = S.fmt(S.value)
@@ -4042,7 +4075,7 @@ Bundle["Elements/Slider/Init"] = function(ctx)
 
         local value = I.SaveManager:Get(S.saveKey, default)
         if type(value) ~= "number" then value = default end
-        S.value = math.clamp(value, min, max)
+        S.value = snapValue(value)
 
         S.prefix = opts.Prefix and tostring(opts.Prefix) or nil
         S.suffix = opts.Suffix and tostring(opts.Suffix) or nil
@@ -4113,7 +4146,7 @@ Bundle["Elements/Slider/Init"] = function(ctx)
         self.Maid:Give(S.hit.MouseButton2Click:Connect(resetToDefault))
         function self:Reset() resetToDefault() end
 
-        S.hit.InputBegan:Connect(function(input)
+        self.Maid:Give(S.hit.InputBegan:Connect(function(input)
             if S.dragging or I.DragManager.Active then return end
             if self._disabled then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
@@ -4163,14 +4196,14 @@ Bundle["Elements/Slider/Init"] = function(ctx)
             if not drag then
                 S.dragging = false
             end
-        end)
+        end))
 
-        S.track.MouseEnter:Connect(function()
+        self.Maid:Give(S.track.MouseEnter:Connect(function()
             if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(16, 16) }) end
-        end)
-        S.track.MouseLeave:Connect(function()
+        end))
+        self.Maid:Give(S.track.MouseLeave:Connect(function()
             if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(14, 14) }) end
-        end)
+        end))
 
         self.Maid:Give(S.box.FocusLost:Connect(function()
             local t = tostring(S.box.Text or "")
@@ -4223,14 +4256,10 @@ Bundle["Elements/Slider/Init"] = function(ctx)
 end
 
 
--- [[Elements/Keybind]]
-Bundle["Elements/Keybind"] = function(ctx)
+-- [[Elements/Keybind/Input]]
+Bundle["Elements/Keybind/Input"] = function(ctx)
     local I = ctx.Internal
-    local Elements = I.Elements
-    local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
-
-    Elements.Keybind = I.MakeElementClass()
 
     local dispatcher = nil
     local function ensureDispatcher()
@@ -4248,24 +4277,106 @@ Bundle["Elements/Keybind"] = function(ctx)
         I.LibMaid:Give(function() I.RemoveInputHook(dispatcher) end)
     end
 
+    local function matches(S, input, excludeMB1)
+        local b = S.binding
+        if b.Kind == "Key" then return input.KeyCode == b.Code end
+        return b.Kind == "Mouse" and input.UserInputType == b.Code
+            and not (excludeMB1 and input.UserInputType == Enum.UserInputType.MouseButton1)
+    end
+
+    local function Wire(S)
+        local self, opts = S.self, S.opts
+
+        S.handleInput = function(input, gp)
+            if self._destroyed then return end
+            if S.listening then
+                if input.KeyCode == Enum.KeyCode.Escape then
+                    S.listenToken += 1
+                    S.setListening(false)
+                    return
+                end
+                if input.KeyCode ~= Enum.KeyCode.Unknown then
+                    if gp then return end
+                    S.listenToken += 1
+                    S.setListening(false)
+                    S.setBinding({
+                        Kind = "Key",
+                        Code = input.KeyCode,
+                        Name = input.KeyCode.Name,
+                    })
+                    I.PlaySound("Click")
+                elseif opts.MouseButtons
+                    and (input.UserInputType == Enum.UserInputType.MouseButton2
+                        or input.UserInputType == Enum.UserInputType.MouseButton3) then
+                    S.listenToken += 1
+                    S.setListening(false)
+                    S.setBinding({
+                        Kind = "Mouse",
+                        Code = input.UserInputType,
+                        Name = input.UserInputType.Name,
+                    })
+                    I.PlaySound("Click")
+                end
+                return
+            end
+            if I.ActiveKeybindListener ~= nil then return end
+            if gp then return end
+            if self._disabled then return end
+            if UserInputService:GetFocusedTextBox() ~= nil then return end
+            if not S.binding then return end
+            if not matches(S, input, true) then return end
+            if S.mode == "toggle" then
+                S.toggleState = not S.toggleState
+                self._toggleState = S.toggleState
+                I.RunCallback(self.Callback, self.Title, S.binding.Code, S.toggleState)
+            elseif S.mode == "hold" then
+                self._holding = true
+                I.RunCallback(self.Callback, self.Title, S.binding.Code, true)
+            else
+                I.RunCallback(self.Callback, self.Title, S.binding.Code)
+            end
+        end
+        self._handleInput = S.handleInput
+
+        if S.mode == "hold" then
+            self.Maid:Give(UserInputService.InputEnded:Connect(function(input)
+                if self._destroyed or self._holding ~= true then return end
+                if not S.binding then return end
+                if matches(S, input) then
+                    self._holding = false
+                    I.RunCallback(self.Callback, self.Title, S.binding.Code, false)
+                end
+            end))
+        end
+
+        ensureDispatcher()
+    end
+
+    I.WireKeybind = Wire
+end
+
+
+-- [[Elements/Keybind/Init]]
+Bundle["Elements/Keybind/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Elements = I.Elements
+    local Kailex = ctx.Kailex
+    local Wire = I.WireKeybind
+
+    Elements.Keybind = I.MakeElementClass()
+
     function Elements.Keybind.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Keybind)
         local saveKey = tab:GetSaveKey(opts)
         local rightW = 96
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Keybind", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local _, _, right = I.MkRow(self, tab, opts, "Keybind", rightW)
 
         self.Callback = opts.Callback or function() end
 
         local mode = string.lower(tostring(opts.Mode or "press"))
         if mode ~= "toggle" and mode ~= "hold" then mode = "press" end
         self.Mode = mode
-        local toggleState = false
 
         local savedBinding = I.SaveManager:Get(saveKey, nil)
         local binding
@@ -4277,8 +4388,11 @@ Bundle["Elements/Keybind"] = function(ctx)
                 binding = I.ToBinding(opts.Default)
             end
         end
-        local listening = false
-        local listenToken = 0
+
+        local S = {
+            self = self, opts = opts, mode = mode, binding = binding,
+            listening = false, listenToken = 0, toggleState = false,
+        }
 
         table.insert(I.KeybindRegistry, { el = self })
         self.Maid:Give(function()
@@ -4302,20 +4416,20 @@ Bundle["Elements/Keybind"] = function(ctx)
         })
 
         local function refresh()
-            if listening then
+            if S.listening then
                 bindBtn.BackgroundColor3 = I.CurrentTheme.Accent
                 bindBtn.TextColor3 = I.CurrentTheme.OnAccent
                 bindBtn.Text = "Press a key..."
             else
                 bindBtn.BackgroundColor3 = I.CurrentTheme.SurfaceLight
                 bindBtn.TextColor3 = I.CurrentTheme.Text
-                bindBtn.Text = binding and binding.Name or "None"
+                bindBtn.Text = S.binding and S.binding.Name or "None"
             end
         end
 
         local function setListening(on)
-            if listening == on then return end
-            listening = on
+            if S.listening == on then return end
+            S.listening = on
             if on then
                 if I.ActiveKeybindListener and I.ActiveKeybindListener ~= self
                     and not I.ActiveKeybindListener._destroyed
@@ -4329,120 +4443,54 @@ Bundle["Elements/Keybind"] = function(ctx)
             refresh()
         end
         self._cancelListen = function() setListening(false) end
+        S.setListening = setListening
 
         local function setBinding(b)
-            binding = b
+            S.binding = b
             I.SaveValue(saveKey, b and (b.Kind .. ":" .. b.Name) or "__none")
             if b then I.NotifyKeybindConflict(self, b) end
             refresh()
         end
+        S.setBinding = setBinding
 
-        self._getBinding = function() return binding end
+        self._getBinding = function() return S.binding end
 
-        self._handleInput = function(input, gp)
-            if self._destroyed then return end
-            if listening then
-                if input.KeyCode ~= Enum.KeyCode.Unknown then
-                    if gp then return end
-                    listenToken += 1
-                    setListening(false)
-                    if input.KeyCode == Enum.KeyCode.Escape then
-                        return
-                    end
-                    setBinding({
-                        Kind = "Key",
-                        Code = input.KeyCode,
-                        Name = input.KeyCode.Name,
-                    })
-                    I.PlaySound("Click")
-                elseif opts.MouseButtons
-                    and (input.UserInputType == Enum.UserInputType.MouseButton2
-                        or input.UserInputType == Enum.UserInputType.MouseButton3) then
-                    listenToken += 1
-                    setListening(false)
-                    setBinding({
-                        Kind = "Mouse",
-                        Code = input.UserInputType,
-                        Name = input.UserInputType.Name,
-                    })
-                    I.PlaySound("Click")
-                end
-                return
-            end
-            if I.ActiveKeybindListener ~= nil then return end
-            if gp then return end
-            if self._disabled then return end
-            if UserInputService:GetFocusedTextBox() ~= nil then return end
-            if not binding then return end
-            local matched = false
-            if binding.Kind == "Key" and input.KeyCode == binding.Code then
-                matched = true
-            elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code
-                and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-                matched = true
-            end
-            if not matched then return end
-            if mode == "toggle" then
-                toggleState = not toggleState
-                self._toggleState = toggleState
-                I.RunCallback(self.Callback, self.Title, binding.Code, toggleState)
-            elseif mode == "hold" then
-                self._holding = true
-                I.RunCallback(self.Callback, self.Title, binding.Code, true)
-            else
-                I.RunCallback(self.Callback, self.Title, binding.Code)
-            end
-        end
-
-        ensureDispatcher()
+        Wire(S)
 
         self.Maid:Give(function()
-            if listening then
-                listening = false
+            if S.listening then
+                S.listening = false
                 if I.ActiveKeybindListener == self then I.ActiveKeybindListener = nil end
             end
         end)
-
-        if mode == "hold" then
-            self.Maid:Give(UserInputService.InputEnded:Connect(function(input)
-                if self._destroyed or self._holding ~= true then return end
-                if not binding then return end
-                local matched = false
-                if binding.Kind == "Key" and input.KeyCode == binding.Code then
-                    matched = true
-                elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code then
-                    matched = true
-                end
-                if matched then
-                    self._holding = false
-                    I.RunCallback(self.Callback, self.Title, binding.Code, false)
-                end
-            end))
-        end
 
         self.Maid:Give(bindBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if bindBtn:GetAttribute("Dragging") then return end
             I.ApplyRipple(bindBtn)
             I.PlaySound("Click", 0.6)
-            if listening then
-                listenToken += 1
+            if S.listening then
+                S.listenToken += 1
                 setListening(false)
             else
                 setListening(true)
-                listenToken += 1
-                local myToken = listenToken
+                S.listenToken += 1
+                local myToken = S.listenToken
                 task.delay(6, function()
-                    if listening and listenToken == myToken then
+                    if S.listening and S.listenToken == myToken then
                         setListening(false)
                     end
                 end)
             end
         end))
 
+        I.HookContextMenu(self, bindBtn, function()
+            return not S.listening and not self._destroyed
+        end)
+
         function self:_contextItems()
             local items = {}
-            if binding then
+            if S.binding then
                 table.insert(items, {
                     Text = "Clear keybind",
                     Callback = function()
@@ -4456,18 +4504,6 @@ Bundle["Elements/Keybind"] = function(ctx)
             return items
         end
 
-        local function showMenu()
-            if self._destroyed or listening then return end
-            local items = self:_contextItems()
-            if #items == 0 then return end
-            local m = UserInputService:GetMouseLocation()
-            I.ContextMenu.Show(items, m.X, m.Y)
-        end
-
-        I.OnLongPress(bindBtn, function()
-            return not listening and not self._destroyed
-        end, showMenu)
-
         function self:Set(v, silent)
             local b = I.ToBinding(v)
             if not b then return end
@@ -4475,13 +4511,13 @@ Bundle["Elements/Keybind"] = function(ctx)
             if not silent then I.RunCallback(self.Callback, self.Title, b.Code) end
         end
         function self:Get()
-            return binding and binding.Code or nil
+            return S.binding and S.binding.Code or nil
         end
         function self:GetName()
-            return binding and binding.Name or "None"
+            return S.binding and S.binding.Name or "None"
         end
         function self:GetState()
-            if mode == "toggle" then return toggleState end
+            if mode == "toggle" then return S.toggleState end
             if mode == "hold" then return self._holding == true end
             return nil
         end
@@ -4566,9 +4602,21 @@ Bundle["Elements/Dropdown/View"] = function(ctx)
         S.searchShown = (#S.options > DROP_SEARCH_AT) or S.opts.Searchable == true
     end
 
+    function View.applyQuery(S)
+        if S.query == "" then
+            S.display = S.options
+            return
+        end
+        local out = {}
+        for _, o in ipairs(S.options) do
+            if o.Text:lower():find(S.query, 1, true) then out[#out + 1] = o end
+        end
+        S.display = out
+    end
+
     function View.setOptions(S, newOptions)
         S.options = I.NormalizeOptions(newOptions)
-        S.display = S.options
+        View.applyQuery(S)
         local valid = {}
         for _, opt in ipairs(S.options) do valid[opt.Key] = true end
         local ns = {}
@@ -4744,19 +4792,12 @@ Bundle["Elements/Dropdown/View"] = function(ctx)
             S.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
                 clearBtn.Visible = S.searchBox.Text ~= ""
                 S.query = S.searchBox.Text:lower()
-                if S.query == "" then
-                    S.display = S.options
-                else
-                    local out = {}
-                    for _, o in ipairs(S.options) do
-                        if o.Text:lower():find(S.query, 1, true) then out[#out + 1] = o end
-                    end
-                    S.display = out
-                end
+                View.applyQuery(S)
                 S.hl = nil
                 S.listCanvas.CanvasPosition = Vector2.new(0, 0)
                 View.buildOptions(S)
             end)
+
             clearBtn.MouseButton1Click:Connect(function()
                 S.searchBox.Text = ""
                 pcall(function() S.searchBox:CaptureFocus() end)
@@ -4778,16 +4819,12 @@ Bundle["Elements/Dropdown/View"] = function(ctx)
 
             S.allBtn.MouseButton1Click:Connect(function()
                 for _, o in ipairs(S.options) do S.selSet[o.Key] = true end
-                View.refreshOptions(S)
-                View.refreshLabel(S)
-                View.saveSelection(S)
+                S.commitSel()
                 I.RunCallback(self.Callback, self.Title, self:Get())
             end)
             S.noneBtn.MouseButton1Click:Connect(function()
                 S.selSet = {}
-                View.refreshOptions(S)
-                View.refreshLabel(S)
-                I.SaveValue(S.saveKey, {})
+                S.commitSel()
                 I.RunCallback(self.Callback, self.Title, self:Get())
             end)
         end
@@ -4814,6 +4851,71 @@ Bundle["Elements/Dropdown/View"] = function(ctx)
             if S.virtual and S.expanded then View.updateVirtualWindow(S) end
         end)
     end
+
+    function View.buildOptions(S)
+        if not S.listCanvas then return end
+        if S._builtOpts == S.options and S._builtQuery == S.query then
+            View.refreshOptions(S)
+            if S.expanded then
+                local sc = I.GetScale()
+                S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
+            end
+            return
+        end
+        View.clearButtons(S)
+        local count = #S.display
+        S.virtual = count > DROP_VIRTUALIZE
+        S.emptyLabel.Visible = count == 0
+
+        local layout = S.listCanvas:FindFirstChildOfClass("UIListLayout")
+        if not S.virtual and not layout then
+            I.Create("UIListLayout", {
+                Padding = UDim.new(0, S.pad),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = S.listCanvas,
+            })
+        elseif S.virtual and layout then
+            layout:Destroy()
+        end
+
+        if S.virtual then
+            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.None
+            S.listCanvas.CanvasSize = UDim2.new(0, 0, 0, count * (S.optH + S.pad) + 8)
+            S.innerList = math.min(count, 6) * S.optH + math.min(count, 5) * S.pad + 12
+            View.updateVirtualWindow(S)
+        else
+            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            S.listCanvas.CanvasSize = UDim2.new()
+            local rows = math.clamp(count, 1, 6)
+            S.innerList = count > 0 and (rows * S.optH + (rows - 1) * S.pad + 12) or 26
+            for i, opt in ipairs(S.display) do
+                local rec = View.newRec(S)
+                rec._idx = i
+                rec.Button.LayoutOrder = i
+                S.optionButtons[i] = rec
+                View.paintRec(S, rec, opt)
+            end
+        end
+        S.header.Size = UDim2.new(1, 0, 0, S.headerH)
+        S.listCanvas.Position = UDim2.new(0, 0, 0, S.headerH)
+        S.listCanvas.Size = UDim2.new(1, 0, 1, -S.headerH)
+        View.refreshOptions(S)
+        if S.expanded then
+            local sc = I.GetScale()
+            S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
+        end
+        S._builtOpts, S._builtQuery = S.options, S.query
+    end
+
+    I.DropdownView = View
+end
+
+
+-- [[Elements/Dropdown/Paint]]
+Bundle["Elements/Dropdown/Paint"] = function(ctx)
+    local I = ctx.Internal
+    local Setting = I.Setting
+    local View = I.DropdownView
 
     function View.paintRec(S, rec, opt)
         local isSel = opt ~= nil and S.selSet[opt.Key] == true
@@ -5006,63 +5108,6 @@ Bundle["Elements/Dropdown/View"] = function(ctx)
         end)
         return rec
     end
-
-    function View.buildOptions(S)
-        if not S.listCanvas then return end
-        if S._builtOpts == S.options and S._builtQuery == S.query then
-            View.refreshOptions(S)
-            if S.expanded then
-                local sc = I.GetScale()
-                S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
-            end
-            return
-        end
-        View.clearButtons(S)
-        local count = #S.display
-        S.virtual = count > DROP_VIRTUALIZE
-        S.emptyLabel.Visible = count == 0
-
-        local layout = S.listCanvas:FindFirstChildOfClass("UIListLayout")
-        if not S.virtual and not layout then
-            I.Create("UIListLayout", {
-                Padding = UDim.new(0, S.pad),
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                Parent = S.listCanvas,
-            })
-        elseif S.virtual and layout then
-            layout:Destroy()
-        end
-
-        if S.virtual then
-            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.None
-            S.listCanvas.CanvasSize = UDim2.new(0, 0, 0, count * (S.optH + S.pad) + 8)
-            S.innerList = math.min(count, 6) * S.optH + math.min(count, 5) * S.pad + 12
-            View.updateVirtualWindow(S)
-        else
-            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.Y
-            S.listCanvas.CanvasSize = UDim2.new()
-            local rows = math.clamp(count, 1, 6)
-            S.innerList = count > 0 and (rows * S.optH + (rows - 1) * S.pad + 12) or 26
-            for i, opt in ipairs(S.display) do
-                local rec = View.newRec(S)
-                rec._idx = i
-                rec.Button.LayoutOrder = i
-                S.optionButtons[i] = rec
-                View.paintRec(S, rec, opt)
-            end
-        end
-        S.header.Size = UDim2.new(1, 0, 0, S.headerH)
-        S.listCanvas.Position = UDim2.new(0, 0, 0, S.headerH)
-        S.listCanvas.Size = UDim2.new(1, 0, 1, -S.headerH)
-        View.refreshOptions(S)
-        if S.expanded then
-            local sc = I.GetScale()
-            S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
-        end
-        S._builtOpts, S._builtQuery = S.options, S.query
-    end
-
-    I.DropdownView = View
 end
 
 
@@ -5146,15 +5191,11 @@ Bundle["Elements/Dropdown/Actions"] = function(ctx)
             else
                 S.selSet[opt.Key] = true
             end
-            View.refreshOptions(S)
-            View.refreshLabel(S)
-            View.saveSelection(S)
+            S.commitSel()
             I.RunCallback(self.Callback, self.Title, self:Get())
         else
             S.selSet = { [opt.Key] = true }
-            View.refreshOptions(S)
-            View.refreshLabel(S)
-            I.SaveValue(S.saveKey, opt.Value)
+            S.commitSel()
             Actions.setExpanded(S, false)
             I.RunCallback(self.Callback, self.Title, self:Get())
         end
@@ -5265,9 +5306,22 @@ Bundle["Elements/Dropdown/Actions"] = function(ctx)
         end
         S.closeFn = function() Actions.setExpanded(S, false) end
 
+        S.commitSel = function()
+            View.saveSelection(S)
+            View.refreshOptions(S)
+            View.refreshLabel(S)
+        end
+
         S.keyHandler = function(input, gp)
             if not S.expanded then return end
-            if gp then return end
+            if gp then
+                local kc = input.KeyCode
+                if kc ~= Enum.KeyCode.Up and kc ~= Enum.KeyCode.Down
+                    and kc ~= Enum.KeyCode.Return and kc ~= Enum.KeyCode.KeypadEnter then
+                    return
+                end
+                if not S.searchBox or I.UserInputService:GetFocusedTextBox() ~= S.searchBox then return end
+            end
             if input.KeyCode == Enum.KeyCode.Up then
                 View.moveHl(S, -1)
             elseif input.KeyCode == Enum.KeyCode.Down then
@@ -5341,9 +5395,7 @@ Bundle["Elements/Dropdown/Init"] = function(ctx)
         function self:Set(v, silent)
             if self._destroyed then return end
             View.setSelection(S, (S.multi and type(v) == "table") and v or { v })
-            View.saveSelection(S)
-            View.refreshOptions(S)
-            View.refreshLabel(S)
+            S.commitSel()
             if not silent then I.RunCallback(self.Callback, self.Title, self:Get()) end
         end
 
@@ -5380,9 +5432,7 @@ Bundle["Elements/Dropdown/Init"] = function(ctx)
                 defaults = (opts.Default ~= nil) and { opts.Default } or {}
             end
             View.setSelection(S, defaults)
-            View.saveSelection(S)
-            View.refreshOptions(S)
-            View.refreshLabel(S)
+            S.commitSel()
             I.RunCallback(self.Callback, self.Title, self:Get())
         end
 
@@ -5430,12 +5480,7 @@ Bundle["Elements/TextInput"] = function(ctx)
         local self = setmetatable({}, Elements.TextInput)
         local saveKey = tab:GetSaveKey(opts)
         local rightW = 170
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Input", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Input", rightW)
         self.Callback = opts.Callback or function() end
 
         local value = I.SaveManager:Get(saveKey, opts.Default or "")
@@ -5521,10 +5566,7 @@ Bundle["Elements/TextInput"] = function(ctx)
 
         function self:SetDisabled(state)
             I.Element.SetDisabled(self, state)
-            local v = state == true
-            box.TextEditable = not v
-            box.Active = not v
-            if v then pcall(function() box:ReleaseFocus() end) end
+            I.SetBoxDisabled({ box }, state)
         end
 
         self:_bindSaveReload(saveKey, function(v)
@@ -6059,13 +6101,9 @@ Bundle["Elements/ProgressBar"] = function(ctx)
         local showText = opts.ShowText ~= false
         local rightW = barW + (showText and 36 or 0)
         local maxValue = tonumber(opts.Max) or 1
+        if maxValue <= 0 then maxValue = 1 end
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Progress", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local _, _, right = I.MkRow(self, tab, opts, "Progress", rightW)
         self.Callback = opts.Callback or nil
 
         local track = I.Create("Frame", {
@@ -6144,11 +6182,11 @@ Bundle["Elements/Stepper"] = function(ctx)
         opts = opts or {}
         local self = setmetatable({}, Elements.Stepper)
         local saveKey = tab:GetSaveKey(opts)
-        local min, max, step, decimals = I.NumSpec(opts, 0, 10, 1)
+        local min, max, step, decimals, snap = I.NumSpec(opts, 0, 10, 1)
         local default = tonumber(opts.Default or min) or min
         local value = I.SaveManager:Get(saveKey, default)
         if type(value) ~= "number" then value = default end
-        value = math.clamp(value, min, max)
+        value = snap(value)
 
         local fmt = opts.Format
         if type(fmt) ~= "function" then
@@ -6169,12 +6207,7 @@ Bundle["Elements/Stepper"] = function(ctx)
             labelW = math.clamp(math.floor(w + 0.5) + 10, 48, 170)
         end
         local rightW = 68 + labelW
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Stepper", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Stepper", rightW)
         self.Callback = opts.Callback or function() end
 
         local function mkStepBtn(text, order)
@@ -6226,7 +6259,7 @@ Bundle["Elements/Stepper"] = function(ctx)
         end
 
         local function bindHold(btn, dir)
-            btn.InputBegan:Connect(function(input)
+            self.Maid:Give(btn.InputBegan:Connect(function(input)
                 if input.UserInputType ~= Enum.UserInputType.MouseButton1
                     and input.UserInputType ~= Enum.UserInputType.Touch then return end
                 if self._disabled then return end
@@ -6245,7 +6278,7 @@ Bundle["Elements/Stepper"] = function(ctx)
                 end))
                 hMaid:Give(btn.Destroying:Connect(stop))
                 hMaid:Give(I.RunService.Heartbeat:Connect(function()
-                    if not I.IsInputDown(input.UserInputType) then stop() end
+                    if not I.IsInputDown(input) then stop() end
                 end))
                 task.delay(0.45, function()
                     if not holding then return end
@@ -6254,7 +6287,7 @@ Bundle["Elements/Stepper"] = function(ctx)
                         task.wait(0.09)
                     end
                 end)
-            end)
+            end))
         end
         bindHold(minus, -1)
         bindHold(plus, 1)
@@ -6296,12 +6329,15 @@ Bundle["Elements/Segmented"] = function(ctx)
         local rightW = math.clamp(#options * (itemW + 4), 60, 200)
         local selected = nil
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Segmented", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local function findOpt(v)
+            for _, o in ipairs(options) do
+                if o.Value == v or tostring(o.Value) == tostring(v) then
+                    return o
+                end
+            end
+        end
+
+        local _, _, right = I.MkRow(self, tab, opts, "Segmented", rightW)
         self.Callback = opts.Callback or function() end
 
         local holder = I.Create("Frame", {
@@ -6379,15 +6415,7 @@ Bundle["Elements/Segmented"] = function(ctx)
 
         do
             local sv = I.SaveManager:Get(saveKey, nil)
-            local d = (sv ~= nil) and sv or opts.Default
-            if d ~= nil then
-                for _, o in ipairs(options) do
-                    if o.Value == d or tostring(o.Value) == tostring(d) then
-                        selected = o
-                        break
-                    end
-                end
-            end
+            selected = findOpt((sv ~= nil) and sv or opts.Default)
         end
 
         paint(true)
@@ -6395,16 +6423,12 @@ Bundle["Elements/Segmented"] = function(ctx)
 
         function self:Set(v, silent)
             if self._destroyed then return end
-            for _, o in ipairs(options) do
-                if o.Value == v or tostring(o.Value) == tostring(v) then
-                    if selected ~= o then
-                        selected = o
-                        paint()
-                        I.SaveValue(saveKey, o.Value)
-                        if not silent then I.RunCallback(self.Callback, self.Title, o.Value) end
-                    end
-                    return
-                end
+            local o = findOpt(v)
+            if o and selected ~= o then
+                selected = o
+                paint()
+                I.SaveValue(saveKey, o.Value)
+                if not silent then I.RunCallback(self.Callback, self.Title, o.Value) end
             end
         end
         function self:Get() return selected and selected.Value or nil end
@@ -6445,12 +6469,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
         local saveKey = tab:GetSaveKey(opts)
         local rightW = 196
         local rowH = 60
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Vector3", RightWidth = rightW, Width = opts.Width,
-            Height = rowH, Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local _, _, right = I.MkRow(self, tab, opts, "Vector3", rightW, rowH)
         self.Callback = opts.Callback or function() end
 
         local function load()
@@ -6485,7 +6504,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
             I.Bind(b, "BackgroundColor3", "SurfaceLight")
             I.Bind(b, "TextColor3", "Text")
             boxes[i] = b
-            b.FocusLost:Connect(function()
+            self.Maid:Give(b.FocusLost:Connect(function()
                 local n = tonumber((b.Text:gsub(",", ".")))
                 if n then
                     local c = { value.X, value.Y, value.Z }
@@ -6494,7 +6513,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
                 else
                     b.Text = string.format("%.2f", ({value.X, value.Y, value.Z})[i])
                 end
-            end)
+            end))
         end
 
         function self:Set(v, silent)
@@ -6523,12 +6542,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
 
         function self:SetDisabled(state)
             I.Element.SetDisabled(self, state)
-            local v = state == true
-            for i = 1, 3 do
-                boxes[i].TextEditable = not v
-                boxes[i].Active = not v
-                if v then pcall(function() boxes[i]:ReleaseFocus() end) end
-            end
+            I.SetBoxDisabled(boxes, state)
         end
 
         self:_bindSaveReload(saveKey, function(v)
@@ -6565,12 +6579,7 @@ Bundle["Elements/DataTable"] = function(ctx)
         end
 
         local bodyH = tonumber(opts.Height) or 200
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Table", Height = bodyH, RightWidth = 0, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, 0, 0)
+        local _, _, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
@@ -6620,7 +6629,7 @@ Bundle["Elements/DataTable"] = function(ctx)
                         local an, bn = tonumber(av), tonumber(bv)
                         if asc then return an < bn else return an > bn end
                     end
-                    av, bv = tostring(av), tostring(bv)
+                    av, bv = tostring(av or ""), tostring(bv or "")
                     if asc then return av < bv else return av > bv end
                 end)
             end
@@ -6728,22 +6737,14 @@ Bundle["Elements/DataTable"] = function(ctx)
 end
 
 
--- [[Window/Class]]
-Bundle["Window/Class"] = function(ctx)
-    local I = ctx.Internal
-
-    local Window = {}
-    Window.__index = Window
-
-    I.WindowClass = Window
-end
-
-
 -- [[Window/Chrome]]
 Bundle["Window/Chrome"] = function(ctx)
     local I = ctx.Internal
     local UserInputService = I.UserInputService
-    local Window = I.WindowClass
+
+    local Window = {}
+    Window.__index = Window
+    I.WindowClass = Window
 
     local Chrome = {}
 
@@ -6774,7 +6775,7 @@ Bundle["Window/Chrome"] = function(ctx)
 
         local body = I.Create("Frame", {
             Position = UDim2.new(0, 0, 0, 56),
-            Size = UDim2.new(1, 0, 1, -46),
+            Size = UDim2.new(1, 0, 1, -56),
             BackgroundTransparency = 1,
             Parent = self.Root,
         })
@@ -6783,23 +6784,10 @@ Bundle["Window/Chrome"] = function(ctx)
         local titleX = 14
         if cfg.Icon ~= nil then
             titleX = 40
-            local raw = tostring(cfg.Icon)
-            local isAsset = I.IsAssetId(cfg.Icon)
-            if isAsset then
-                self.IconImg = I.Create("ImageLabel", {
-                    Position = UDim2.fromOffset(14, 5),
-                    Size = UDim2.fromOffset(20, 20),
-                    BackgroundTransparency = 1,
-                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = titleBar,
-                })
-                I.Bind(self.IconImg, "ImageColor3", "SubText")
-            else
-                self.IconImg = I.Icon(titleBar, raw, "SubText")
-                self.IconImg.Position = UDim2.fromOffset(14, 5)
-                self.IconImg.Size = UDim2.fromOffset(20, 20)
-            end
+            self.IconImg = I.MkIcon(titleBar, cfg.Icon, {
+                Position = UDim2.fromOffset(14, 5),
+                Size = UDim2.fromOffset(20, 20),
+            })
         end
 
         self._titleReserve = 130 + (titleX - 14)
@@ -7042,7 +7030,7 @@ Bundle["Window/Search"] = function(ctx)
 
         self._setSearch = function(_, on) setSearch(on) end
 
-        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        self.Maid:Give(searchBox:GetPropertyChangedSignal("Text"):Connect(function()
             local text = searchBox.Text
             if searchDebounce then pcall(task.cancel, searchDebounce) end
             if text == "" then
@@ -7051,14 +7039,15 @@ Bundle["Window/Search"] = function(ctx)
                 return
             end
             searchDebounce = task.delay(0.15, function()
+                if self._destroyed then return end
                 self._filterQuery = text
                 self:ApplyFilter(text)
             end)
-        end)
+        end))
 
-        searchBox.FocusLost:Connect(function(enter)
+        self.Maid:Give(searchBox.FocusLost:Connect(function(enter)
             if not enter and searchBox.Text == "" then setSearch(false) end
-        end)
+        end))
 
         self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
             if not self._searchActive then return end
@@ -7682,26 +7671,13 @@ Bundle["Window/Tab"] = function(ctx)
         local iconOffset = 12
         if opts.Icon then
             iconOffset = 32
-            local raw = tostring(opts.Icon)
-            local isAsset = I.IsAssetId(opts.Icon)
-            if isAsset then
-                self.IconImg = I.Create("ImageLabel", {
-                    AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
-                    Position = Setting.RTL and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0),
-                    Size = UDim2.fromOffset(16, 16),
-                    BackgroundTransparency = 1,
-                    Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = self.Button,
-                })
-                I.Bind(self.IconImg, "ImageColor3", "SubText")
-            else
-                self.IconImg = I.Icon(self.Button, raw, "SubText")
-                self.IconImg.AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5)
-                self.IconImg.Position = Setting.RTL and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0)
-                self.IconImg.Size = UDim2.fromOffset(16, 16)
-            end
+            self.IconImg = I.MkIcon(self.Button, opts.Icon, {
+                AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
+                Position = Setting.RTL and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0),
+                Size = UDim2.fromOffset(16, 16),
+            })
         end
+
         self._iconOffset = iconOffset
         self.Label = I.Create("TextLabel", {
             Position = Setting.RTL and UDim2.new(1, -iconOffset, 0, 0) or UDim2.fromOffset(iconOffset, 0),
@@ -7797,6 +7773,54 @@ Bundle["Window/Tab"] = function(ctx)
         return self._order
     end
 
+    local ADD = {
+        Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
+        Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
+        TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
+        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
+        Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
+        DataTable = Elements.DataTable, Label = Elements.Label,
+        Paragraph = Elements.Paragraph, Divider = Elements.Divider,
+    }
+    for name, class in pairs(ADD) do
+        TabClass["Add" .. name] = function(self, opts)
+            opts = opts or {}
+            self._pendingKeyRelease = nil
+            return self:_track(class.new(self, opts))
+        end
+    end
+
+    function TabClass:AddRow(cols)
+        self._autoRow = nil
+        cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
+        local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)
+        row:_newFrame()
+        return row
+    end
+
+    function TabClass:Destroy()
+        if self._destroyed then return end
+        self._destroyed = true
+        self.Window:RemoveTab(self)
+    end
+end
+
+
+-- [[Window/TabTrack]]
+Bundle["Window/TabTrack"] = function(ctx)
+    local I = ctx.Internal
+    local Elements = I.Elements
+    local TabClass = I.TabClass
+
+    function TabClass:_deferFilter()
+        local win = self.Window
+        task.defer(function()
+            if win and not win._destroyed and win.CurrentTab == self and not self._destroyed then
+                win:ApplyFilter(win._filterQuery)
+            end
+        end)
+    end
+
     function TabClass:_consumeKeyRelease(el)
         local pending = self._pendingKeyRelease
         if not pending or not el or not el.Maid then return end
@@ -7863,22 +7887,9 @@ Bundle["Window/Tab"] = function(ctx)
             el.Row.LayoutOrder = self:_nextOrder()
         end
 
-        local win, tab = self.Window, self
-        el.Maid:Give(function()
-            if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
-                task.defer(function()
-                    if win and not win._destroyed and win.CurrentTab == tab then
-                        win:ApplyFilter(win._filterQuery)
-                    end
-                end)
-            end
-        end)
-        if win.EmptyLabel and win.EmptyLabel.Visible then
-            task.defer(function()
-                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
-                    win:ApplyFilter(win._filterQuery)
-                end
-            end)
+        el.Maid:Give(function() self:_deferFilter() end)
+        if self.Window.EmptyLabel and self.Window.EmptyLabel.Visible then
+            self:_deferFilter()
         end
         return el
     end
@@ -7894,64 +7905,19 @@ Bundle["Window/Tab"] = function(ctx)
         section.Row.LayoutOrder = self:_nextOrder()
         table.insert(self.Sections, section)
         self.CurrentSection = section
-        local tab = self
-        local win = self.Window
-        if win.EmptyLabel and win.EmptyLabel.Visible then
-            task.defer(function()
-                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
-                    win:ApplyFilter(win._filterQuery)
-                end
-            end)
+        if self.Window.EmptyLabel and self.Window.EmptyLabel.Visible then
+            self:_deferFilter()
         end
         section.Maid:Give(function()
-            for i, s in ipairs(tab.Sections) do
-                if s == section then table.remove(tab.Sections, i) break end
-            end
-            if tab.CurrentSection == section then tab.CurrentSection = nil end
+            I.RemoveFrom(self.Sections, section)
+            if self.CurrentSection == section then self.CurrentSection = nil end
             for _, el in ipairs(section.Elements) do
                 if not el._destroyed then el.Section = nil end
             end
-            if tab._gridFrames then tab:_syncGridFrames() end
-            if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
-                task.defer(function()
-                    if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
-                        win:ApplyFilter(win._filterQuery)
-                    end
-                end)
-            end
+            if self._gridFrames then self:_syncGridFrames() end
+            self:_deferFilter()
         end)
         return section
-    end
-
-    local ADD = {
-        Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
-        Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
-        TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
-        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
-        Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
-        DataTable = Elements.DataTable, Label = Elements.Label,
-        Paragraph = Elements.Paragraph, Divider = Elements.Divider,
-    }
-    for name, class in pairs(ADD) do
-        TabClass["Add" .. name] = function(self, opts)
-            opts = opts or {}
-            self._pendingKeyRelease = nil
-            return self:_track(class.new(self, opts))
-        end
-    end
-
-    function TabClass:AddRow(cols)
-        self._autoRow = nil
-        cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
-        local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)
-        row:_newFrame()
-        return row
-    end
-
-    function TabClass:Destroy()
-        if self._destroyed then return end
-        self._destroyed = true
-        self.Window:RemoveTab(self)
     end
 end
 
@@ -8045,7 +8011,7 @@ Bundle["Window/TabFilter"] = function(ctx)
                     secVis = secMatch or childMatch > 0
                 end
                 sec.Row.Visible = secVis
-                matches += childMatch
+                matches += childMatch + (secMatch and 1 or 0)
             end
         end
         self:_syncGridFrames()
@@ -8056,7 +8022,8 @@ Bundle["Window/TabFilter"] = function(ctx)
         if not q or q == "" then return 0 end
         local n = 0
         for _, el in ipairs(self.Elements) do
-            if not el._destroyed and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
+            if not el._destroyed and el.Section == nil
+                and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
         end
         for _, sec in ipairs(self.Sections) do
             if not sec._destroyed then
@@ -8080,8 +8047,8 @@ Bundle["Window/TabFilter"] = function(ctx)
 end
 
 
--- [[Window/Init]]
-Bundle["Window/Init"] = function(ctx)
+-- [[Window/Create]]
+Bundle["Window/Create"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local Window = I.WindowClass
@@ -8089,60 +8056,6 @@ Bundle["Window/Init"] = function(ctx)
     local Search = I.WindowSearch
     local Layout = I.WindowLayout
     local State = I.WindowState
-
-    function Window:Tab(tabOpts)
-        local tab = I.TabClass.new(self, tabOpts)
-        table.insert(self.Tabs, tab)
-        if #self.Tabs == 1 then
-            tab:Select()
-        end
-        self:UpdateLayout()
-        return tab
-    end
-
-    function Window:ApplyFilter(q)
-        self._filterQuery = q or ""
-        local tab = self.CurrentTab
-        if not tab then return end
-        local n = tab:ApplyFilter(self._filterQuery)
-        for _, t in ipairs(self.Tabs) do
-            if t ~= tab and not t._destroyed then
-                local c = t:CountMatches(self._filterQuery)
-                t:SetFilterBadge(c > 0 and tostring(c) or "")
-            else
-                t:SetFilterBadge("")
-            end
-        end
-        local shouldShow, txt = false, ""
-        if self._filterQuery ~= "" then
-            txt = "No results for \"" .. self._filterQuery .. "\""
-            shouldShow = (n == 0)
-        elseif #tab.Elements == 0 and #tab.Sections == 0 then
-            txt = "This tab is empty"
-            shouldShow = true
-        end
-        local el = self.EmptyLabel
-        if shouldShow then
-            el.Text = txt
-            if not el.Visible then
-                el.Visible = true
-                el.TextTransparency = 1
-                I.Tween(el, "Fast", { TextTransparency = 0 })
-            end
-        else
-            el.Visible = false
-        end
-    end
-
-    function Window:_closeDropdowns()
-        for _, tab in ipairs(self.Tabs) do
-            if tab._openDropdown then
-                local fn = tab._openDropdown
-                tab._openDropdown = nil
-                fn()
-            end
-        end
-    end
 
     function Kailex:CreateWindow(cfg)
         cfg = cfg or {}
@@ -8282,16 +8195,75 @@ Bundle["Window/Init"] = function(ctx)
 
         return self
     end
+end
+
+
+-- [[Window/Init]]
+Bundle["Window/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Kailex = ctx.Kailex
+    local Window = I.WindowClass
+
+    function Window:Tab(tabOpts)
+        local tab = I.TabClass.new(self, tabOpts)
+        table.insert(self.Tabs, tab)
+        if #self.Tabs == 1 then
+            tab:Select()
+        end
+        self:UpdateLayout()
+        return tab
+    end
+
+    function Window:ApplyFilter(q)
+        self._filterQuery = q or ""
+        local tab = self.CurrentTab
+        if not tab then return end
+        local n = tab:ApplyFilter(self._filterQuery)
+        for _, t in ipairs(self.Tabs) do
+            if t ~= tab and not t._destroyed then
+                local c = t:CountMatches(self._filterQuery)
+                t:SetFilterBadge(c > 0 and tostring(c) or "")
+            else
+                t:SetFilterBadge("")
+            end
+        end
+        local shouldShow, txt = false, ""
+        if self._filterQuery ~= "" then
+            txt = "No results for \"" .. self._filterQuery .. "\""
+            shouldShow = (n == 0)
+        elseif #tab.Elements == 0 and #tab.Sections == 0 then
+            txt = "This tab is empty"
+            shouldShow = true
+        end
+        local el = self.EmptyLabel
+        if shouldShow then
+            el.Text = txt
+            if not el.Visible then
+                el.Visible = true
+                el.TextTransparency = 1
+                I.Tween(el, "Fast", { TextTransparency = 0 })
+            end
+        else
+            el.Visible = false
+        end
+    end
+
+    function Window:_closeDropdowns()
+        for _, tab in ipairs(self.Tabs) do
+            if tab._openDropdown then
+                local fn = tab._openDropdown
+                tab._openDropdown = nil
+                fn()
+            end
+        end
+    end
 
     local uiVisible = true
 
     function Kailex:SetVisible(state)
         state = state == true
         uiVisible = state
-        I.LayerWindows.Visible = state
-        I.LayerOverlay.Visible = state
-        I.LayerNotify.Visible = state
-        I.LayerTooltip.Visible = state
+        for _, layer in ipairs(I.ToggleLayers) do layer.Visible = state end
         if not state then
             I.Tooltip.Hide()
             I.ContextMenu.Hide()
@@ -8517,7 +8489,7 @@ Bundle["App/KeySystem/View"] = function(ctx)
                 if not K.alive then return end
                 local txt = I.ReadClipboard()
                 if type(txt) == "string" and txt:match("%S") then
-                    K.inputBox.Text = txt:match("^%s*(.-)%s*$")
+                    K.inputBox.Text = I.Trim(txt)
                     I.PlaySound("Click", 0.5)
                     View.setStatus(K, "Key pasted from clipboard - press Verify.")
                 end
@@ -8564,11 +8536,8 @@ Bundle["App/KeySystem/Init"] = function(ctx)
         local opts = K.options
 
         if Logic.inList(K, opts.Blacklist, opts.CheckBlacklist) then
-            Kailex:Notify({
-                Title = "Access Denied",
-                Text = tostring(opts.BlacklistMessage or "You are not allowed to use this script."),
-                Type = "Error", Duration = 7,
-            })
+            I.Note("Access Denied",
+                tostring(opts.BlacklistMessage or "You are not allowed to use this script."), "Error", 7)
             if K.onBlacklisted then I.SafeCall(K.onBlacklisted, K.lpName) end
             Logic.handleDecline(K)
             return nil
@@ -8576,11 +8545,7 @@ Bundle["App/KeySystem/Init"] = function(ctx)
 
         if Logic.inList(K, opts.Whitelist, opts.CheckWhitelist) then
             if opts.Silent ~= true then
-                Kailex:Notify({
-                    Title = "Key System",
-                    Text = "Welcome, " .. K.lpName .. " - you are whitelisted.",
-                    Type = "Success",
-                })
+                I.Note("Key System", "Welcome, " .. K.lpName .. " - you are whitelisted.", "Success")
             end
             I.SafeCall(K.onComplete, "WHITELISTED")
             return nil
@@ -8591,11 +8556,7 @@ Bundle["App/KeySystem/Init"] = function(ctx)
             if type(savedKey) == "string" and savedKey ~= ""
                 and Logic.validateKey(K, savedKey) then
                 if opts.Silent ~= true then
-                    Kailex:Notify({
-                        Title = "Key System",
-                        Text = "Saved key accepted - welcome back.",
-                        Type = "Success",
-                    })
+                    I.Note("Key System", "Saved key accepted - welcome back.", "Success")
                 end
                 I.SafeCall(K.onComplete, savedKey)
                 return nil
@@ -8658,7 +8619,7 @@ Bundle["App/KeySystem/Init"] = function(ctx)
 
         local function verify()
             if not K.alive then return end
-            local val = K.inputBox.Text:match("^%s*(.-)%s*$")
+            local val = I.Trim(K.inputBox.Text)
             if val ~= "" and Logic.validateKey(K, val) then
                 grantAccess(val)
             else
@@ -8685,10 +8646,14 @@ Bundle["App/KeySystem/Init"] = function(ctx)
                 I.PlaySound("Click", 0.5)
                 local setc = I.GetClipboardSetter()
                 if setc then
-                    pcall(setc, tostring(K.link))
-                    View.setStatus(K, "Link copied to clipboard - get your key, then paste it.", "Success")
+                    if pcall(setc, tostring(K.link)) then
+                        View.setStatus(K, "Link copied to clipboard - get your key, then paste it.", "Success")
+                    else
+                        I.Note(K.title, tostring(K.link), nil, 10)
+                        View.setStatus(K, "Could not copy - the link is shown in the notifications.", "Error")
+                    end
                 else
-                    Kailex:Notify({ Title = K.title, Text = tostring(K.link), Duration = 10 })
+                    I.Note(K.title, tostring(K.link), nil, 10)
                     View.setStatus(K, "Link is shown in the notifications.")
                 end
             end))
@@ -8713,7 +8678,7 @@ Bundle["App/ThemeStore"] = function(ctx)
 
     function Kailex:RegisterTheme(name, colors)
         name = tostring(name or "")
-        if name == "" then return nil end
+        if name == "" or I.BuiltinThemes[name] then return nil end
         local t = table.clone(I.Themes[name] or I.Themes.Nocturne)
         for _, k in ipairs(I.ThemeKeys) do
             local c = colors and colors[k]
@@ -8730,7 +8695,7 @@ Bundle["App/ThemeStore"] = function(ctx)
 
     function Kailex:RemoveTheme(name)
         name = tostring(name)
-        if I.Themes[name] then
+        if I.Themes[name] and not I.BuiltinThemes[name] then
             I.Themes[name] = nil
             if I.Setting.Theme == name then
                 I.Setting.Theme = "Nocturne"
@@ -8795,10 +8760,13 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
             Callback = function()
                 local n = themeNameInput:Get()
                 if n == "" then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Enter a theme name first.", Type = "Warning" })
+                    I.Note("Theme Editor", "Enter a theme name first.", "Warning")
                     return
                 end
-                Kailex:RegisterTheme(n, editing.colors)
+                if not Kailex:RegisterTheme(n, editing.colors) then
+                    I.Note("Theme Editor", "Built-in theme names cannot be overwritten.", "Warning")
+                    return
+                end
                 Kailex:SaveCustomThemes()
                 Setting.Theme = n
                 I.SaveManager:Set("__theme", n)
@@ -8817,7 +8785,7 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
                     cp:Set(editing.colors[cp.ThemeKey], true)
                 end
                 I.ApplyTheme(editing.colors)
-                Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
+                I.Note("Theme Editor", "Edits reverted to \"" .. Setting.Theme .. "\".")
             end,
         })
 
@@ -8839,7 +8807,7 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
             Callback = function()
                 local raw = I.ReadClipboard()
                 if not raw then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
+                    I.Note("Theme Editor", "Clipboard is not available on this executor.", "Error")
                     return
                 end
                 local data = nil
@@ -8848,7 +8816,7 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
                     if okDecode and type(decoded) == "table" then data = decoded end
                 end
                 if not data then
-                    Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard does not contain a valid theme.", Type = "Warning" })
+                    I.Note("Theme Editor", "Clipboard does not contain a valid theme.", "Warning")
                     return
                 end
                 for _, key in ipairs(I.ThemeKeys) do
@@ -8862,7 +8830,7 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
                     cp:Set(editing.colors[cp.ThemeKey], true)
                 end
                 I.ApplyTheme(editing.colors)
-                Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
+                I.Note("Theme Editor", "Theme imported from clipboard.", "Success")
             end,
         })
     end
@@ -8880,16 +8848,16 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
             Callback = function()
                 local n = nameInput:Get()
                 if n == "" then
-                    Kailex:Notify({ Title = "Profiles", Text = "Enter a profile name first.", Type = "Warning" })
+                    I.Note("Profiles", "Enter a profile name first.", "Warning")
                     return
                 end
                 I.SaveManager:Flush()
                 if I.Configs:Save(n) then
                     refreshProfiles()
                     profDrop:Set(n, true)
-                    Kailex:Notify({ Title = "Profiles", Text = "Saved \"" .. n .. "\".", Type = "Success" })
+                    I.Note("Profiles", "Saved \"" .. n .. "\".", "Success")
                 else
-                    Kailex:Notify({ Title = "Profiles", Text = "Saving files is not supported here.", Type = "Error" })
+                    I.Note("Profiles", "Saving files is not supported here.", "Error")
                 end
             end,
         })
@@ -8900,9 +8868,9 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
                 local n = profDrop:Get()
                 if not n then return end
                 if I.Configs:Load(n) then
-                    Kailex:Notify({ Title = "Profiles", Text = "Loaded \"" .. n .. "\".", Type = "Success" })
+                    I.Note("Profiles", "Loaded \"" .. n .. "\".", "Success")
                 else
-                    Kailex:Notify({ Title = "Profiles", Text = "Could not load that profile.", Type = "Error" })
+                    I.Note("Profiles", "Could not load that profile.", "Error")
                 end
             end,
         })
@@ -8918,7 +8886,7 @@ Bundle["App/SettingsTab/Sections"] = function(ctx)
                 }, function()
                     I.Configs:Delete(n)
                     refreshProfiles()
-                    Kailex:Notify({ Title = "Profiles", Text = "Deleted \"" .. n .. "\"." })
+                    I.Note("Profiles", "Deleted \"" .. n .. "\".")
                 end)
             end,
         })
@@ -9034,7 +9002,7 @@ Bundle["App/SettingsTab/Init"] = function(ctx)
                     Text = "All saved values and themes will be cleared. Re-execute the script after.",
                 }, function()
                     I.SaveManager:Clear()
-                    Kailex:Notify({ Title = "Settings", Text = "Cleared. Re-execute the script.", Type = "Success" })
+                    I.Note("Settings", "Cleared. Re-execute the script.", "Success")
                 end)
             end,
         })
@@ -9065,7 +9033,9 @@ Bundle["App/Persist"] = function(ctx)
             I.Setting.Theme = t
             I.ApplyTheme(I.Themes[t])
         end
-        bool("__sounds", function(v) I.Setting.Sounds = v end)
+        for key, name in pairs({ __sounds = "Sounds", __effects = "Effects", __rtl = "RTL", __async = "AsyncCallbacks" }) do
+            bool(key, function(v) I.Setting[name] = v end)
+        end
         num("__volume", 0, 1, function(v)
             if Kailex.Audio then Kailex.Audio.Master = v end
         end)
@@ -9080,9 +9050,6 @@ Bundle["App/Persist"] = function(ctx)
             I.ApplyTextScale()
         end)
         num("__motion", 0.2, 1, function(v) I.Setting.MotionScale = v end)
-        bool("__effects", function(v) I.Setting.Effects = v end)
-        bool("__rtl", function(v) I.Setting.RTL = v end)
-        bool("__async", function(v) I.Setting.AsyncCallbacks = v end)
         local tk = I.SaveManager:Get("__toggleKey", nil)
         if tk ~= nil then
             I.Setting.ToggleUIKey = I.ParseKey(tk)
@@ -9096,6 +9063,7 @@ Bundle["App/Boot"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
+    local genv = I.Getgenv()
     local unloaded = false
 
     function Kailex:Unload()
@@ -9104,17 +9072,18 @@ Bundle["App/Boot"] = function(ctx)
         pcall(function() I.SaveManager:Flush() end)
         I.ModalManager.CloseAll()
         pcall(function() I.ContextMenu.Hide() end)
-        for el in pairs(I.QuickWidgets.Active) do I.QuickWidgets.Destroy(el) end
+        for el in pairs(I.QuickWidgets.Active) do
+            pcall(I.QuickWidgets.Destroy, el)
+        end
         for i = #Kailex.Windows, 1, -1 do
             local w = Kailex.Windows[i]
             if w and w.Destroy then pcall(w.Destroy, w) end
         end
-        I.Tooltip.Hide()
+        pcall(function() I.Tooltip.Hide() end)
         I.HotElement = nil
         I.ActiveKeybindListener = nil
         I.LibMaid:Destroy()
         pcall(function() I.ScreenGui:Destroy() end)
-        local genv = I.Getgenv()
         if genv and genv.kailex == Kailex then genv.kailex = nil end
     end
 
@@ -9188,7 +9157,6 @@ Bundle["App/Boot"] = function(ctx)
         I.LibMaid:Destroy()
     end))
 
-    local genv = I.Getgenv()
     if genv then genv.kailex = Kailex end
 end
 

@@ -105,7 +105,7 @@ return function(ctx)
                 if not K.alive then return end
                 local txt = I.ReadClipboard()
                 if type(txt) == "string" and txt:match("%S") then
-                    K.inputBox.Text = txt:match("^%s*(.-)%s*$")
+                    K.inputBox.Text = I.Trim(txt)
                     I.PlaySound("Click", 0.5)
                     View.setStatus(K, "Key pasted from clipboard - press Verify.")
                 end

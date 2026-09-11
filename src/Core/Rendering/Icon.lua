@@ -100,5 +100,26 @@ return function(ctx)
         return holder
     end
 
+    local function MkIcon(parent, val, props)
+        local url = tonumber(val) and ("rbxassetid://" .. val) or (I.IsAssetId(val) and val) or nil
+        local inst
+        if url then
+            props = table.clone(props or {})
+            props.Image = url
+            props.ImageColor3 = I.CurrentTheme.SubText
+            props.BackgroundTransparency = props.BackgroundTransparency or 1
+            props.Parent = parent
+            inst = I.Create("ImageLabel", props)
+            I.Bind(inst, "ImageColor3", "SubText")
+        else
+            inst = Icon(parent, tostring(val or ""), "SubText")
+            if props then
+                for k, v in pairs(props) do inst[k] = v end
+            end
+        end
+        return inst
+    end
+
     I.Icon = Icon
+    I.MkIcon = MkIcon
 end

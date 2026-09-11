@@ -9,12 +9,7 @@ return function(ctx)
         local self = setmetatable({}, Elements.TextInput)
         local saveKey = tab:GetSaveKey(opts)
         local rightW = 170
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Input", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local row, _, right = I.MkRow(self, tab, opts, "Input", rightW)
         self.Callback = opts.Callback or function() end
 
         local value = I.SaveManager:Get(saveKey, opts.Default or "")
@@ -100,10 +95,7 @@ return function(ctx)
 
         function self:SetDisabled(state)
             I.Element.SetDisabled(self, state)
-            local v = state == true
-            box.TextEditable = not v
-            box.Active = not v
-            if v then pcall(function() box:ReleaseFocus() end) end
+            I.SetBoxDisabled({ box }, state)
         end
 
         self:_bindSaveReload(saveKey, function(v)

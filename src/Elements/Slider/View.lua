@@ -138,6 +138,8 @@ return function(ctx)
         local bx = frac
         if trackW > 48 then
             bx = math.clamp(frac * trackW, 24, trackW - 24) / trackW
+        elseif trackW > 0 then
+            bx = 0.5
         end
         S.bubble.Position = UDim2.new(bx, 0, 0, S.fullH - 26)
         S.bubble.Text = S.fmt(S.value)

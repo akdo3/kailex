@@ -15,12 +15,15 @@ return function(ctx)
         local rightW = math.clamp(#options * (itemW + 4), 60, 200)
         local selected = nil
 
-        local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Segmented", RightWidth = rightW, Width = opts.Width,
-            Description = opts.Description,
-        })
-        self:_init(row, opts, tab)
-        self:_initRow(title, right, left, rightW)
+        local function findOpt(v)
+            for _, o in ipairs(options) do
+                if o.Value == v or tostring(o.Value) == tostring(v) then
+                    return o
+                end
+            end
+        end
+
+        local _, _, right = I.MkRow(self, tab, opts, "Segmented", rightW)
         self.Callback = opts.Callback or function() end
 
         local holder = I.Create("Frame", {
@@ -98,15 +101,7 @@ return function(ctx)
 
         do
             local sv = I.SaveManager:Get(saveKey, nil)
-            local d = (sv ~= nil) and sv or opts.Default
-            if d ~= nil then
-                for _, o in ipairs(options) do
-                    if o.Value == d or tostring(o.Value) == tostring(d) then
-                        selected = o
-                        break
-                    end
-                end
-            end
+            selected = findOpt((sv ~= nil) and sv or opts.Default)
         end
 
         paint(true)
@@ -114,16 +109,12 @@ return function(ctx)
 
         function self:Set(v, silent)
             if self._destroyed then return end
-            for _, o in ipairs(options) do
-                if o.Value == v or tostring(o.Value) == tostring(v) then
-                    if selected ~= o then
-                        selected = o
-                        paint()
-                        I.SaveValue(saveKey, o.Value)
-                        if not silent then I.RunCallback(self.Callback, self.Title, o.Value) end
-                    end
-                    return
-                end
+            local o = findOpt(v)
+            if o and selected ~= o then
+                selected = o
+                paint()
+                I.SaveValue(saveKey, o.Value)
+                if not silent then I.RunCallback(self.Callback, self.Title, o.Value) end
             end
         end
         function self:Get() return selected and selected.Value or nil end

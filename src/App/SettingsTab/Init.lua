@@ -103,7 +103,7 @@ return function(ctx)
                     Text = "All saved values and themes will be cleared. Re-execute the script after.",
                 }, function()
                     I.SaveManager:Clear()
-                    Kailex:Notify({ Title = "Settings", Text = "Cleared. Re-execute the script.", Type = "Success" })
+                    I.Note("Settings", "Cleared. Re-execute the script.", "Success")
                 end)
             end,
         })
