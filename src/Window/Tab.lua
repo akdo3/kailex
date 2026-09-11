@@ -18,18 +18,21 @@ return function(ctx)
         self._gridFrames = {}
         self.CurrentSection = nil
         self._order = 0
-        self._saveKeys = {}
+        self._liveKeys = {}
+        self._pendingKeyRelease = nil
         self._selected = false
         self._openDropdown = nil
         self._autoRow = nil
 
-        self.Page = I.Create("CanvasGroup", {
+        local useGroup = not I.Device.IsTouch
+        self.Page = I.Create(useGroup and "CanvasGroup" or "Frame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
             Visible = false,
-            GroupTransparency = 1,
             Parent = window.Pages,
         })
+        if useGroup then self.Page.GroupTransparency = 1 end
+
         self.Content = I.Create("ScrollingFrame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
@@ -103,8 +106,7 @@ return function(ctx)
         if opts.Icon then
             iconOffset = 32
             local raw = tostring(opts.Icon)
-            local isAsset = tonumber(opts.Icon) ~= nil
-                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            local isAsset = I.IsAssetId(opts.Icon)
             if isAsset then
                 self.IconImg = I.Create("ImageLabel", {
                     AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
@@ -131,7 +133,7 @@ return function(ctx)
             Font = Enum.Font.GothamMedium,
             TextSize = 12,
             TextColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = self.Title,
             Parent = self.Button,
@@ -190,17 +192,27 @@ return function(ctx)
         win:_closeDropdowns()
         I.ModalManager.CloseAll(win)
         if prev then
-            I.Tween(prev.Page, "Vanish", { GroupTransparency = 1 }, function()
-                if win.CurrentTab ~= prev then prev.Page.Visible = false end
-            end)
+            if prev.Page:IsA("CanvasGroup") then
+                I.Tween(prev.Page, "Vanish", { GroupTransparency = 1 }, function()
+                    if win.CurrentTab ~= prev then prev.Page.Visible = false end
+                end)
+            else
+                prev.Page.Visible = false
+            end
             prev:_setSelected(false)
         end
         self.Page.Visible = true
         self:_setSelected(true)
-        self.Page.GroupTransparency = 1
-        I.Tween(self.Page, "Fast", { GroupTransparency = 0 })
+        if self.Page:IsA("CanvasGroup") then
+            self.Page.GroupTransparency = 1
+            I.Tween(self.Page, "Fast", { GroupTransparency = 0 })
+        end
         self.Content.CanvasPosition = Vector2.new(0, 0)
-        win:ApplyFilter(win._filterQuery)
+        task.defer(function()
+            if not self._destroyed and not win._destroyed and win.CurrentTab == self then
+                win:ApplyFilter(win._filterQuery)
+            end
+        end)
     end
 
     function TabClass:_nextOrder()
@@ -208,36 +220,32 @@ return function(ctx)
         return self._order
     end
 
-    function TabClass:_syncGridFrames()
-        local frames = self._gridFrames
-        if not frames then return end
-        for i = #frames, 1, -1 do
-            local frame = frames[i]
-            if not frame.Parent then
-                table.remove(frames, i)
-            else
-                local anyVisible = false
-                local anyAlive = false
-                for _, ch in ipairs(frame:GetChildren()) do
-                    if ch:IsA("GuiObject") and ch:GetAttribute("__el") then
-                        anyAlive = true
-                        if ch.Visible then
-                            anyVisible = true
-                            break
-                        end
-                    end
-                end
-                if not anyAlive then
-                    frame:Destroy()
-                    table.remove(frames, i)
-                else
-                    frame.Visible = anyVisible
-                end
-            end
-        end
+    function TabClass:_consumeKeyRelease(el)
+        local pending = self._pendingKeyRelease
+        if not pending or not el or not el.Maid then return end
+        self._pendingKeyRelease = nil
+        local used = self._liveKeys[pending.base]
+        el.Maid:Give(function()
+            if used then used[pending.idx] = nil end
+        end)
+    end
+
+    function TabClass:GetSaveKey(opts)
+        opts = opts or {}
+        local el = tostring(opts.SaveKey or opts.Name or opts.Title or "Element")
+        local base = self.Window.SavePrefix .. "/" .. self.Title .. "/" .. el
+        local used = self._liveKeys[base]
+        if not used then used = {} self._liveKeys[base] = used end
+        local idx = 1
+        while used[idx] do idx += 1 end
+        used[idx] = true
+        self._pendingKeyRelease = { base = base, idx = idx }
+        if idx > 1 then return base .. " #" .. idx end
+        return base
     end
 
     function TabClass:_track(el)
+        self:_consumeKeyRelease(el)
         local opts = el._opts or {}
         local row = opts._gridRow
         local span = tonumber(opts.Span) or 1
@@ -288,6 +296,13 @@ return function(ctx)
                 end)
             end
         end)
+        if win.EmptyLabel and win.EmptyLabel.Visible then
+            task.defer(function()
+                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                    win:ApplyFilter(win._filterQuery)
+                end
+            end)
+        end
         return el
     end
 
@@ -303,121 +318,62 @@ return function(ctx)
         table.insert(self.Sections, section)
         self.CurrentSection = section
         local tab = self
+        local win = self.Window
+        if win.EmptyLabel and win.EmptyLabel.Visible then
+            task.defer(function()
+                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                    win:ApplyFilter(win._filterQuery)
+                end
+            end)
+        end
         section.Maid:Give(function()
             for i, s in ipairs(tab.Sections) do
                 if s == section then table.remove(tab.Sections, i) break end
             end
             if tab.CurrentSection == section then tab.CurrentSection = nil end
+            for _, el in ipairs(section.Elements) do
+                if not el._destroyed then el.Section = nil end
+            end
             if tab._gridFrames then tab:_syncGridFrames() end
+            if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                task.defer(function()
+                    if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                        win:ApplyFilter(win._filterQuery)
+                    end
+                end)
+            end
         end)
         return section
     end
 
-    function TabClass:AddButton(opts) opts = opts or {}; return self:_track(Elements.Button.new(self, opts)) end
-    function TabClass:AddToggle(opts) opts = opts or {}; return self:_track(Elements.Toggle.new(self, opts)) end
-    function TabClass:AddSlider(opts) opts = opts or {}; return self:_track(Elements.Slider.new(self, opts)) end
-    function TabClass:AddDropdown(opts) opts = opts or {}; return self:_track(Elements.Dropdown.new(self, opts)) end
-    function TabClass:AddKeybind(opts) opts = opts or {}; return self:_track(Elements.Keybind.new(self, opts)) end
-    function TabClass:AddColorPicker(opts) opts = opts or {}; return self:_track(Elements.ColorPicker.new(self, opts)) end
-    function TabClass:AddTextInput(opts) opts = opts or {}; return self:_track(Elements.TextInput.new(self, opts)) end
-    function TabClass:AddLabel(opts) opts = opts or {}; return self:_track(Elements.Label.new(self, opts)) end
-    function TabClass:AddParagraph(opts) opts = opts or {}; return self:_track(Elements.Paragraph.new(self, opts)) end
-    function TabClass:AddDivider(opts) opts = opts or {}; return self:_track(Elements.Divider.new(self, opts)) end
-    function TabClass:AddProgressBar(opts) opts = opts or {}; return self:_track(Elements.ProgressBar.new(self, opts)) end
-    function TabClass:AddStepper(opts) opts = opts or {}; return self:_track(Elements.Stepper.new(self, opts)) end
-    function TabClass:AddSegmented(opts) opts = opts or {}; return self:_track(Elements.Segmented.new(self, opts)) end
-    function TabClass:AddVector3Input(opts) opts = opts or {}; return self:_track(Elements.Vector3Input.new(self, opts)) end
+    local ADD = {
+        Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
+        Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
+        TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
+        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
+        Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
+        DataTable = Elements.DataTable, Label = Elements.Label,
+        Paragraph = Elements.Paragraph, Divider = Elements.Divider,
+    }
+    for name, class in pairs(ADD) do
+        TabClass["Add" .. name] = function(self, opts)
+            opts = opts or {}
+            self._pendingKeyRelease = nil
+            return self:_track(class.new(self, opts))
+        end
+    end
 
     function TabClass:AddRow(cols)
         self._autoRow = nil
         cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
-        local row = setmetatable({ Tab = self, Cols = cols, Manual = true }, I.GridRow)
+        local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)
         row:_newFrame()
         return row
     end
 
-    function TabClass:ApplyFilter(query)
-        local q = (query or ""):lower()
-        local matches = 0
-
-        for _, el in ipairs(self.Elements) do
-            if not el._destroyed and el.Section == nil then
-                local vis
-                if q == "" then
-                    vis = el._manualVisible ~= false
-                else
-                    vis = el.SearchText and el.SearchText:find(q, 1, true) ~= nil
-                end
-                el.Row.Visible = vis
-                if vis and q ~= "" then matches += 1 end
-            end
-        end
-        for _, sec in ipairs(self.Sections) do
-            if not sec._destroyed then
-                local secMatch = q ~= "" and sec.Title:lower():find(q, 1, true) ~= nil
-                local childMatch = 0
-                for _, el in ipairs(sec.Elements) do
-                    if not el._destroyed then
-                        local vis
-                        if q == "" then
-                            vis = (el._manualVisible ~= false) and not sec.Collapsed
-                        else
-                            vis = (secMatch or (el.SearchText and el.SearchText:find(q, 1, true) ~= nil)) and not sec.Collapsed
-                        end
-                        el.Row.Visible = vis
-                        if vis and q ~= "" then childMatch += 1 end
-                    end
-                end
-                local secVis
-                if q == "" then
-                    secVis = sec._manualVisible ~= false
-                else
-                    secVis = secMatch or childMatch > 0
-                end
-                sec.Row.Visible = secVis
-                matches += childMatch
-            end
-        end
-        self:_syncGridFrames()
-        return matches
+    function TabClass:Destroy()
+        if self._destroyed then return end
+        self._destroyed = true
+        self.Window:RemoveTab(self)
     end
-
-    function TabClass:CountMatches(q)
-        if not q or q == "" then return 0 end
-        local n = 0
-        for _, el in ipairs(self.Elements) do
-            if not el._destroyed and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
-        end
-        for _, sec in ipairs(self.Sections) do
-            if not sec._destroyed then
-                if sec.Title:lower():find(q, 1, true) then n += 1 end
-                for _, el in ipairs(sec.Elements) do
-                    if not el._destroyed and el.SearchText and el.SearchText:find(q, 1, true) then n += 1 end
-                end
-            end
-        end
-        return n
-    end
-
-    function TabClass:SetFilterBadge(text)
-        if text and text ~= "" then
-            self.Badge.Text = text
-            self.Badge.Visible = true
-        else
-            self.Badge.Visible = false
-        end
-    end
-
-    function TabClass:GetSaveKey(opts)
-        opts = opts or {}
-        local el = tostring(opts.SaveKey or opts.Name or opts.Title or "Element")
-        local base = self.Window.SavePrefix .. "/" .. self.Title .. "/" .. el
-        local seen = self._saveKeys
-        local n = (seen[base] or 0) + 1
-        seen[base] = n
-        if n > 1 then return base .. " #" .. n end
-        return base
-    end
-
-    function TabClass:AddDataTable(opts) opts = opts or {}; return self:_track(Elements.DataTable.new(self, opts)) end
 end

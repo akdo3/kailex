@@ -6,33 +6,41 @@ return function(ctx)
     local InputHooks = {}
     I.InputHooks = InputHooks
 
-    local function AddInputHook(alive, fn)
-        local rec = { alive = alive, fn = fn }
-        table.insert(InputHooks, rec)
-        return rec
+    local function RemoveInputHook(rec)
+        rec._removed = true
+        local idx = table.find(InputHooks, rec)
+        if idx then table.remove(InputHooks, idx) end
     end
 
-    local function RemoveInputHook(rec)
-        for i, r in ipairs(InputHooks) do
-            if r == rec then table.remove(InputHooks, i) break end
+    local function AddInputHook(alive, fn)
+        local rec = { alive = alive, fn = fn }
+        function rec:Destroy()
+            RemoveInputHook(rec)
         end
+        table.insert(InputHooks, rec)
+        return rec
     end
 
     I.LibMaid:Give(UserInputService.InputBegan:Connect(function(input, gp)
         local n = #InputHooks
         if n == 0 then return end
-        for i = 1, n do
-            local h = InputHooks[i]
-            if h and h.alive() then
-                local ok, err = pcall(h.fn, input, gp)
-                if not ok then warn("[Kailex] " .. tostring(err)) end
+        local snapshot = table.clone(InputHooks)
+        for i = 1, #snapshot do
+            local h = snapshot[i]
+            if h and not h._removed then
+                local okAlive, alive = pcall(h.alive)
+                if okAlive and alive then
+                    local ok, err = pcall(h.fn, input, gp)
+                    if not ok then warn("[Kailex] " .. tostring(err)) end
+                end
             end
         end
         if #InputHooks > 96 then
             local keep = table.create(8)
             for i = 1, #InputHooks do
                 local h = InputHooks[i]
-                if h.alive() then keep[#keep + 1] = h end
+                local okAlive, alive = pcall(h.alive)
+                if okAlive and alive then keep[#keep + 1] = h end
             end
             I.InputHooks = keep
             InputHooks = keep
@@ -43,22 +51,6 @@ return function(ctx)
     I.KeybindRegistry = KeybindRegistry
     I.ActiveKeybindListener = nil
     I.HotElement = nil
-
-    local function ParseKey(v)
-        if typeof(v) == "EnumItem" then
-            if v.EnumType == Enum.KeyCode then return v end
-            return nil
-        end
-        if type(v) == "string" then
-            local kind, name = v:match("^(%a+):(.+)$")
-            if kind and kind:lower() ~= "key" then return nil end
-            local key = name or v
-            local ok, item = pcall(function() return Enum.KeyCode[key] end)
-            if ok and item ~= nil then return item end
-            return nil
-        end
-        return nil
-    end
 
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
@@ -93,6 +85,11 @@ return function(ctx)
             end
         end
         return nil
+    end
+
+    local function ParseKey(v)
+        local b = ToBinding(v)
+        if b and b.Kind == "Key" then return b.Code end
     end
 
     local function NotifyKeybindConflict(self, b)

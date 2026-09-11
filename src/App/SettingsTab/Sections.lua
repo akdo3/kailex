@@ -3,85 +3,9 @@ return function(ctx)
     local Kailex = ctx.Kailex
     local Setting = I.Setting
 
-    function Kailex:CreateSettingsTab(win)
-        local tab = win:Tab({ Title = "Settings", Icon = "Gear" })
+    local Sections = {}
 
-        tab:AddSection("Appearance")
-        local themeDrop
-        themeDrop = tab:AddDropdown({
-            Name = "Theme",
-            Options = Kailex:GetThemes(),
-            Default = Setting.Theme,
-            Callback = function(name)
-                Setting.Theme = tostring(name)
-                Kailex:SetTheme(Setting.Theme)
-                I.SaveManager:Set("__theme", Setting.Theme)
-            end,
-        })
-        tab:AddSlider({
-            Name = "UI Scale",
-            Min = 0.8, Max = 1.3, Default = tonumber(Setting.UIScale) or 1, Increment = 0.05,
-            Callback = function(v)
-                Setting.UIScale = v
-                I.SaveManager:Set("__scale", v)
-                I.UpdateViewport()
-            end,
-        })
-        tab:AddSlider({
-            Name = "Text Size",
-            Min = 0.85, Max = 1.4, Default = tonumber(Setting.TextScale) or 1.1, Increment = 0.05,
-            Callback = function(v)
-                Setting.TextScale = v
-                I.ApplyTextScale()
-                I.SaveManager:Set("__textScale", v)
-            end,
-        })
-        tab:AddSlider({
-            Name = "Animation Speed",
-            Min = 0.2, Max = 1, Default = tonumber(Setting.MotionScale) or 1, Increment = 0.05,
-            Callback = function(v)
-                Setting.MotionScale = v
-                I.SaveManager:Set("__motion", v)
-            end,
-        })
-
-        tab:AddSection("Behavior")
-        tab:AddToggle({
-            Name = "Interface Sounds",
-            Description = "Click and hover sound effects",
-            Default = Setting.Sounds == true,
-            Callback = function(v)
-                Setting.Sounds = v
-                I.SaveManager:Set("__sounds", v)
-            end,
-        })
-        tab:AddToggle({
-            Name = "Visual Effects",
-            Description = "Ripple effects on click",
-            Default = Setting.Effects ~= false,
-            Callback = function(v)
-                Setting.Effects = v
-                I.SaveManager:Set("__effects", v)
-            end,
-        })
-        tab:AddToggle({
-            Name = "Async Callbacks",
-            Description = "Run callbacks in background threads",
-            Default = Setting.AsyncCallbacks == true,
-            Callback = function(v)
-                Setting.AsyncCallbacks = v
-                I.SaveManager:Set("__async", v)
-            end,
-        })
-        local keybindEl = tab:AddKeybind({
-            Name = "Show / Hide UI",
-            Default = Setting.ToggleUIKey,
-            Callback = function(code)
-                Setting.ToggleUIKey = code
-                I.SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
-            end,
-        })
-
+    function Sections.themeEditor(tab, themeDrop)
         tab:AddSection({ Name = "Theme Editor", Columns = 2 })
         local editing = { colors = table.clone(I.Themes[Setting.Theme] or I.Themes.Nocturne) }
         local pickers = {}
@@ -123,6 +47,7 @@ return function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Theme \"" .. n .. "\" saved & applied.", Type = "Success" })
             end,
         })
+
         tab:AddButton({
             Name = "Discard Edits",
             Callback = function()
@@ -134,6 +59,7 @@ return function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
             end,
         })
+
         tab:AddButton({
             Name = "Export Theme",
             Description = "Copy the current edits as JSON",
@@ -145,20 +71,18 @@ return function(ctx)
                 I.CopyToClipboard(I.HttpService:JSONEncode(out))
             end,
         })
+
         tab:AddButton({
             Name = "Import Theme",
             Description = "Load a theme JSON from the clipboard",
             Callback = function()
-                local gc = nil
-                local ok, fn = pcall(function() return getclipboard end)
-                if ok and type(fn) == "function" then gc = fn end
-                if type(gc) ~= "function" then
+                local raw = I.ReadClipboard()
+                if not raw then
                     Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
                     return
                 end
-                local okRead, raw = pcall(gc)
                 local data = nil
-                if okRead and type(raw) == "string" and raw ~= "" then
+                if raw ~= "" then
                     local okDecode, decoded = pcall(I.HttpService.JSONDecode, I.HttpService, raw)
                     if okDecode and type(decoded) == "table" then data = decoded end
                 end
@@ -180,13 +104,16 @@ return function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
             end,
         })
+    end
 
+    function Sections.profiles(tab)
         tab:AddSection("Profiles")
         local nameInput = tab:AddTextInput({ Name = "Profile name", Placeholder = "My config" })
         local profDrop = tab:AddDropdown({ Name = "Profile", Options = I.Configs:List() })
         local function refreshProfiles()
             profDrop:SetOptions(I.Configs:List())
         end
+
         tab:AddButton({
             Name = "Save profile",
             Callback = function()
@@ -205,6 +132,7 @@ return function(ctx)
                 end
             end,
         })
+
         tab:AddButton({
             Name = "Load profile",
             Callback = function()
@@ -217,6 +145,7 @@ return function(ctx)
                 end
             end,
         })
+
         tab:AddButton({
             Name = "Delete profile",
             Callback = function()
@@ -232,25 +161,7 @@ return function(ctx)
                 end)
             end,
         })
-
-        tab:AddSection("About")
-        tab:AddParagraph({
-            Title = "Kailex UI " .. Kailex.Version,
-            Text = "Device: " .. (I.Device.IsTouch and "Mobile" or (I.Device.IsConsole and "Console" or "Desktop"))
-                .. " | Files: " .. (I.HasFileSystem and "available" or "unavailable"),
-        })
-        tab:AddButton({
-            Name = "Reset all settings",
-            Callback = function()
-                Kailex:Confirm({
-                    Title = "Reset everything?",
-                    Text = "All saved values and themes will be cleared. Re-execute the script after.",
-                }, function()
-                    I.SaveManager:Clear()
-                    Kailex:Notify({ Title = "Settings", Text = "Cleared. Re-execute the script.", Type = "Success" })
-                end)
-            end,
-        })
-        return tab
     end
+
+    I.SettingsSections = Sections
 end

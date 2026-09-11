@@ -1,7 +1,6 @@
 return function(ctx)
     local I = ctx.Internal
     local Elements = I.Elements
-    local Setting = I.Setting
 
     Elements.TextInput = I.MakeElementClass()
 
@@ -15,11 +14,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local value = I.SaveManager:Get(saveKey, opts.Default or "")
@@ -28,7 +23,7 @@ return function(ctx)
         local validator = type(opts.Validator) == "function" and opts.Validator or nil
 
         local box = I.Create("TextBox", {
-            Size = UDim2.new(1, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, I.Device.IsTouch and 30 or 26),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
             Text = value,
@@ -37,7 +32,7 @@ return function(ctx)
             Font = Enum.Font.Gotham,
             TextSize = 12,
             TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             ClearTextOnFocus = false,
             Parent = right,
             Children = {
@@ -115,6 +110,7 @@ return function(ctx)
             if type(v) == "string" then self:Set(v, true) end
         end)
 
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
         self:RecalcWidth()
         return self
     end

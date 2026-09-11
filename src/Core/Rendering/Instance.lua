@@ -71,143 +71,6 @@ return function(ctx)
         return s
     end
 
-    local function Icon(parent, kind, colorKey)
-        colorKey = colorKey or "SubText"
-        local holder = Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(14, 14),
-            Parent = parent,
-        })
-        local function bar(w, h, x, y, rot)
-            local f = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Size = UDim2.fromOffset(w, h),
-                Position = UDim2.fromScale(x, y),
-                Rotation = rot or 0,
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-            })
-            I.Bind(f, "BackgroundColor3", colorKey)
-        end
-        if kind == "Minimize" then
-            bar(10, 2, 0.5, 0.5)
-        elseif kind == "Close" then
-            bar(11, 2, 0.5, 0.5, 45)
-            bar(11, 2, 0.5, 0.5, -45)
-        elseif kind == "Chevron" then
-            bar(7, 2, 0.32, 0.55, 45)
-            bar(7, 2, 0.68, 0.55, -45)
-        elseif kind == "Search" then
-            local ring = Create("Frame", {
-                Size = UDim2.fromOffset(8, 8),
-                Position = UDim2.fromOffset(1, 1),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            bar(6, 2, 0.72, 0.72, 45)
-        elseif kind == "Grip" then
-            bar(2, 5, 0.30, 0.72, 45)
-            bar(2, 7, 0.52, 0.52, 45)
-            bar(2, 9, 0.74, 0.32, 45)
-        elseif kind == "Gear" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(6, 6),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            for i = 0, 7 do
-                local ang = i * 45
-                local f = Create("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.new(0.5, math.cos(math.rad(ang)) * 5, 0.5, math.sin(math.rad(ang)) * 5),
-                    Size = UDim2.fromOffset(3, 2),
-                    Rotation = ang,
-                    BackgroundColor3 = I.CurrentTheme[colorKey],
-                    BorderSizePixel = 0,
-                    Parent = holder,
-                })
-                I.Bind(f, "BackgroundColor3", colorKey)
-            end
-        elseif kind == "Check" then
-            bar(6, 2, 0.34, 0.60, 45)
-            bar(9, 2, 0.64, 0.42, -45)
-        elseif kind == "Reset" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(9, 9),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            bar(4, 2, 0.82, 0.16, 0)
-            bar(3, 2, 0.68, 0.22, 90)
-        elseif kind == "ResizeH" then
-            bar(6, 2, 0.24, 0.40, -45)
-            bar(6, 2, 0.24, 0.60, 45)
-            bar(11, 2, 0.5, 0.5, 0)
-            bar(6, 2, 0.76, 0.40, 45)
-            bar(6, 2, 0.76, 0.60, -45)
-        elseif kind == "Pin" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.34),
-                Size = UDim2.fromOffset(7, 7),
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(ring, "BackgroundColor3", colorKey)
-            bar(2, 6, 0.5, 0.76)
-        elseif kind == "Maximize" then
-            local sq = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(9, 9),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = sq }), "Color", colorKey)
-        elseif kind == "Restore" then
-            local back = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, -2, 0.5, -2),
-                Size = UDim2.fromOffset(7, 7),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.4, Parent = back }), "Color", colorKey)
-            local front = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 2, 0.5, 2),
-                Size = UDim2.fromOffset(8, 8),
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
-            })
-            I.Bind(front, "BackgroundColor3", colorKey)
-        elseif kind == "Alert" then
-            bar(2, 6, 0.5, 0.40)
-            bar(2, 2, 0.5, 0.76)
-        elseif kind == "Info" then
-            bar(2, 2, 0.5, 0.24)
-            bar(2, 6, 0.5, 0.55)
-        end
-        return holder
-    end
-
     local function AddHover(obj, opts)
         if I.Device.IsTouch then return end
         opts = opts or {}
@@ -216,13 +79,13 @@ return function(ctx)
         local hoverT = opts.HoverTransparency
         if hoverT == nil then hoverT = baseT end
         local hoverKey = opts.HoverKey or "ElementHover"
-        local baseKey  = opts.BaseKey or "Element"
+        local baseKey = opts.BaseKey or "Element"
+        local stroke = obj:FindFirstChildOfClass("UIStroke")
 
         obj.MouseEnter:Connect(function()
             if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") then return end
             I.PlaySound("Hover", 0.12)
             I.Tween(obj, "HoverIn", { BackgroundColor3 = I.CurrentTheme[hoverKey], BackgroundTransparency = hoverT })
-            local stroke = obj:FindFirstChildOfClass("UIStroke")
             if stroke and not opts.IgnoreStroke then
                 I.Tween(stroke, "HoverIn", { Color = I.CurrentTheme.StrokeBright, Transparency = 0.25 })
             end
@@ -230,39 +93,10 @@ return function(ctx)
 
         obj.MouseLeave:Connect(function()
             I.Tween(obj, "HoverOut", { BackgroundColor3 = I.CurrentTheme[baseKey], BackgroundTransparency = baseT })
-            local stroke = obj:FindFirstChildOfClass("UIStroke")
             if stroke and not opts.IgnoreStroke then
                 I.Tween(stroke, "HoverOut", { Color = I.CurrentTheme.Stroke, Transparency = opts.StrokeTransparency or 0.6 })
             end
         end)
-    end
-
-    local function AddPress(hit, target)
-        target = target or hit
-        if not hit or not target then return nil end
-        if target:FindFirstChildOfClass("UIScale") then return nil end
-        local scale = Create("UIScale", { Scale = 1, Parent = target })
-        local down = false
-        local function release()
-            if not down then return end
-            down = false
-            I.Tween(scale, "PopSoft", { Scale = 1 })
-        end
-        hit.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            if target:GetAttribute("Disabled") then return end
-            down = true
-            scale.Scale = 0.97
-        end)
-        hit.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.Touch then
-                release()
-            end
-        end)
-        hit.MouseLeave:Connect(release)
-        return scale
     end
 
     local function DropShadow(target, opts)
@@ -278,16 +112,14 @@ return function(ctx)
             Parent = parent,
         })
         local radius = opts.Radius or 12
-        local spreads = opts.Spreads or { 2, 5, 9 }
-        local dropY = opts.DropY or 3
+        local defs = { { 2, 0.92 }, { 5, 0.945 }, { 9, 0.962 }, { 14, 0.978 } }
         local layers = {}
-        for i = 1, #spreads do
-            local s = spreads[i]
-            local base = ({ 0.92, 0.945, 0.965 })[i] or 0.965
+        for i, def in ipairs(defs) do
+            local s, base = def[1], def[2]
             local f = Create("Frame", {
                 AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 0, 0.5, dropY),
-                Size = UDim2.new(1, s * 2, 1, s * 2 + dropY),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.new(1, s * 2, 1, s * 2),
                 BackgroundColor3 = Color3.new(0, 0, 0),
                 BackgroundTransparency = base,
                 BorderSizePixel = 0,
@@ -343,8 +175,6 @@ return function(ctx)
     I.Create = Create
     I.Corner = Corner
     I.StrokeBind = StrokeBind
-    I.Icon = Icon
     I.AddHover = AddHover
-    I.AddPress = AddPress
     I.DropShadow = DropShadow
 end

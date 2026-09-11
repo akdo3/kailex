@@ -5,20 +5,17 @@ return function(ctx)
     Elements.Label = I.MakeElementClass()
 
     function Elements.Label.new(tab, opts)
+        if type(opts) == "string" then opts = { Text = opts } end
         opts = opts or {}
         local self = setmetatable({}, Elements.Label)
-        local row = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new((opts.Width or 1), -3, 0, 20),
-            Parent = tab.Content,
-        })
+        local row = I.BareRow(tab.Content, opts.Width, 20)
         local label = I.Create("TextLabel", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 1, 0),
             Font = Enum.Font.GothamMedium,
             TextSize = 13,
             TextColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = opts.Text or opts.Name or "Label",
             Parent = row,

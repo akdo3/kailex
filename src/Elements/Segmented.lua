@@ -1,5 +1,6 @@
 return function(ctx)
     local I = ctx.Internal
+    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Segmented = I.MakeElementClass()
@@ -9,16 +10,9 @@ return function(ctx)
         local self = setmetatable({}, Elements.Segmented)
         local saveKey = tab:GetSaveKey(opts)
 
-        local options = {}
-        for _, v in ipairs(opts.Options or {}) do
-            if type(v) == "table" and v.Text ~= nil then
-                options[#options + 1] = { Text = tostring(v.Text), Value = (v.Value ~= nil) and v.Value or v.Text }
-            else
-                options[#options + 1] = { Text = tostring(v), Value = v }
-            end
-        end
-        local itemW = opts.ItemWidth or 56
-        local rightW = math.clamp(#options * (itemW + 4), 60, 280)
+        local options = I.NormalizeOptions(opts.Options)
+        local itemW = opts.ItemWidth or 48
+        local rightW = math.clamp(#options * (itemW + 4), 60, 200)
         local selected = nil
 
         local row, title, right, left = I.CreateRow(tab.Content, {
@@ -26,11 +20,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local holder = I.Create("Frame", {
@@ -47,11 +37,32 @@ return function(ctx)
         })
 
         local buttons = {}
-        local function paint()
+        local indicator = I.Create("Frame", {
+            Size = UDim2.fromOffset(itemW, 26),
+            BackgroundColor3 = I.CurrentTheme.Accent,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 0,
+            Parent = holder,
+            Children = { I.Corner(8) },
+        })
+        I.Bind(indicator, "BackgroundColor3", "Accent")
+        local function paint(instant)
+            local idx = selected and table.find(options, selected) or nil
             for i, b in ipairs(buttons) do
-                local sel = options[i] == selected
-                b.BackgroundColor3 = sel and I.CurrentTheme.Accent or I.CurrentTheme.Element
-                b.TextColor3 = sel and I.CurrentTheme.OnAccent or I.CurrentTheme.SubText
+                b.BackgroundTransparency = 1
+                b.TextColor3 = (i == idx) and I.CurrentTheme.OnAccent or I.CurrentTheme.SubText
+            end
+            if idx then
+                indicator.BackgroundTransparency = 0
+                local target = UDim2.fromOffset((idx - 1) * (itemW + 4), 0)
+                if instant then
+                    indicator.Position = target
+                else
+                    I.Tween(indicator, "Snappy", { Position = target })
+                end
+            else
+                indicator.BackgroundTransparency = 1
             end
         end
 
@@ -70,10 +81,7 @@ return function(ctx)
                 Parent = holder,
                 Children = { I.Corner(8) },
             })
-            I.Bind(b, "BackgroundColor3", "Element")
-            I.Bind(b, "TextColor3", "SubText")
-            I.AddHover(b)
-            I.AddPress(b)
+            I.AddHover(b, { BaseTransparency = 1, HoverTransparency = 0.8, IgnoreStroke = true })
             buttons[i] = b
             b.MouseButton1Click:Connect(function()
                 if self._disabled then return end
@@ -100,7 +108,9 @@ return function(ctx)
                 end
             end
         end
-        paint()
+
+        paint(true)
+        self.Maid:Give(Kailex.ThemeChanged:Connect(function() paint(true) end))
 
         function self:Set(v, silent)
             if self._destroyed then return end
@@ -133,11 +143,7 @@ return function(ctx)
         self:_bindSaveReload(saveKey, function(v)
             self:Set(v, true)
         end)
-        if selected then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, selected.Value) end
-            end)
-        end
+        self:_initialCallback(selected ~= nil, selected and selected.Value)
 
         self:RecalcWidth()
         return self

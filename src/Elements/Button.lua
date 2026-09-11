@@ -1,6 +1,5 @@
 return function(ctx)
     local I = ctx.Internal
-    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Button = I.MakeElementClass()
@@ -18,13 +17,8 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
+        self:_initRow(title, right, left, rightW, 0)
         self.Callback = opts.Callback or function() end
-        self._width = 0
-        self._busy = false
 
         local overlay = I.Create("TextButton", {
             BackgroundTransparency = 1,
@@ -33,70 +27,13 @@ return function(ctx)
             ZIndex = 0,
             Parent = row,
         })
-        I.AddPress(overlay, row)
-
-        local spinner
-        local spinTween
-        local function setSpinner(on)
-            if on then
-                if not spinner then
-                    spinner = I.Create("Frame", {
-                        AnchorPoint = Vector2.new(0.5, 0.5),
-                        Position = UDim2.fromScale(0.5, 0.5),
-                        Size = UDim2.fromOffset(14, 14),
-                        BackgroundTransparency = 1,
-                        ZIndex = 5,
-                        Parent = row,
-                        Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-                    })
-                    I.Bind(I.Create("UIStroke", { Thickness = 2, Parent = spinner }), "Color", "Accent")
-                end
-                spinner.Visible = true
-                spinTween = I.Tween(spinner, TweenInfo.new(0.7, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), { Rotation = 360 })
-                if title then I.Tween(title, "Fast", { TextTransparency = 0.55 }) end
-            else
-                if spinner then spinner.Visible = false end
-                if spinTween then pcall(function() spinTween:Cancel() end) spinTween = nil end
-                if title and not self._disabled then I.Tween(title, "Fast", { TextTransparency = 0 }) end
-            end
-        end
-
-        function self:SetBusy(busy)
-            if self._destroyed or self._busy == (busy == true) then return end
-            self._busy = busy == true
-            setSpinner(self._busy)
-        end
-
-        function self:HandleAsync(fn)
-            if self._destroyed or self._busy then return end
-            if type(fn) ~= "function" then return end
-            self:SetBusy(true)
-            task.spawn(function()
-                local ok, err = pcall(fn)
-                if not ok then
-                    warn("[Kailex] " .. tostring(err))
-                    Kailex:Notify({
-                        Title = "Task error",
-                        Text = tostring(err),
-                        Type = "Error", Duration = 6,
-                    })
-                end
-                self:SetBusy(false)
-            end)
-        end
 
         local function fire()
-            if self._busy or self._disabled then return end
-            I.ApplyRipple(overlay)
-            I.PlaySound("Click")
-            if opts.Confirm then
-                Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
-                    I.RunCallback(self.Callback, self.Title)
-                end)
-                return
+            if self._disabled then return end
+                I.ApplyRipple(overlay)
+                I.PlaySound("Click")
+                I.RunCallback(self.Callback, self.Title)
             end
-            I.RunCallback(self.Callback, self.Title)
-        end
 
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if overlay:GetAttribute("Dragging") then return end
@@ -114,8 +51,7 @@ return function(ctx)
                 Parent = right,
             })
             local raw = tostring(opts.Icon)
-            local isAsset = tonumber(opts.Icon) ~= nil
-                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            local isAsset = I.IsAssetId(opts.Icon)
             if isAsset then
                 local img = I.Create("ImageLabel", {
                     BackgroundTransparency = 1,
@@ -129,12 +65,9 @@ return function(ctx)
                 I.Bind(img, "ImageColor3", "SubText")
                 self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
                 self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
-            else
-                local holder = I.Icon(iconBtn, raw, "SubText")
-                holder.AnchorPoint = Vector2.new(0.5, 0.5)
-                holder.Position = UDim2.fromScale(0.5, 0.5)
-                holder.Size = UDim2.fromOffset(16, 16)
-            end
+                else
+                    I.Icon(iconBtn, raw, "SubText", 16)
+                end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 

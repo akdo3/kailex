@@ -2,8 +2,12 @@ return function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
+    local unloaded = false
 
     function Kailex:Unload()
+        if unloaded then return end
+        unloaded = true
+        pcall(function() I.SaveManager:Flush() end)
         I.ModalManager.CloseAll()
         pcall(function() I.ContextMenu.Hide() end)
         for el in pairs(I.QuickWidgets.Active) do I.QuickWidgets.Destroy(el) end
@@ -15,15 +19,6 @@ return function(ctx)
         I.HotElement = nil
         I.ActiveKeybindListener = nil
         I.LibMaid:Destroy()
-        for _, s in ipairs(I.SoundInstances) do
-            pcall(function() s:Destroy() end)
-        end
-        table.clear(I.SoundInstances)
-        for k in pairs(I.SoundPool) do I.SoundPool[k] = nil end
-        for _, r in ipairs(I.RipplePool) do
-            pcall(function() r:Destroy() end)
-        end
-        for i = #I.RipplePool, 1, -1 do table.remove(I.RipplePool, i) end
         pcall(function() I.ScreenGui:Destroy() end)
         local genv = I.Getgenv()
         if genv and genv.kailex == Kailex then genv.kailex = nil end
@@ -36,36 +31,12 @@ return function(ctx)
     I.UpdateViewport()
 
     local bootHook = I.AddInputHook(function() return true end, function(input, gp)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            local top = I.ModalManager.Stack[#I.ModalManager.Stack]
-            if not (top and top.Owner == nil) then
-                local m = input.Position
-                if m then
-                    local best, bestZ = nil, -1
-                    for _, w in ipairs(Kailex.Windows) do
-                        if not w._destroyed and w.Root and w.Root.Visible and not w._hidden then
-                            local ap, as = w.Root.AbsolutePosition, w.Root.AbsoluteSize
-                            if m.X >= ap.X and m.X <= ap.X + as.X
-                                and m.Y >= ap.Y and m.Y <= ap.Y + as.Y then
-                                if w.Root.ZIndex > bestZ then
-                                    best, bestZ = w, w.Root.ZIndex
-                                end
-                            end
-                        end
-                    end
-                    if best and best._focus then I.SafeCall(best._focus) end
-                end
-            end
-        end
-
         if input.KeyCode == Enum.KeyCode.Escape then
             if I.ActiveKeybindListener == nil and I.ModalManager.CloseTop() then
                 return
             end
         end
 
-        if gp then return end
         local code = input.KeyCode
         if code == Enum.KeyCode.Unknown then return end
         if I.ActiveKeybindListener ~= nil then return end
@@ -75,12 +46,23 @@ return function(ctx)
             and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
                 or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
             local w = Kailex._lastActive
-            if w and not w._destroyed and not w._hidden
-                and not w.Minimized and w._setSearch then
-                w:_setSearch(true)
+            if not (w and not w._destroyed and not w._hidden
+                and not w.Minimized and w._setSearch) then
+                w = nil
+                local best = -1
+                for _, cw in ipairs(Kailex.Windows) do
+                    if not cw._destroyed and not cw._hidden and not cw.Minimized
+                        and cw._setSearch and cw.Root and cw.Root.ZIndex > best then
+                        best = cw.Root.ZIndex
+                        w = cw
+                    end
+                end
             end
+            if w then w:_setSearch(true) end
             return
         end
+
+        if gp then return end
 
         local key = I.Setting.ToggleUIKey
         if key ~= nil and code == key then
@@ -103,10 +85,6 @@ return function(ctx)
         end
     end)
     I.LibMaid:Give(function() I.RemoveInputHook(bootHook) end)
-
-    I.LibMaid:Give(I.SaveManager.DataChanged:Connect(function()
-        I.ApplyPersisted()
-    end))
 
     if I.Device.IsTouch then
         Kailex:CreateMobileButton()

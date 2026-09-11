@@ -15,11 +15,7 @@ return function(ctx)
             Height = rowH, Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local function load()
@@ -106,11 +102,7 @@ return function(ctx)
             end
         end)
 
-        if opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
 
         self:RecalcWidth()
         return self

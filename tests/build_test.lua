@@ -34,8 +34,8 @@ if content:find("Tests/") then
 end
 
 local count = select(2, content:gsub("Bundle%[", ""))
-if count < 48 then
-    print("FAIL: expected 48 modules, found " .. count)
+if count < 60 then
+    print("FAIL: expected 60 modules, found " .. count)
     os.exit(1)
 end
 

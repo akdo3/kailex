@@ -5,6 +5,11 @@ return function(ctx)
 
     function FX.Shake(inst, dist)
         if not inst then return end
+        if inst:GetAttribute("__shaking") then return end
+        inst:SetAttribute("__shaking", true)
+        task.delay(1, function()
+            pcall(function() inst:SetAttribute("__shaking", nil) end)
+        end)
         local orig = inst.Position
         local d = dist or 8
         I.Tween(inst, "Fast", { Position = orig + UDim2.fromOffset(d, 0) }, function()

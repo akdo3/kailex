@@ -20,16 +20,21 @@ return function(ctx)
 
     local LastPlayed = {}
     local THROTTLE = 0.08
+    local KindThrottle = { Slider = 0.06, Click = 0.05 }
 
     local function PlaySound(kind, scale)
         if not Setting.Sounds then return end
         local a = Audio[kind]
         if type(a) ~= "table" or a.Id == "" then return end
-        if (a.Vol or 0.4) <= 0.08 then
+        local gap = KindThrottle[kind]
+            or ((a.Vol or 0.4) <= 0.08 and THROTTLE or 0)
+
+        if gap > 0 then
             local now = os.clock()
-            if LastPlayed[kind] and now - LastPlayed[kind] < THROTTLE then return end
+            if LastPlayed[kind] and now - LastPlayed[kind] < gap then return end
             LastPlayed[kind] = now
         end
+
         pcall(function()
             local pool = SoundPool[a.Id]
             if not pool then pool = {} SoundPool[a.Id] = pool end
@@ -62,6 +67,14 @@ return function(ctx)
             s:Play()
         end)
     end
+
+    I.LibMaid:Give(function()
+        for _, s in ipairs(SoundInstances) do
+            pcall(function() s:Destroy() end)
+        end
+        table.clear(SoundInstances)
+        for k in pairs(SoundPool) do SoundPool[k] = nil end
+    end)
 
     I.Audio = Audio
     I.PlaySound = PlaySound

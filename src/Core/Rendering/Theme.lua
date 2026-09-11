@@ -74,7 +74,7 @@ return function(ctx)
         if not b then b = {} ThemeBindings[inst] = b end
         b[prop] = key
         local v = I.CurrentTheme[key]
-        if v ~= nil then inst[prop] = v end
+        if v ~= nil and inst[prop] ~= v then inst[prop] = v end
         return inst
     end
 
@@ -92,7 +92,7 @@ return function(ctx)
                 for inst, binds in pairs(ThemeBindings) do
                     for prop, key in pairs(binds) do
                         local v = t[key]
-                        if v ~= nil then inst[prop] = v end
+                        if v ~= nil and inst[prop] ~= v then inst[prop] = v end
                     end
                 end
                 Kailex.ThemeChanged:Fire(t)
@@ -113,6 +113,10 @@ return function(ctx)
 
     I.Themes = Themes
     I.ThemeKeys = ThemeKeys
+    I.BuiltinThemes = {
+        Nocturne = true, Aurora = true, Sakura = true,
+        Daylight = true, Obsidian = true, Ember = true,
+    }
     I.Bind = Bind
     I.ApplyTheme = ApplyTheme
 end

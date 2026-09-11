@@ -24,26 +24,16 @@ return function(ctx)
         for _ in pairs(QuickWidgets.Active) do count += 1 end
         local name = element.Title
         local s = I.GetScale()
-        local widget = I.Create("Frame", {
-            Size = UDim2.fromOffset(0, 0),
-            Position = UDim2.fromOffset((I.Viewport.X - 70) / s, (I.Viewport.Y * 0.35 + count * 56) / s),
-            BackgroundColor3 = I.CurrentTheme.Surface,
-            BorderSizePixel = 0,
+        local widget, _, wMaid = I.FloatingChip({
+            Anchor = Vector2.new(0, 0),
             ZIndex = 20,
             Parent = I.LayerWindows,
-            Children = { I.Corner(12), I.StrokeBind(1, "Stroke", 0.4) },
+            Position = UDim2.fromOffset((I.Viewport.X - 70) / s, (I.Viewport.Y * 0.35 + count * 56) / s),
         })
-        I.Bind(widget, "BackgroundColor3", "Surface")
-        local wMaid = I.Maid.new()
-        wMaid:Link(widget)
-        QuickWidgets.Active[element] = { Frame = widget, Maid = wMaid }
+        local entry = { Frame = widget, Maid = wMaid }
+        QuickWidgets.Active[element] = entry
 
         local state = element:Get() == true
-        local hit = I.Create("TextButton", {
-            BackgroundTransparency = 1, Text = "",
-            Size = UDim2.fromScale(1, 1),
-            Parent = widget,
-        })
         local letter = I.Create("TextLabel", {
             BackgroundTransparency = 1,
             AnchorPoint = Vector2.new(0.5, 0.5),
@@ -81,16 +71,19 @@ return function(ctx)
         local function refresh()
             dot.BackgroundColor3 = state and I.CurrentTheme.Accent or I.CurrentTheme.Stroke
         end
+        entry.Refresh = refresh
         refresh()
-        I.MakeDraggable(hit, widget, { Clamp = true })
-        wMaid:Give(hit.MouseButton1Click:Connect(function()
-            if hit:GetAttribute("Dragging") then return end
-            I.ApplyRipple(hit)
+
+        wMaid:Give(widget.MouseButton1Click:Connect(function()
+            if widget:GetAttribute("Dragging") then return end
+            I.ApplyRipple(widget)
             state = not state
             element:Set(state)
             refresh()
         end))
+
         wMaid:Give(closeB.MouseButton1Click:Connect(function() QuickWidgets.Destroy(element) end))
+
         wMaid:Give(element.Changed:Connect(function(v)
             state = v == true
             refresh()
@@ -99,11 +92,24 @@ return function(ctx)
         local letterScale = I.Create("UIScale", { Parent = letter })
         letterScale.Scale = 0.2
         I.Tween(letterScale, "Pop", { Scale = 1 })
-        I.Tween(widget, "SpringBig", { Size = UDim2.fromOffset(46, 46) })
     end
 
-    table.insert(I.ViewportHooks, function()
-        for _, w in pairs(QuickWidgets.Active) do I.ClampFloat(w.Frame) end
-        if Kailex._mobileButton then I.ClampFloat(Kailex._mobileButton) end
+    local function onViewport()
+        for _, w in pairs(QuickWidgets.Active) do
+            if w.Frame and w.Frame.Parent then I.ClampFloat(w.Frame) end
+        end
+        local mb = Kailex._mobileButton
+        if mb and mb.Parent then I.ClampFloat(mb) end
+    end
+    table.insert(I.ViewportHooks, onViewport)
+    I.LibMaid:Give(function()
+        local idx = table.find(I.ViewportHooks, onViewport)
+        if idx then table.remove(I.ViewportHooks, idx) end
     end)
+
+    I.LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+        for _, w in pairs(QuickWidgets.Active) do
+            if w.Refresh then w.Refresh() end
+        end
+    end))
 end

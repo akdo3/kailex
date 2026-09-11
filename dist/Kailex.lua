@@ -3,26 +3,28 @@ local Bundle = {}
 Bundle.__order = (function()
 return {
     "Core/Services/Env",
-    "Core/Primitives/Signal", "Core/Primitives/Maid",
-    "Core/Primitives/Root", "Core/Primitives/Utils",
+    "Core/Primitives/Signal", "Core/Primitives/Maid", "Core/Primitives/Root", "Core/Primitives/Utils",
     "Core/Interaction/Input",
-    "Core/Rendering/Tween", "Core/Rendering/Theme", "Core/Rendering/Instance",
-    "Core/Services/Save", "Core/Services/Sound",
-    "Core/Misc/Gui",
-    "Core/Interaction/Modal", "Core/Interaction/Drag", "Core/Interaction/Ripple",
-    "Core/Rendering/FX",
-    "Core/Overlays/Tooltip", "Core/Overlays/Notify", "Core/Misc/Callbacks",
+    "Core/Rendering/Tween", "Core/Rendering/Theme", "Core/Rendering/Instance", "Core/Rendering/Icon",
+    "Core/Services/Save", "Core/Services/Sound", "Core/Misc/Gui",
+    "Core/Interaction/Modal", "Core/Interaction/Drag", "Core/Interaction/Ripple", "Core/Rendering/FX",
+    "Core/Overlays/Tooltip", "Core/Overlays/Notify", "Core/Overlays/NotifyCards", "Core/Misc/Callbacks",
+    "Core/Overlays/ModalCard",
     "Core/Overlays/Confirm", "Core/Misc/QuickWidgets", "Core/Overlays/ContextMenu",
-    "Elements/Base",
-    "Elements/Label", "Elements/Paragraph", "Elements/Divider",
-    "Elements/Section", "Elements/Button", "Elements/Toggle",
-    "Elements/Slider", "Elements/Keybind", "Elements/Dropdown",
-    "Elements/TextInput", "Elements/ColorPicker", "Elements/ProgressBar",
-    "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input",
-    "Elements/DataTable",
-    "Window/GridRow", "Window/Tab", "Window/Window",
-    "App/MobileButton", "App/KeySystem", "App/ThemeStore",
-    "App/SettingsTab", "App/Persist", "App/Boot",
+    "Elements/Base", "Elements/Row",
+    "Elements/Label", "Elements/Paragraph", "Elements/Divider", "Elements/Section", "Elements/Button", "Elements/Toggle",
+    "Elements/Slider/View", "Elements/Slider/Init", "Elements/Keybind",
+    "Elements/Dropdown/View", "Elements/Dropdown/Virtual", "Elements/Dropdown/Actions", "Elements/Dropdown/Init",
+    "Elements/TextInput",
+    "Elements/ColorPicker/View", "Elements/ColorPicker/Init",
+    "Elements/ProgressBar", "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
+    "Window/Class", "Window/Chrome", "Window/Search", "Window/Layout", "Window/State", "Window/Placement",
+    "Window/GridRow", "Window/Tab", "Window/TabFilter", "Window/Init",
+    "App/MobileButton",
+    "App/KeySystem/Logic", "App/KeySystem/View", "App/KeySystem/Init",
+    "App/ThemeStore",
+    "App/SettingsTab/Sections", "App/SettingsTab/Init",
+    "App/Persist", "App/Boot",
 }
 
 end)()
@@ -367,16 +369,99 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
     end
 
     local function RGBtoHSV(c)
-        local r, g, b = c.R, c.G, c.B
-        local max, min = math.max(r, g, b), math.min(r, g, b)
-        local v, d = max, max - min
-        local s = (max == 0) and 0 or d / max
-        local h
-        if d == 0 then h = 0
-        elseif max == r then h = ((g - b) / d) % 6
-        elseif max == g then h = (b - r) / d + 2
-        else h = (r - g) / d + 4 end
-        return h / 6, s, v
+        return c:ToHSV()
+    end
+
+    local function IsAssetId(v)
+        local raw = tostring(v)
+        return tonumber(v) ~= nil
+            or raw:sub(1, 10) == "rbxassetid" or raw:sub(1, 11) == "rbxasset://"
+    end
+
+    local function NormalizeOptions(list)
+        local out = {}
+        for _, v in ipairs(list or {}) do
+            if type(v) == "table" and v.Text ~= nil then
+                local val = (v.Value ~= nil) and v.Value or v.Text
+                out[#out + 1] = { Text = tostring(v.Text), Value = val, Key = tostring(val) }
+            else
+                out[#out + 1] = { Text = tostring(v), Value = v, Key = tostring(v) }
+            end
+        end
+        return out
+    end
+
+    local function NumSpec(opts, dMin, dMax, dStep)
+        local min = tonumber(opts.Min or opts.MinVal or dMin) or dMin
+        local max = tonumber(opts.Max or opts.MaxVal or dMax) or dMax
+        if max <= min then max = min + 1 end
+        local step = tonumber(opts.Step or opts.Increment)
+        if not (step and step > 0) then
+            step = dStep or ((min % 1 == 0 and max % 1 == 0) and 1 or 0.01)
+        end
+        local decimals = step >= 1 and 0 or math.clamp(math.ceil(-math.log10(step)), 1, 3)
+        local pow = 10 ^ decimals
+        local function snap(v)
+            v = math.floor((v - min) / step + 0.5) * step + min
+            v = math.clamp(math.floor(v * pow + 0.5) / pow, min, max)
+            if decimals <= 0 then v = math.floor(v + 0.5) end
+            return v
+        end
+        return min, max, step, decimals, snap
+    end
+
+    local function ReadClipboard()
+        local ok, fn = pcall(function() return getclipboard end)
+        if ok and type(fn) == "function" then
+            local okRead, txt = pcall(fn)
+            if okRead and type(txt) == "string" then return txt end
+        end
+        return nil
+    end
+
+    local function GetClipboardSetter()
+        local ok, sc = pcall(function() return setclipboard or toclipboard or setrbxclipboard end)
+        if ok and type(sc) == "function" then return sc end
+        return nil
+    end
+
+    local function OnLongPress(obj, alive, fn)
+        if I.Device.IsTouch then
+            local token = nil
+            obj.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.Touch then return end
+                local myToken = {}
+                token = myToken
+                task.delay(0.55, function()
+                    if token ~= myToken or not alive() then return end
+                    token = nil
+                    if fn() ~= false then
+                        obj:SetAttribute("Dragging", true)
+                    end
+                end)
+            end)
+            obj.InputEnded:Connect(function()
+                token = nil
+                if obj:GetAttribute("Dragging") then
+                    task.defer(function() obj:SetAttribute("Dragging", nil) end)
+                end
+            end)
+        else
+            obj.MouseButton2Click:Connect(function()
+                if alive() then fn() end
+            end)
+        end
+    end
+
+    local function TrackHot(el, row)
+        if I.Device.IsTouch then return end
+        el.Maid:Give(function()
+            if I.HotElement == el then I.HotElement = nil end
+        end)
+        row.MouseEnter:Connect(function() I.HotElement = el end)
+        row.MouseLeave:Connect(function()
+            if I.HotElement == el then I.HotElement = nil end
+        end)
     end
 
     I.IsInputDown = IsInputDown
@@ -386,6 +471,81 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
     I.ColorToHex = ColorToHex
     I.HexToColor = HexToColor
     I.RGBtoHSV = RGBtoHSV
+    local function XAlign()
+        return I.Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left
+    end
+
+    local function HAlign()
+        return I.Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right
+    end
+
+    local function MkButton(parent, props, style)
+        style = style or {}
+        local bgKey = style.Bg or "Element"
+        local textKey = style.Text or "Text"
+        props.BackgroundColor3 = I.CurrentTheme[bgKey]
+        props.TextColor3 = I.CurrentTheme[textKey]
+        props.BorderSizePixel = 0
+        props.AutoButtonColor = false
+        props.Parent = parent
+        props.Children = { I.Corner(style.Corner or 8) }
+        local b = I.Create("TextButton", props)
+        I.Bind(b, "BackgroundColor3", bgKey)
+        I.Bind(b, "TextColor3", textKey)
+        I.AddHover(b, style.Hover)
+        return b
+    end
+
+    local function FloatingChip(cfg)
+        cfg = cfg or {}
+        local chip = I.Create("TextButton", {
+            AnchorPoint = cfg.Anchor or Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(0, 0),
+            Position = cfg.Position,
+            BackgroundColor3 = I.CurrentTheme.Surface,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            ZIndex = cfg.ZIndex or 5,
+            Parent = cfg.Parent or I.LayerPersistent,
+        })
+        I.Bind(chip, "BackgroundColor3", "Surface")
+        I.Create("UICorner", {
+            CornerRadius = cfg.Circle and UDim.new(1, 0) or UDim.new(0, cfg.Corner or 12),
+            Parent = chip,
+        })
+        I.StrokeBind(1, "Stroke", cfg.StrokeT or 0.4).Parent = chip
+        local glyph
+        if cfg.Text then
+            glyph = I.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = cfg.GlyphPos or UDim2.fromScale(0.5, 0.5),
+                Size = cfg.GlyphSize or UDim2.fromScale(1, 1),
+                Font = cfg.Font or Enum.Font.GothamBold,
+                TextSize = cfg.TextSize or 14,
+                TextColor3 = I.CurrentTheme.Text,
+                Text = cfg.Text,
+                Parent = chip,
+            })
+            I.Bind(glyph, "TextColor3", "Text")
+        end
+        local maid = I.Maid.new():Link(chip)
+        I.MakeDraggable(chip, chip, { Clamp = true })
+        I.Tween(chip, cfg.Pop or "SpringBig", { Size = UDim2.fromOffset(46, 46) })
+        return chip, glyph, maid
+    end
+
+    I.IsAssetId = IsAssetId
+    I.NormalizeOptions = NormalizeOptions
+    I.NumSpec = NumSpec
+    I.ReadClipboard = ReadClipboard
+    I.GetClipboardSetter = GetClipboardSetter
+    I.OnLongPress = OnLongPress
+    I.TrackHot = TrackHot
+    I.XAlign = XAlign
+    I.HAlign = HAlign
+    I.MkButton = MkButton
+    I.FloatingChip = FloatingChip
 end
 
 
@@ -398,33 +558,41 @@ Bundle["Core/Interaction/Input"] = function(ctx)
     local InputHooks = {}
     I.InputHooks = InputHooks
 
-    local function AddInputHook(alive, fn)
-        local rec = { alive = alive, fn = fn }
-        table.insert(InputHooks, rec)
-        return rec
+    local function RemoveInputHook(rec)
+        rec._removed = true
+        local idx = table.find(InputHooks, rec)
+        if idx then table.remove(InputHooks, idx) end
     end
 
-    local function RemoveInputHook(rec)
-        for i, r in ipairs(InputHooks) do
-            if r == rec then table.remove(InputHooks, i) break end
+    local function AddInputHook(alive, fn)
+        local rec = { alive = alive, fn = fn }
+        function rec:Destroy()
+            RemoveInputHook(rec)
         end
+        table.insert(InputHooks, rec)
+        return rec
     end
 
     I.LibMaid:Give(UserInputService.InputBegan:Connect(function(input, gp)
         local n = #InputHooks
         if n == 0 then return end
-        for i = 1, n do
-            local h = InputHooks[i]
-            if h and h.alive() then
-                local ok, err = pcall(h.fn, input, gp)
-                if not ok then warn("[Kailex] " .. tostring(err)) end
+        local snapshot = table.clone(InputHooks)
+        for i = 1, #snapshot do
+            local h = snapshot[i]
+            if h and not h._removed then
+                local okAlive, alive = pcall(h.alive)
+                if okAlive and alive then
+                    local ok, err = pcall(h.fn, input, gp)
+                    if not ok then warn("[Kailex] " .. tostring(err)) end
+                end
             end
         end
         if #InputHooks > 96 then
             local keep = table.create(8)
             for i = 1, #InputHooks do
                 local h = InputHooks[i]
-                if h.alive() then keep[#keep + 1] = h end
+                local okAlive, alive = pcall(h.alive)
+                if okAlive and alive then keep[#keep + 1] = h end
             end
             I.InputHooks = keep
             InputHooks = keep
@@ -435,22 +603,6 @@ Bundle["Core/Interaction/Input"] = function(ctx)
     I.KeybindRegistry = KeybindRegistry
     I.ActiveKeybindListener = nil
     I.HotElement = nil
-
-    local function ParseKey(v)
-        if typeof(v) == "EnumItem" then
-            if v.EnumType == Enum.KeyCode then return v end
-            return nil
-        end
-        if type(v) == "string" then
-            local kind, name = v:match("^(%a+):(.+)$")
-            if kind and kind:lower() ~= "key" then return nil end
-            local key = name or v
-            local ok, item = pcall(function() return Enum.KeyCode[key] end)
-            if ok and item ~= nil then return item end
-            return nil
-        end
-        return nil
-    end
 
     local function ToBinding(v)
         if typeof(v) == "EnumItem" then
@@ -485,6 +637,11 @@ Bundle["Core/Interaction/Input"] = function(ctx)
             end
         end
         return nil
+    end
+
+    local function ParseKey(v)
+        local b = ToBinding(v)
+        if b and b.Kind == "Key" then return b.Code end
     end
 
     local function NotifyKeybindConflict(self, b)
@@ -669,7 +826,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
         if not b then b = {} ThemeBindings[inst] = b end
         b[prop] = key
         local v = I.CurrentTheme[key]
-        if v ~= nil then inst[prop] = v end
+        if v ~= nil and inst[prop] ~= v then inst[prop] = v end
         return inst
     end
 
@@ -687,7 +844,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
                 for inst, binds in pairs(ThemeBindings) do
                     for prop, key in pairs(binds) do
                         local v = t[key]
-                        if v ~= nil then inst[prop] = v end
+                        if v ~= nil and inst[prop] ~= v then inst[prop] = v end
                     end
                 end
                 Kailex.ThemeChanged:Fire(t)
@@ -708,6 +865,10 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
 
     I.Themes = Themes
     I.ThemeKeys = ThemeKeys
+    I.BuiltinThemes = {
+        Nocturne = true, Aurora = true, Sakura = true,
+        Daylight = true, Obsidian = true, Ember = true,
+    }
     I.Bind = Bind
     I.ApplyTheme = ApplyTheme
 end
@@ -787,143 +948,6 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         return s
     end
 
-    local function Icon(parent, kind, colorKey)
-        colorKey = colorKey or "SubText"
-        local holder = Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(14, 14),
-            Parent = parent,
-        })
-        local function bar(w, h, x, y, rot)
-            local f = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Size = UDim2.fromOffset(w, h),
-                Position = UDim2.fromScale(x, y),
-                Rotation = rot or 0,
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-            })
-            I.Bind(f, "BackgroundColor3", colorKey)
-        end
-        if kind == "Minimize" then
-            bar(10, 2, 0.5, 0.5)
-        elseif kind == "Close" then
-            bar(11, 2, 0.5, 0.5, 45)
-            bar(11, 2, 0.5, 0.5, -45)
-        elseif kind == "Chevron" then
-            bar(7, 2, 0.32, 0.55, 45)
-            bar(7, 2, 0.68, 0.55, -45)
-        elseif kind == "Search" then
-            local ring = Create("Frame", {
-                Size = UDim2.fromOffset(8, 8),
-                Position = UDim2.fromOffset(1, 1),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            bar(6, 2, 0.72, 0.72, 45)
-        elseif kind == "Grip" then
-            bar(2, 5, 0.30, 0.72, 45)
-            bar(2, 7, 0.52, 0.52, 45)
-            bar(2, 9, 0.74, 0.32, 45)
-        elseif kind == "Gear" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(6, 6),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            for i = 0, 7 do
-                local ang = i * 45
-                local f = Create("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.new(0.5, math.cos(math.rad(ang)) * 5, 0.5, math.sin(math.rad(ang)) * 5),
-                    Size = UDim2.fromOffset(3, 2),
-                    Rotation = ang,
-                    BackgroundColor3 = I.CurrentTheme[colorKey],
-                    BorderSizePixel = 0,
-                    Parent = holder,
-                })
-                I.Bind(f, "BackgroundColor3", colorKey)
-            end
-        elseif kind == "Check" then
-            bar(6, 2, 0.34, 0.60, 45)
-            bar(9, 2, 0.64, 0.42, -45)
-        elseif kind == "Reset" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(9, 9),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = ring }), "Color", colorKey)
-            bar(4, 2, 0.82, 0.16, 0)
-            bar(3, 2, 0.68, 0.22, 90)
-        elseif kind == "ResizeH" then
-            bar(6, 2, 0.24, 0.40, -45)
-            bar(6, 2, 0.24, 0.60, 45)
-            bar(11, 2, 0.5, 0.5, 0)
-            bar(6, 2, 0.76, 0.40, 45)
-            bar(6, 2, 0.76, 0.60, -45)
-        elseif kind == "Pin" then
-            local ring = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.34),
-                Size = UDim2.fromOffset(7, 7),
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-            })
-            I.Bind(ring, "BackgroundColor3", colorKey)
-            bar(2, 6, 0.5, 0.76)
-        elseif kind == "Maximize" then
-            local sq = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(9, 9),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.6, Parent = sq }), "Color", colorKey)
-        elseif kind == "Restore" then
-            local back = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, -2, 0.5, -2),
-                Size = UDim2.fromOffset(7, 7),
-                BackgroundTransparency = 1,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
-            })
-            I.Bind(Create("UIStroke", { Thickness = 1.4, Parent = back }), "Color", colorKey)
-            local front = Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 2, 0.5, 2),
-                Size = UDim2.fromOffset(8, 8),
-                BackgroundColor3 = I.CurrentTheme[colorKey],
-                BorderSizePixel = 0,
-                Parent = holder,
-                Children = { Create("UICorner", { CornerRadius = UDim.new(0, 1) }) },
-            })
-            I.Bind(front, "BackgroundColor3", colorKey)
-        elseif kind == "Alert" then
-            bar(2, 6, 0.5, 0.40)
-            bar(2, 2, 0.5, 0.76)
-        elseif kind == "Info" then
-            bar(2, 2, 0.5, 0.24)
-            bar(2, 6, 0.5, 0.55)
-        end
-        return holder
-    end
-
     local function AddHover(obj, opts)
         if I.Device.IsTouch then return end
         opts = opts or {}
@@ -932,13 +956,13 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
         local hoverT = opts.HoverTransparency
         if hoverT == nil then hoverT = baseT end
         local hoverKey = opts.HoverKey or "ElementHover"
-        local baseKey  = opts.BaseKey or "Element"
+        local baseKey = opts.BaseKey or "Element"
+        local stroke = obj:FindFirstChildOfClass("UIStroke")
 
         obj.MouseEnter:Connect(function()
             if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") then return end
             I.PlaySound("Hover", 0.12)
             I.Tween(obj, "HoverIn", { BackgroundColor3 = I.CurrentTheme[hoverKey], BackgroundTransparency = hoverT })
-            local stroke = obj:FindFirstChildOfClass("UIStroke")
             if stroke and not opts.IgnoreStroke then
                 I.Tween(stroke, "HoverIn", { Color = I.CurrentTheme.StrokeBright, Transparency = 0.25 })
             end
@@ -946,39 +970,10 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
 
         obj.MouseLeave:Connect(function()
             I.Tween(obj, "HoverOut", { BackgroundColor3 = I.CurrentTheme[baseKey], BackgroundTransparency = baseT })
-            local stroke = obj:FindFirstChildOfClass("UIStroke")
             if stroke and not opts.IgnoreStroke then
                 I.Tween(stroke, "HoverOut", { Color = I.CurrentTheme.Stroke, Transparency = opts.StrokeTransparency or 0.6 })
             end
         end)
-    end
-
-    local function AddPress(hit, target)
-        target = target or hit
-        if not hit or not target then return nil end
-        if target:FindFirstChildOfClass("UIScale") then return nil end
-        local scale = Create("UIScale", { Scale = 1, Parent = target })
-        local down = false
-        local function release()
-            if not down then return end
-            down = false
-            I.Tween(scale, "PopSoft", { Scale = 1 })
-        end
-        hit.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            if target:GetAttribute("Disabled") then return end
-            down = true
-            scale.Scale = 0.97
-        end)
-        hit.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.Touch then
-                release()
-            end
-        end)
-        hit.MouseLeave:Connect(release)
-        return scale
     end
 
     local function DropShadow(target, opts)
@@ -994,16 +989,14 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
             Parent = parent,
         })
         local radius = opts.Radius or 12
-        local spreads = opts.Spreads or { 2, 5, 9 }
-        local dropY = opts.DropY or 3
+        local defs = { { 2, 0.92 }, { 5, 0.945 }, { 9, 0.962 }, { 14, 0.978 } }
         local layers = {}
-        for i = 1, #spreads do
-            local s = spreads[i]
-            local base = ({ 0.92, 0.945, 0.965 })[i] or 0.965
+        for i, def in ipairs(defs) do
+            local s, base = def[1], def[2]
             local f = Create("Frame", {
                 AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 0, 0.5, dropY),
-                Size = UDim2.new(1, s * 2, 1, s * 2 + dropY),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.new(1, s * 2, 1, s * 2),
                 BackgroundColor3 = Color3.new(0, 0, 0),
                 BackgroundTransparency = base,
                 BorderSizePixel = 0,
@@ -1059,10 +1052,115 @@ Bundle["Core/Rendering/Instance"] = function(ctx)
     I.Create = Create
     I.Corner = Corner
     I.StrokeBind = StrokeBind
-    I.Icon = Icon
     I.AddHover = AddHover
-    I.AddPress = AddPress
     I.DropShadow = DropShadow
+end
+
+
+-- [[Core/Rendering/Icon]]
+Bundle["Core/Rendering/Icon"] = function(ctx)
+    local I = ctx.Internal
+
+    local Bars = {
+        Minimize = { {10, 2, 0.5, 0.5} },
+        Close    = { {11, 2, 0.5, 0.5, 45}, {11, 2, 0.5, 0.5, -45} },
+        Chevron  = { {7, 2, 0.32, 0.55, 45}, {7, 2, 0.68, 0.55, -45} },
+        Grip     = { {2, 5, 0.30, 0.72, 45}, {2, 7, 0.52, 0.52, 45}, {2, 9, 0.74, 0.32, 45} },
+        Check    = { {6, 2, 0.34, 0.60, 45}, {9, 2, 0.64, 0.42, -45} },
+        Alert    = { {2, 6, 0.5, 0.40}, {2, 2, 0.5, 0.76} },
+        Info     = { {2, 2, 0.5, 0.24}, {2, 6, 0.5, 0.55} },
+        Pin      = { {2, 6, 0.5, 0.76} },
+        Search   = { {6, 2, 0.72, 0.72, 45} },
+        Reset    = { {4, 2, 0.82, 0.16}, {3, 2, 0.68, 0.22, 90} },
+    }
+
+    local function part(holder, colorKey, w, h, pos, rot)
+        local f = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(w, h),
+            Position = pos,
+            Rotation = rot or 0,
+            BackgroundColor3 = I.CurrentTheme[colorKey],
+            BorderSizePixel = 0,
+            Parent = holder,
+        })
+        I.Bind(f, "BackgroundColor3", colorKey)
+        return f
+    end
+
+    local function ring(holder, colorKey, sz, pos, corner, thick, filled, anchor)
+        local f = I.Create("Frame", {
+            AnchorPoint = anchor or Vector2.new(0.5, 0.5),
+            Position = pos,
+            Size = sz,
+            BackgroundTransparency = filled and 0 or 1,
+            BackgroundColor3 = filled and I.CurrentTheme[colorKey] or nil,
+            BorderSizePixel = 0,
+            Parent = holder,
+            Children = { I.Create("UICorner", { CornerRadius = corner }) },
+        })
+        if filled then
+            I.Bind(f, "BackgroundColor3", colorKey)
+        else
+            I.Bind(I.Create("UIStroke", { Thickness = thick or 1.6, Parent = f }), "Color", colorKey)
+        end
+        return f
+    end
+
+    local function IconRaw(kind, colorKey)
+        colorKey = colorKey or "SubText"
+        local holder = I.Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(14, 14),
+        })
+        for _, b in ipairs(Bars[kind] or {}) do
+            part(holder, colorKey, b[1], b[2], UDim2.fromScale(b[3], b[4]), b[5])
+        end
+        if kind == "Search" then
+            ring(holder, colorKey, UDim2.fromOffset(8, 8), UDim2.fromOffset(1, 1), UDim.new(1, 0), 1.6, false, Vector2.zero)
+        elseif kind == "Gear" then
+            ring(holder, colorKey, UDim2.fromOffset(6, 6), UDim2.fromScale(0.5, 0.5), UDim.new(1, 0))
+            for i = 0, 7 do
+                local ang = i * 45
+                part(holder, colorKey, 3, 2,
+                    UDim2.new(0.5, math.cos(math.rad(ang)) * 5, 0.5, math.sin(math.rad(ang)) * 5), ang)
+            end
+        elseif kind == "Reset" then
+            ring(holder, colorKey, UDim2.fromOffset(9, 9), UDim2.fromScale(0.5, 0.5), UDim.new(1, 0))
+        elseif kind == "Pin" then
+            ring(holder, colorKey, UDim2.fromOffset(7, 7), UDim2.new(0.5, 0, 0.34, 0), UDim.new(1, 0), nil, true)
+        end
+        return holder
+    end
+
+    local IconCache = {}
+
+    local function Icon(parent, kind, colorKey, size)
+        colorKey = colorKey or "SubText"
+        local key = kind .. "\0" .. colorKey
+        local proto = IconCache[key]
+        if not proto then
+            proto = IconRaw(kind, colorKey)
+            IconCache[key] = proto
+        end
+        local holder = proto:Clone()
+        holder.Parent = parent
+        if size then
+            holder.AnchorPoint = Vector2.new(0.5, 0.5)
+            holder.Position = UDim2.fromScale(0.5, 0.5)
+            holder.Size = UDim2.fromOffset(size, size)
+        end
+        for _, f in ipairs(holder:GetDescendants()) do
+            if f:IsA("Frame") then
+                I.Bind(f, "BackgroundColor3", colorKey)
+            elseif f:IsA("UIStroke") then
+                I.Bind(f, "Color", colorKey)
+            end
+        end
+        return holder
+    end
+
+    I.Icon = Icon
 end
 
 
@@ -1250,16 +1348,21 @@ Bundle["Core/Services/Sound"] = function(ctx)
 
     local LastPlayed = {}
     local THROTTLE = 0.08
+    local KindThrottle = { Slider = 0.06, Click = 0.05 }
 
     local function PlaySound(kind, scale)
         if not Setting.Sounds then return end
         local a = Audio[kind]
         if type(a) ~= "table" or a.Id == "" then return end
-        if (a.Vol or 0.4) <= 0.08 then
+        local gap = KindThrottle[kind]
+            or ((a.Vol or 0.4) <= 0.08 and THROTTLE or 0)
+
+        if gap > 0 then
             local now = os.clock()
-            if LastPlayed[kind] and now - LastPlayed[kind] < THROTTLE then return end
+            if LastPlayed[kind] and now - LastPlayed[kind] < gap then return end
             LastPlayed[kind] = now
         end
+
         pcall(function()
             local pool = SoundPool[a.Id]
             if not pool then pool = {} SoundPool[a.Id] = pool end
@@ -1293,6 +1396,14 @@ Bundle["Core/Services/Sound"] = function(ctx)
         end)
     end
 
+    I.LibMaid:Give(function()
+        for _, s in ipairs(SoundInstances) do
+            pcall(function() s:Destroy() end)
+        end
+        table.clear(SoundInstances)
+        for k in pairs(SoundPool) do SoundPool[k] = nil end
+    end)
+
     I.Audio = Audio
     I.PlaySound = PlaySound
     I.SoundInstances = SoundInstances
@@ -1322,6 +1433,8 @@ Bundle["Core/Misc/Gui"] = function(ctx)
     local LayerOverlay = I.Create("Frame", { Name = "Overlay",  BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
     local LayerNotify  = I.Create("Frame", { Name = "Notify",   BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
     local LayerTooltip = I.Create("Frame", { Name = "Tooltip",  BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
+    local LayerPersistent = I.Create("Frame", { Name = "Persistent", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
+    I.LayerPersistent = LayerPersistent
 
     local RootScale = I.Create("UIScale", { Parent = ScreenGui })
     local Camera = Workspace.CurrentCamera
@@ -1410,6 +1523,7 @@ Bundle["Core/Interaction/Modal"] = function(ctx)
     function ModalManager.CloseTop()
         local top = ModalManager.Stack[#ModalManager.Stack]
         if not top then return false end
+        table.remove(ModalManager.Stack, #ModalManager.Stack)
         pcall(top.Close)
         return true
     end
@@ -1474,7 +1588,11 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
             if finished then return end
             finished = true
             if DragManager.Active == key then DragManager.Active = nil end
-            if useAttr then handle:SetAttribute("Dragging", nil) end
+            if useAttr then
+                task.defer(function()
+                    if handle and handle.Parent then handle:SetAttribute("Dragging", nil) end
+                end)
+            end
             maid:Destroy()
             if opts.OnEnd then I.SafeCall(opts.OnEnd, moved) end
         end
@@ -1578,12 +1696,10 @@ Bundle["Core/Interaction/Drag"] = function(ctx)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
             task.defer(function()
-                local anyDown = false
                 local ok, btns = pcall(UserInputService.GetMouseButtonsPressed, UserInputService)
-                if ok and type(btns) == "table" then
-                    anyDown = #btns > 0
+                if ok and type(btns) == "table" and #btns == 0 then
+                    DragManager.Active = nil
                 end
-                if not anyDown then DragManager.Active = nil end
             end)
         end
     end))
@@ -1673,6 +1789,13 @@ Bundle["Core/Interaction/Ripple"] = function(ctx)
         end)
     end
 
+    I.LibMaid:Give(function()
+        for i = #RipplePool, 1, -1 do
+            pcall(function() RipplePool[i]:Destroy() end)
+        end
+        table.clear(RipplePool)
+    end)
+
     I.ApplyRipple = ApplyRipple
 end
 
@@ -1685,6 +1808,11 @@ Bundle["Core/Rendering/FX"] = function(ctx)
 
     function FX.Shake(inst, dist)
         if not inst then return end
+        if inst:GetAttribute("__shaking") then return end
+        inst:SetAttribute("__shaking", true)
+        task.delay(1, function()
+            pcall(function() inst:SetAttribute("__shaking", nil) end)
+        end)
         local orig = inst.Position
         local d = dist or 8
         I.Tween(inst, "Fast", { Position = orig + UDim2.fromOffset(d, 0) }, function()
@@ -1705,83 +1833,82 @@ Bundle["Core/Overlays/Tooltip"] = function(ctx)
     local I = ctx.Internal
     local Setting = I.Setting
     local UserInputService = I.UserInputService
+    local TextService = I.TextService
 
     local Tooltip = {}
     I.Tooltip = Tooltip
 
-    do
-        local frame = I.Create("Frame", {
-            BackgroundColor3 = I.CurrentTheme.SurfaceLight,
-            BorderSizePixel = 0,
-            Size = UDim2.fromOffset(0, 26),
-            Visible = false,
-            ZIndex = 100,
-            Parent = I.LayerTooltip,
-            Children = { I.Corner(6), I.StrokeBind(1, "Stroke", 0.35) },
-        })
-        I.Bind(frame, "BackgroundColor3", "SurfaceLight")
-        local label = I.Create("TextLabel", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, -16, 1, 0),
-            Position = UDim2.fromOffset(8, 0),
-            Font = Enum.Font.Gotham,
-            TextSize = 12,
-            TextColor3 = I.CurrentTheme.Text,
-            TextWrapped = true,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = frame,
-        })
-        I.Bind(label, "TextColor3", "Text")
-        local tipScale = I.Create("UIScale", { Scale = 1, Parent = frame })
-        local maid = I.Maid.new()
-        local hideToken = 0
-        local tipW, tipH = 0, 26
+    local frame = I.Create("Frame", {
+        BackgroundColor3 = I.CurrentTheme.SurfaceLight,
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(0, 26),
+        Visible = false,
+        ZIndex = 100,
+        Parent = I.LayerTooltip,
+        Children = { I.Corner(6), I.StrokeBind(1, "Stroke", 0.35) },
+    })
+    I.Bind(frame, "BackgroundColor3", "SurfaceLight")
+    local label = I.Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -12, 1, 0),
+        Position = UDim2.fromOffset(6, 0),
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextColor3 = I.CurrentTheme.Text,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = frame,
+    })
+    I.Bind(label, "TextColor3", "Text")
+    local tipScale = I.Create("UIScale", { Scale = 1, Parent = frame })
+    local maid = I.Maid.new()
+    local hideToken = 0
+    local tipW, tipH = 0, 26
 
-        local function position()
-            local m = UserInputService:GetMouseLocation()
-            local s = I.GetScale()
-            local x, y = m.X + 14, m.Y + 18
-            if x + tipW > I.Viewport.X - 8 then x = m.X - tipW - 14 end
-            if y + tipH > I.Viewport.Y - 8 then y = m.Y - tipH - 16 end
-            if x < 8 then x = 8 end
-            if y < 8 then y = 8 end
-            frame.Position = UDim2.fromOffset(x / s, y / s)
-        end
+    local function position()
+        local m = UserInputService:GetMouseLocation()
+        local s = I.GetScale()
+        local x, y = m.X + 14, m.Y + 18
+        if x + tipW > I.Viewport.X - 8 then x = m.X - tipW - 14 end
+        if y + tipH > I.Viewport.Y - 8 then y = m.Y - tipH - 16 end
+        if x < 8 then x = 8 end
+        if y < 8 then y = 8 end
+        frame.Position = UDim2.fromOffset(x / s, y / s)
+    end
 
-        function Tooltip.Show(text)
-            if not text or text == "" then return end
-            hideToken += 1
-            label.Text = text
-            local bounds = I.TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(340, 1000))
-            tipW = math.min(bounds.X + 18, 358)
-            tipH = math.clamp(bounds.Y + 10, 24, 92)
-            frame.Size = UDim2.fromOffset(tipW, tipH)
-            frame.Visible = true
-            frame.BackgroundTransparency = 1
-            label.TextTransparency = 1
-            tipScale.Scale = 0.93
-            position()
-            maid:Clean()
-            maid:Give(UserInputService.InputChanged:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement then position() end
-            end))
-            I.Tween(frame, "Fast", { BackgroundTransparency = 0.06 })
-            I.Tween(label, "Fast", { TextTransparency = 0 })
-            I.Tween(tipScale, "PopSoft", { Scale = 1 })
-        end
+    function Tooltip.Show(text)
+        if not text or text == "" then return end
+        hideToken += 1
+        label.Text = text
+        local bounds = TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(340, 1000))
+        tipW = math.min(bounds.X + 20, 358)
+        tipH = math.clamp(bounds.Y + 10, 24, 120)
+        frame.Size = UDim2.fromOffset(tipW, tipH)
+        frame.Visible = true
+        frame.BackgroundTransparency = 1
+        label.TextTransparency = 1
+        tipScale.Scale = 0.93
+        position()
+        maid:Clean()
+        maid:Give(UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then position() end
+        end))
+        I.Tween(frame, "Fast", { BackgroundTransparency = 0.06 })
+        I.Tween(label, "Fast", { TextTransparency = 0 })
+        I.Tween(tipScale, "PopSoft", { Scale = 1 })
+    end
 
-        function Tooltip.Hide()
-            if not frame.Visible then return end
-            hideToken += 1
-            local tk = hideToken
-            I.Tween(tipScale, "Vanish", { Scale = 0.95 })
-            I.Tween(frame, "Vanish", { BackgroundTransparency = 1 })
-            I.Tween(label, "Vanish", { TextTransparency = 1 })
-            task.delay(0.16, function()
-                if hideToken == tk then frame.Visible = false end
-            end)
-            maid:Clean()
-        end
+    function Tooltip.Hide()
+        if not frame.Visible then return end
+        hideToken += 1
+        local tk = hideToken
+        I.Tween(tipScale, "Vanish", { Scale = 0.95 })
+        I.Tween(frame, "Vanish", { BackgroundTransparency = 1 })
+        I.Tween(label, "Vanish", { TextTransparency = 1 })
+        task.delay(0.16, function()
+            if hideToken == tk then frame.Visible = false end
+        end)
+        maid:Clean()
     end
 
     local function AddTooltip(obj, ref)
@@ -1813,6 +1940,10 @@ Bundle["Core/Overlays/Tooltip"] = function(ctx)
         end
         obj.Destroying:Connect(Tooltip.Hide)
     end
+    I.LibMaid:Give(function()
+        maid:Destroy()
+    end)
+
     I.AddTooltip = AddTooltip
 end
 
@@ -1822,22 +1953,28 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local Setting = I.Setting
+    local TextService = I.TextService
 
-    local NotificationLog = {}
-    Kailex.GetNotificationLog = function()
-        local out = table.create(#NotificationLog)
-        for i, e in ipairs(NotificationLog) do out[i] = table.clone(e) end
+    local N = {
+        LOG_CAP = 50,
+        TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" },
+        TypeGlyphs = { info = "Info", success = "Check", warning = "Alert", error = "Alert" },
+        Log = {},
+        MAX_ACTIVE = I.Device.IsTouch and 3 or 5,
+        queue = {},
+        active = 0,
+        pool = {},
+    }
+    N.POOL_CAP = N.MAX_ACTIVE + 3
+    I.NotifyState = N
+
+    function Kailex:GetNotificationLog()
+        local out = table.create(#N.Log)
+        for i, e in ipairs(N.Log) do out[i] = table.clone(e) end
         return out
     end
 
-    local MAX_ACTIVE = I.Device.IsTouch and 3 or 5
-    local POOL_CAP = MAX_ACTIVE + 3
-    local TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" }
-    local queue = {}
-    local active = 0
-    local pool = {}
-
-    local container = I.Create("Frame", {
+    N.container = I.Create("Frame", {
         BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 1),
         Position = Setting.RTL and UDim2.new(0, 14, 1, -14) or UDim2.new(1, -14, 1, -14),
@@ -1847,158 +1984,32 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
             I.Create("UIListLayout", {
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 VerticalAlignment = Enum.VerticalAlignment.Bottom,
-                HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                HorizontalAlignment = I.HAlign(),
                 Padding = UDim.new(0, 8),
             }),
         },
     })
 
-    local process
-
-    local function newCard()
-        local card = I.Create("Frame", {
-            BackgroundColor3 = I.CurrentTheme.Surface,
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, 0),
-            Visible = false,
-            Parent = container,
-            Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 10) }) },
-        })
-        I.Bind(card, "BackgroundColor3", "Surface")
-        local stroke = I.StrokeBind(1, "Stroke", 0.5)
-        stroke.Parent = card
-        local dot = I.Create("Frame", {
-            Size = UDim2.fromOffset(7, 7),
-            Position = UDim2.fromOffset(12, 11),
-            BackgroundColor3 = I.CurrentTheme.Accent,
-            BorderSizePixel = 0,
-            ZIndex = 2,
-            Parent = card,
-            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-        })
-        local title = I.Create("TextLabel", {
-            BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(26, 8),
-            Size = UDim2.new(1, -38, 0, 16),
-            Font = Enum.Font.GothamBold,
-            TextSize = 13,
-            TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            ZIndex = 2,
-            Parent = card,
-        })
-        I.Bind(title, "TextColor3", "Text")
-        local body = I.Create("TextLabel", {
-            BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(12, 26),
-            Size = UDim2.new(1, -24, 0, 0),
-            Font = Enum.Font.Gotham,
-            TextSize = 12,
-            TextColor3 = I.CurrentTheme.SubText,
-            TextWrapped = true,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top,
-            ZIndex = 2,
-            Parent = card,
-        })
-        I.Bind(body, "TextColor3", "SubText")
-        local actions = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 12, 1, -32),
-            Size = UDim2.new(1, -24, 0, 26),
-            ZIndex = 2,
-            Parent = card,
-            Children = {
-                I.Create("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
-                    Padding = UDim.new(0, 6),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }),
-            },
-        })
-        local progress = I.Create("Frame", {
-            AnchorPoint = Vector2.new(0, 1),
-            Position = UDim2.new(0, 12, 1, -5),
-            Size = UDim2.new(1, -24, 0, 2),
-            BackgroundColor3 = I.CurrentTheme.Accent,
-            BorderSizePixel = 0,
-            ZIndex = 1,
-            Parent = card,
-            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-        })
-        local hit = I.Create("TextButton", {
-            BackgroundTransparency = 1,
-            Text = "",
-            Size = UDim2.fromScale(1, 1),
-            ZIndex = 3,
-            Parent = card,
-        })
-        local cardScale = I.Create("UIScale", { Scale = 1, Parent = card })
-        local dotScale = I.Create("UIScale", { Scale = 1, Parent = dot })
-        local meta = {
-            Card = card, Stroke = stroke, Dot = dot, Title = title,
-            Body = body, Actions = actions, Progress = progress, Hit = hit, InUse = false,
-            CardScale = cardScale, DotScale = dotScale,
-        }
-        table.insert(pool, meta)
-        return meta
-    end
-
-    local function getFreeCard()
-        for _, m in ipairs(pool) do
-            if not m.InUse and not m.Card.Visible then return m end
-        end
-        if #pool < POOL_CAP then return newCard() end
-        return nil
-    end
-
-    local function dismiss(meta)
-        if not meta.InUse then return end
-        meta.InUse = false
-        active = math.max(0, active - 1)
-        if meta.DelayThread then pcall(task.cancel, meta.DelayThread) meta.DelayThread = nil end
-        if meta.ProgressTween then pcall(function() meta.ProgressTween:Cancel() end) meta.ProgressTween = nil end
-        if meta.Maid then meta.Maid:Destroy() meta.Maid = nil end
-        I.Tween(meta.Card, "Fast", { BackgroundTransparency = 1 })
-        I.Tween(meta.Stroke, "Fast", { Transparency = 1 })
-        I.Tween(meta.Title, "Fast", { TextTransparency = 1 })
-        I.Tween(meta.Body, "Fast", { TextTransparency = 1 })
-        I.Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
-        for _, b in ipairs(meta.Actions:GetChildren()) do
-            if b:IsA("TextButton") then b:Destroy() end
-        end
-        if meta.CardScale then I.Tween(meta.CardScale, "Vanish", { Scale = 0.88 }) end
-        I.Tween(meta.Card, "Snappy", { Size = UDim2.new(1, 0, 0, 0) }, function()
-            if not meta.InUse then meta.Card.Visible = false end
-            process()
-        end)
-        process()
-    end
-
-    process = function()
-        while active < MAX_ACTIVE and #queue > 0 do
-            local item = table.remove(queue, 1)
-            local meta = getFreeCard()
+    function N.process()
+        while N.active < N.MAX_ACTIVE and #N.queue > 0 do
+            local item = table.remove(N.queue, 1)
+            local meta = N.getFreeCard()
             if not meta then
-                table.insert(queue, 1, item)
+                table.insert(N.queue, 1, item)
                 break
             end
-            active += 1
+            N.active += 1
             meta.InUse = true
-            local themeKey = TypeColors[item.Type] or "Accent"
+            local themeKey = N.TypeColors[item.Type] or "Accent"
             meta.ThemeKey = themeKey
             meta.Card.Visible = true
-            meta.Dot.BackgroundColor3 = I.CurrentTheme[themeKey]
             meta.Progress.BackgroundColor3 = I.CurrentTheme[themeKey]
             meta.Title.Text = item.Title
             meta.Body.Text = item.Text
 
             local textH = 0
             if item.Text ~= "" then
-                local b = I.TextService:GetTextSize(item.Text, I.TS(12), Enum.Font.Gotham, Vector2.new(296, 400))
+                local b = TextService:GetTextSize(item.Text, I.TS(12), Enum.Font.Gotham, Vector2.new(296, 400))
                 textH = math.min(b.Y, 120)
                 meta.Body.Size = UDim2.new(1, -24, 0, textH)
                 meta.Body.Visible = true
@@ -2006,36 +2017,37 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
                 meta.Body.Visible = false
             end
 
-            local actCount = 0
+            local glyphKind = N.TypeGlyphs[item.Type]
+            if glyphKind then
+                meta.Glyph = I.Icon(meta.Card, glyphKind, themeKey)
+                meta.Glyph.Position = UDim2.fromOffset(11, 9)
+                meta.Glyph.Size = UDim2.fromOffset(14, 14)
+                meta.Glyph.ZIndex = 2
+                local glyphScale = I.Create("UIScale", { Scale = 0, Parent = meta.Glyph })
+                I.Tween(glyphScale, "Pop", { Scale = 1 })
+            end
+
             for _, b in ipairs(meta.Actions:GetChildren()) do
                 if b:IsA("TextButton") then b:Destroy() end
             end
+            local actCount = 0
             if type(item.Actions) == "table" then
                 local cardMaid = I.Maid.new()
                 meta.Maid = cardMaid
                 for i = 1, math.min(#item.Actions, 3) do
                     local a = item.Actions[i]
-                    local b = I.Create("TextButton", {
+                    local b = I.MkButton(meta.Actions, {
                         Size = UDim2.fromOffset(64, 24),
-                        BackgroundColor3 = I.CurrentTheme.Element,
-                        BorderSizePixel = 0,
                         Text = tostring(a.Text or "OK"),
                         Font = Enum.Font.GothamBold,
                         TextSize = 11,
-                        TextColor3 = I.CurrentTheme.Text,
-                        AutoButtonColor = false,
                         LayoutOrder = i,
                         ZIndex = 3,
-                        Parent = meta.Actions,
-                        Children = { I.Corner(6) },
-                    })
-                    I.Bind(b, "BackgroundColor3", "Element")
-                    I.Bind(b, "TextColor3", "Text")
-                    I.AddHover(b)
+                    }, { Corner = 6 })
                     actCount += 1
                     cardMaid:Give(b.MouseButton1Click:Connect(function()
                         if not meta.InUse then return end
-                        dismiss(meta)
+                        N.dismiss(meta)
                         if type(a.Callback) == "function" then
                             I.SafeCall(a.Callback)
                         end
@@ -2051,9 +2063,8 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
             meta.Progress.BackgroundTransparency = 1
             meta.Progress.Size = UDim2.new(1, -24, 0, 2)
             meta.Card.Size = UDim2.new(1, 0, 0, 0)
-            if meta.CardScale then meta.CardScale.Scale = 0.9 end
-            if meta.DotScale then meta.DotScale.Scale = 0 end
             if not meta.Maid then meta.Maid = I.Maid.new() end
+            if meta.CardScale then meta.CardScale.Scale = 0.9 end
 
             I.Tween(meta.Card, "Snappy", { Size = UDim2.new(1, 0, 0, cardH) })
             I.Tween(meta.Card, "Snappy", { BackgroundTransparency = 0.04 })
@@ -2062,14 +2073,13 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
             if textH > 0 then I.Tween(meta.Body, "Snappy", { TextTransparency = 0 }) end
             I.Tween(meta.Progress, "Snappy", { BackgroundTransparency = 0 })
             if meta.CardScale then I.Tween(meta.CardScale, "PopSoft", { Scale = 1 }) end
-            if meta.DotScale then I.Tween(meta.DotScale, "Pop", { Scale = 1 }) end
 
             local duration = math.max(0.5, tonumber(item.Duration) or 4)
             local remaining = duration
             local startedAt = os.clock()
             meta.DelayThread = task.delay(duration, function()
                 meta.DelayThread = nil
-                dismiss(meta)
+                N.dismiss(meta)
             end)
             meta.ProgressTween = I.Tween(meta.Progress,
                 TweenInfo.new(duration, Enum.EasingStyle.Linear),
@@ -2095,10 +2105,10 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
                 end
                 meta.DelayThread = task.delay(remaining, function()
                     meta.DelayThread = nil
-                    dismiss(meta)
+                    N.dismiss(meta)
                 end)
             end))
-            meta.Maid:Give(meta.Hit.MouseButton1Click:Connect(function() dismiss(meta) end))
+            meta.Maid:Give(meta.Hit.MouseButton1Click:Connect(function() N.dismiss(meta) end))
         end
     end
 
@@ -2106,27 +2116,157 @@ Bundle["Core/Overlays/Notify"] = function(ctx)
         if type(data) == "string" then data = { Text = data } end
         data = data or {}
         local t = string.lower(tostring(data.Type or "info"))
-        if not TypeColors[t] then t = "info" end
+        if not N.TypeColors[t] then t = "info" end
         local actions
         if type(data.Actions) == "table" then
             actions = {}
-            for i, a in ipairs(data.Actions) do
+            for _, a in ipairs(data.Actions) do
                 if type(a) == "table" and a.Text then
                     actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
                 end
             end
         end
         local entry = {
-            Title = data.Title or (t == "info" and "Notice" or (t:sub(1,1):upper() .. t:sub(2))),
+            Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
             Text = tostring(data.Text or data.Description or ""),
             Duration = data.Duration,
             Type = t,
             Actions = actions,
         }
-        table.insert(NotificationLog, { Title = entry.Title, Text = entry.Text, Type = t, Time = os.time() })
-        while #NotificationLog > 50 do table.remove(NotificationLog, 1) end
-        table.insert(queue, entry)
-        process()
+        table.insert(N.Log, { Title = entry.Title, Text = entry.Text, Type = t, Time = os.time() })
+        while #N.Log > N.LOG_CAP do table.remove(N.Log, 1) end
+        table.insert(N.queue, entry)
+        if #N.queue > 30 then table.remove(N.queue, 1) end
+        N.process()
+    end
+
+    I.LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+        for _, m in ipairs(N.pool) do
+            if m.InUse and m.ThemeKey then
+                m.Progress.BackgroundColor3 = I.CurrentTheme[m.ThemeKey] or I.CurrentTheme.Accent
+            end
+        end
+    end))
+end
+
+
+-- [[Core/Overlays/NotifyCards]]
+Bundle["Core/Overlays/NotifyCards"] = function(ctx)
+    local I = ctx.Internal
+    local N = I.NotifyState
+
+    function N.newCard()
+        local card = I.Create("Frame", {
+            BackgroundColor3 = I.CurrentTheme.Surface,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, 0),
+            Visible = false,
+            Parent = N.container,
+            Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 10) }) },
+        })
+        I.Bind(card, "BackgroundColor3", "Surface")
+        local stroke = I.StrokeBind(1, "Stroke", 0.5)
+        stroke.Parent = card
+        local title = I.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(26, 8),
+            Size = UDim2.new(1, -38, 0, 16),
+            Font = Enum.Font.GothamBold,
+            TextSize = 13,
+            TextColor3 = I.CurrentTheme.Text,
+            TextXAlignment = I.XAlign(),
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 2,
+            Parent = card,
+        })
+        I.Bind(title, "TextColor3", "Text")
+        local body = I.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(12, 26),
+            Size = UDim2.new(1, -24, 0, 0),
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.SubText,
+            TextWrapped = true,
+            TextXAlignment = I.XAlign(),
+            TextYAlignment = Enum.TextYAlignment.Top,
+            ZIndex = 2,
+            Parent = card,
+        })
+        I.Bind(body, "TextColor3", "SubText")
+        local actions = I.Create("Frame", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 12, 1, -32),
+            Size = UDim2.new(1, -24, 0, 26),
+            ZIndex = 2,
+            Parent = card,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = I.HAlign(),
+                    Padding = UDim.new(0, 6),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
+        })
+        local progress = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, 12, 1, -5),
+            Size = UDim2.new(1, -24, 0, 2),
+            BackgroundColor3 = I.CurrentTheme.Accent,
+            BorderSizePixel = 0,
+            ZIndex = 1,
+            Parent = card,
+            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
+        })
+        local hit = I.Create("TextButton", {
+            BackgroundTransparency = 1,
+            Text = "",
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 1,
+            Parent = card,
+        })
+        local cardScale = I.Create("UIScale", { Scale = 1, Parent = card })
+        local meta = {
+            Card = card, Stroke = stroke, Title = title, Body = body,
+            Actions = actions, Progress = progress, Hit = hit,
+            InUse = false, CardScale = cardScale,
+        }
+        table.insert(N.pool, meta)
+        return meta
+    end
+
+    function N.getFreeCard()
+        for _, m in ipairs(N.pool) do
+            if not m.InUse and not m.Card.Visible then return m end
+        end
+        if #N.pool < N.POOL_CAP then return N.newCard() end
+        return nil
+    end
+
+    function N.dismiss(meta)
+        if not meta.InUse then return end
+        meta.InUse = false
+        N.active = math.max(0, N.active - 1)
+        if meta.DelayThread then pcall(task.cancel, meta.DelayThread) meta.DelayThread = nil end
+        if meta.ProgressTween then pcall(function() meta.ProgressTween:Cancel() end) meta.ProgressTween = nil end
+        if meta.Maid then meta.Maid:Destroy() meta.Maid = nil end
+        if meta.Glyph then meta.Glyph:Destroy() meta.Glyph = nil end
+        I.Tween(meta.Card, "Fast", { BackgroundTransparency = 1 })
+        I.Tween(meta.Stroke, "Fast", { Transparency = 1 })
+        I.Tween(meta.Title, "Fast", { TextTransparency = 1 })
+        I.Tween(meta.Body, "Fast", { TextTransparency = 1 })
+        I.Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
+        for _, b in ipairs(meta.Actions:GetChildren()) do
+            if b:IsA("TextButton") then b:Destroy() end
+        end
+        if meta.CardScale then I.Tween(meta.CardScale, "Vanish", { Scale = 0.88 }) end
+        I.Tween(meta.Card, "Snappy", { Size = UDim2.new(1, 0, 0, 0) }, function()
+            if not meta.InUse then meta.Card.Visible = false end
+            N.process()
+        end)
+        N.process()
     end
 end
 
@@ -2137,30 +2277,35 @@ Bundle["Core/Misc/Callbacks"] = function(ctx)
     local Kailex = ctx.Kailex
     local Setting = I.Setting
 
+    local lastErrMsg, lastErrAt = nil, 0
+    local function ReportError(ctxName, err)
+        local msg, now = tostring(err), os.clock()
+        warn("[Kailex] " .. msg)
+        if msg == lastErrMsg and (now - lastErrAt) < 1 then return end
+        lastErrMsg, lastErrAt = msg, now
+        Kailex:Notify({
+            Title = "Callback error" .. (ctxName and (" - " .. ctxName) or ""),
+            Text = msg, Type = "Error", Duration = 6,
+        })
+    end
+
     local function RunCallback(fn, ctxName, ...)
         if type(fn) ~= "function" then return end
         if Setting.AsyncCallbacks then
             local args = table.pack(...)
             task.spawn(function()
                 local ok, err = pcall(fn, table.unpack(args, 1, args.n))
-                if not ok then
-                    warn("[Kailex] " .. tostring(err))
-                    Kailex:Notify({
-                        Title = "Callback error" .. (ctxName and (" - " .. ctxName) or ""),
-                        Text = tostring(err), Type = "Error", Duration = 6,
-                    })
-                end
+                if not ok then ReportError(ctxName, err) end
             end)
         else
-            I.SafeCall(fn, ...)
+            local ok, err = pcall(fn, ...)
+            if not ok then ReportError(ctxName, err) end
         end
     end
 
     local function CopyToClipboard(text)
-        local setc
-        local ok, sc = pcall(function() return setclipboard or toclipboard or setrbxclipboard end)
-        if ok then setc = sc end
-        if type(setc) == "function" then
+        local setc = I.GetClipboardSetter()
+        if setc then
             pcall(setc, tostring(text))
             Kailex:Notify({ Title = "Copied", Text = tostring(text), Type = "Success", Duration = 2 })
         else
@@ -2173,64 +2318,237 @@ Bundle["Core/Misc/Callbacks"] = function(ctx)
 end
 
 
--- [[Core/Overlays/Confirm]]
-Bundle["Core/Overlays/Confirm"] = function(ctx)
+-- [[Core/Overlays/ModalCard]]
+Bundle["Core/Overlays/ModalCard"] = function(ctx)
     local I = ctx.Internal
-    local Kailex = ctx.Kailex
-    local Setting = I.Setting
-    local TextService = I.TextService
 
-    local ModalActive = false
+    local ModalCard = {}
 
-    function Kailex:Confirm(data, onAccept)
-        if ModalActive then return nil end
-        if type(data) == "string" then data = { Text = data } end
-        data = data or {}
-        if type(onAccept) == "function" then data.OnAccept = onAccept end
-        for _, w in ipairs(Kailex.Windows) do
-            if not w._destroyed and w._closeDropdowns then w:_closeDropdowns() end
-        end
-        ModalActive = true
-        local maid = I.Maid.new()
-        maid:Give(function() ModalActive = false end)
+    function ModalCard.OpenCenter(cfg)
+        cfg = cfg or {}
+        local h = {}
+        local closed = false
+        local z = cfg.ZIndex or 200
 
-        local styleType = string.lower(tostring(data.Type or ""))
-        local isDanger = styleType == "danger" or data.Danger == true
-        local isInfo = styleType == "info"
-        local accentKey = isDanger and "Error" or "Accent"
-
-        local dimmer = I.Create("TextButton", {
+        h.Dimmer = I.Create("TextButton", {
             Size = UDim2.fromScale(1, 1),
             BackgroundColor3 = Color3.new(0, 0, 0),
             BackgroundTransparency = 1,
             AutoButtonColor = false,
             Text = "",
-            ZIndex = 300,
+            ZIndex = z,
             Parent = I.LayerOverlay,
         })
-        maid:Give(dimmer)
-        maid:Link(dimmer)
-
-        local card = I.Create("CanvasGroup", {
+        h.Card = I.Create("CanvasGroup", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.fromOffset(360, 200),
+            Size = cfg.Size or UDim2.fromOffset(360, 200),
             BackgroundColor3 = I.CurrentTheme.Surface,
             BorderSizePixel = 0,
             GroupTransparency = 1,
-            ZIndex = 301,
+            ZIndex = z + 1,
             Parent = I.LayerOverlay,
             Children = { I.Corner(12), I.StrokeBind(1, "Stroke", 0.4) },
         })
-        I.Bind(card, "BackgroundColor3", "Surface")
-        maid:Give(card)
+        I.Bind(h.Card, "BackgroundColor3", "Surface")
+        h.Scale = I.Create("UIScale", { Scale = 0.88, Parent = h.Card })
+        h.Shadow = I.DropShadow(h.Card, { Radius = 12 })
+
+        h.Maid = I.Maid.new()
+        h.Maid:Give(h.Dimmer)
+        h.Maid:Give(h.Card)
+        h.Maid:Link(h.Card)
+
+        local function close()
+            if closed then return end
+            closed = true
+            I.ModalManager.Remove(h.Entry)
+            h.Entry = nil
+            if h.Shadow then h.Shadow.FadeOut() end
+            I.Tween(h.Dimmer, "Fast", { BackgroundTransparency = 1 })
+            I.Tween(h.Scale, "Vanish", { Scale = 0.92 })
+            I.Tween(h.Card, "Fast", { GroupTransparency = 1 })
+            task.delay(0.2, function()
+                h.Maid:Destroy()
+            end)
+        end
+
+        h.Close = close
+        h.IsClosed = function() return closed end
+
+        if cfg.OnDimmerClick then
+            h.Maid:Give(h.Dimmer.MouseButton1Click:Connect(cfg.OnDimmerClick))
+        end
+
+        h.Entry = I.ModalManager.Push(cfg.Owner, cfg.Closer or close)
+
+        I.Tween(h.Dimmer, "Normal", { BackgroundTransparency = 0.5 })
+        I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
+        I.Tween(h.Scale, "Pop", { Scale = 1 })
+        if h.Shadow then
+            h.Shadow.SetFade(1)
+            task.delay(0.1, function()
+                if not closed and h.Shadow then h.Shadow.SetFade(0) end
+            end)
+        end
+        return h
+    end
+
+    function ModalCard.MakeAnchor(cfg)
+        cfg = cfg or {}
+        local h = {}
+        local open = false
+        local z = cfg.ZIndex or 100
+
+        h.Card = I.Create("CanvasGroup", {
+            Size = cfg.Size or UDim2.fromOffset(240, 250),
+            BackgroundColor3 = I.CurrentTheme[cfg.BgKey or "Surface"],
+            BackgroundTransparency = cfg.BgTransparency or 0,
+            BorderSizePixel = 0,
+            Visible = false,
+            GroupTransparency = 1,
+            ZIndex = z,
+            Parent = I.LayerOverlay,
+            Children = {
+                I.Corner(cfg.Corner or 12),
+                I.StrokeBind(1, cfg.StrokeKey or "Stroke", cfg.StrokeT or 0.4),
+            },
+        })
+        I.Bind(h.Card, "BackgroundColor3", cfg.BgKey or "Surface")
+        h.Shadow = I.DropShadow(h.Card, { Radius = cfg.ShadowR or 12 })
+        if cfg.HasScale then
+            h.Scale = I.Create("UIScale", { Scale = 1, Parent = h.Card })
+        end
+
+        h.Catcher = I.Create("TextButton", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "",
+            Visible = false,
+            ZIndex = z - 1,
+            Parent = I.LayerOverlay,
+        })
+
+        h.Maid = I.Maid.new()
+        h.Maid:Give(h.Catcher)
+        h.Maid:Give(h.Card)
+        h.Maid:Link(h.Card)
+        h.Maid:Give(function()
+            I.ModalManager.Remove(h.Entry)
+        end)
+        if cfg.OnCatcherClick then
+            h.Maid:Give(h.Catcher.MouseButton1Click:Connect(cfg.OnCatcherClick))
+        end
+
+        function h.Show()
+            I.ModalManager.Remove(h.Entry)
+            open = true
+            h.Catcher.Visible = true
+            h.Card.Visible = true
+            h.Card.GroupTransparency = 1
+            if h.Scale then h.Scale.Scale = 0.94 end
+            I.Tween(h.Card, "Snappy", { GroupTransparency = 0 })
+            if h.Scale then I.Tween(h.Scale, "Pop", { Scale = 1 }) end
+            if h.Shadow then
+                h.Shadow.SetFade(1)
+                task.delay(0.1, function()
+                    if open and h.Shadow then h.Shadow.SetFade(0) end
+                end)
+            end
+            h.Entry = I.ModalManager.Push(cfg.Owner, cfg.Closer or h.Hide)
+        end
+
+        function h.Hide()
+            open = false
+            I.ModalManager.Remove(h.Entry)
+            h.Entry = nil
+            h.Catcher.Visible = false
+            if h.Shadow then h.Shadow.FadeOut() end
+            if h.Scale then I.Tween(h.Scale, "Vanish", { Scale = 0.95 }) end
+        I.Tween(h.Card, "Fast", { GroupTransparency = 1 }, function()
+                if not open then h.Card.Visible = false end
+            end)
+        end
+
+        h.IsOpen = function() return open end
+
+        return h
+    end
+
+    I.ModalCard = ModalCard
+end
+
+
+-- [[Core/Overlays/Confirm]]
+Bundle["Core/Overlays/Confirm"] = function(ctx)
+    local I = ctx.Internal
+    local Kailex = ctx.Kailex
+    local TextService = I.TextService
+
+    local ModalActive = false
+    local ConfirmQueue = {}
+
+    local function tryRunNext()
+        if ModalActive or #ConfirmQueue == 0 then return end
+        local item = table.remove(ConfirmQueue, 1)
+        Kailex:Confirm(item.data, item.fn)
+    end
+
+    I.LibMaid:Give(function() table.clear(ConfirmQueue) end)
+
+    function Kailex:Confirm(data, onAccept)
+        if ModalActive then
+            if #ConfirmQueue < 8 then
+                table.insert(ConfirmQueue, { data = data, fn = onAccept })
+            end
+            return nil
+        end
+        if type(data) == "string" then data = { Text = data } end
+        data = (type(data) == "table") and table.clone(data) or {}
+        if type(onAccept) == "function" then data.OnAccept = onAccept end
+        for _, w in ipairs(Kailex.Windows) do
+            if not w._destroyed and w._closeDropdowns then w:_closeDropdowns() end
+        end
+        ModalActive = true
+
+        local styleType = string.lower(tostring(data.Type or ""))
+        local isDanger = styleType == "danger" or data.Danger == true
+        local isInfo = styleType == "info"
+
+        local bodyText = tostring(data.Text or data.Description or "")
+        local measured = TextService:GetTextSize(bodyText, I.TS(13), Enum.Font.Gotham, Vector2.new(324, 300))
+        local bodyH = math.min(measured.Y, 140)
+        local cardH = 16 + 18 + 6 + bodyH + 14 + 34 + 16
+
+        local h
+        local closed = false
+        local function close(accepted)
+            if closed then return end
+
+            closed = true
+            h.Close()
+
+            if accepted then I.RunCallback(data.OnAccept, data.Title or "Confirm", true) end
+            if not accepted then I.RunCallback(data.OnDecline, data.Title or "Confirm", false) end
+        end
+
+        h = I.ModalCard.OpenCenter({
+            Size = UDim2.fromOffset(360, cardH),
+            OnDimmerClick = function() close(false) end,
+            Closer = function() close(false) end,
+        })
+
+        local card = h.Card
+        h.Maid:Give(function()
+            ModalActive = false
+            tryRunNext()
+        end)
+
         I.Create("UIPadding", {
             PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18),
             PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16),
             Parent = card,
         })
-        local shadow = I.DropShadow(card, { Radius = 12 })
-        if shadow then shadow.SetFade(1) end
 
         local title = I.Create("TextLabel", {
             BackgroundTransparency = 1,
@@ -2238,7 +2556,7 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             Font = Enum.Font.GothamBold,
             TextSize = 15,
             TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = data.Title or "Are you sure?",
             Parent = card,
@@ -2254,9 +2572,6 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             title.Size = UDim2.new(1, -21, 0, 18)
         end
 
-        local bodyText = tostring(data.Text or data.Description or "")
-        local b = TextService:GetTextSize(bodyText, I.TS(13), Enum.Font.Gotham, Vector2.new(324, 300))
-        local bodyH = math.min(b.Y, 140)
         local body = I.Create("TextLabel", {
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(0, 24),
@@ -2265,7 +2580,7 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             TextSize = 13,
             TextColor3 = I.CurrentTheme.SubText,
             TextWrapped = true,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextYAlignment = Enum.TextYAlignment.Top,
             Text = bodyText,
             Parent = card,
@@ -2278,95 +2593,64 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             Position = UDim2.new(0, 0, 1, 0),
             Size = UDim2.new(1, 0, 0, 34),
             Parent = card,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = I.HAlign(),
+                    Padding = UDim.new(0, 8),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
         })
 
-        local function mkBtn(text, isAccent, pos)
-            local btn = I.Create("TextButton", {
-                Position = pos,
-                Size = UDim2.new(0.48, -4, 1, 0),
-                BackgroundColor3 = isAccent and I.CurrentTheme[accentKey] or I.CurrentTheme.Element,
+        local function mkBtn(text, accent, order)
+            local b = I.Create("TextButton", {
+                Size = UDim2.new(0.5, -4, 1, 0),
+                BackgroundColor3 = accent and I.CurrentTheme.Accent or I.CurrentTheme.Element,
+                BorderSizePixel = 0,
                 Text = text,
                 Font = Enum.Font.GothamBold,
-                TextSize = 13,
-                TextColor3 = isAccent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
+                TextSize = 12,
+                TextColor3 = accent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
                 AutoButtonColor = false,
-                BorderSizePixel = 0,
-                Parent = btnRow,
+                LayoutOrder = order,
+                ZIndex = 42, Parent = btnRow,
                 Children = { I.Corner(8) },
             })
-            if isAccent then
-                I.Bind(btn, "BackgroundColor3", accentKey)
-                I.Bind(btn, "TextColor3", "OnAccent")
-                if isDanger then
-                    I.AddHover(btn, { HoverKey = "Error", BaseKey = "Error", HoverTransparency = 0.15 })
-                else
-                    I.AddHover(btn, { HoverKey = "AccentHover", BaseKey = "Accent" })
-                end
+            if accent then
+                I.Bind(b, "BackgroundColor3", "Accent")
+                I.Bind(b, "TextColor3", "OnAccent")
+                I.AddHover(b, { HoverKey = "AccentHover", BaseKey = "Accent" })
             else
-                I.Bind(btn, "BackgroundColor3", "Element")
-                I.Bind(btn, "TextColor3", "Text")
-                I.AddHover(btn)
+                I.Bind(b, "BackgroundColor3", "Element")
+                I.Bind(b, "TextColor3", "Text")
+                I.AddHover(b)
             end
-            I.AddPress(btn)
-            return btn
+            return b
         end
 
-        local decline = mkBtn(data.DeclineText or data.CancelText or "Cancel", false, UDim2.new(0, 0, 0, 0))
-        local accept  = mkBtn(data.AcceptText  or data.ConfirmText or "Confirm", true,  UDim2.new(0.52, 0, 0, 0))
+        local decline = mkBtn(data.DeclineText or data.CancelText or "Cancel", false, 1)
+        local accept = mkBtn(data.AcceptText or data.ConfirmText or "Confirm", true, 2)
 
-        card.Size = UDim2.fromOffset(360, 16 + 18 + 6 + bodyH + 14 + 34 + 16)
-
-        local scale = I.Create("UIScale", { Scale = 0.88, Parent = card })
-
-        local closed = false
-        local modalEntry
-        local function close(accepted)
-            if closed then return end
-            closed = true
-            I.ModalManager.Remove(modalEntry)
-            if shadow then shadow.FadeOut() end
-            I.Tween(dimmer, "Fast", { BackgroundTransparency = 1 })
-            I.Tween(scale, "Vanish", { Scale = 0.92 })
-            I.Tween(card, "Fast", { GroupTransparency = 1 })
-            if accepted and data.OnAccept then I.SafeCall(data.OnAccept, true) end
-            if not accepted and data.OnDecline then I.SafeCall(data.OnDecline, false) end
-            task.delay(0.2, function()
-                maid:Destroy()
-            end)
-        end
-
-        modalEntry = I.ModalManager.Push(nil, function() close(false) end)
-
-        maid:Give(accept.MouseButton1Click:Connect(function()
+        h.Maid:Give(accept.MouseButton1Click:Connect(function()
             close(true)
             I.ApplyRipple(accept)
             I.PlaySound("Click")
         end))
-        maid:Give(decline.MouseButton1Click:Connect(function()
+        h.Maid:Give(decline.MouseButton1Click:Connect(function()
             close(false)
             I.ApplyRipple(decline)
             I.PlaySound("Click")
         end))
-        maid:Give(dimmer.MouseButton1Click:Connect(function() close(false) end))
 
         local hook = I.AddInputHook(function() return not closed end, function(input, gp)
             if gp then return end
             if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
                 close(true)
-            elseif input.KeyCode == Enum.KeyCode.Escape then
-                close(false)
             end
         end)
-        maid:Give(function() I.RemoveInputHook(hook) end)
+        h.Maid:Give(function() I.RemoveInputHook(hook) end)
 
-        I.Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
-        I.Tween(card, "Snappy", { GroupTransparency = 0 })
-        I.Tween(scale, "Pop", { Scale = 1 })
-        if shadow then
-            task.delay(0.1, function()
-                if not closed and shadow then shadow.SetFade(0) end
-            end)
-        end
         return card
     end
 end
@@ -2399,26 +2683,16 @@ Bundle["Core/Misc/QuickWidgets"] = function(ctx)
         for _ in pairs(QuickWidgets.Active) do count += 1 end
         local name = element.Title
         local s = I.GetScale()
-        local widget = I.Create("Frame", {
-            Size = UDim2.fromOffset(0, 0),
-            Position = UDim2.fromOffset((I.Viewport.X - 70) / s, (I.Viewport.Y * 0.35 + count * 56) / s),
-            BackgroundColor3 = I.CurrentTheme.Surface,
-            BorderSizePixel = 0,
+        local widget, _, wMaid = I.FloatingChip({
+            Anchor = Vector2.new(0, 0),
             ZIndex = 20,
             Parent = I.LayerWindows,
-            Children = { I.Corner(12), I.StrokeBind(1, "Stroke", 0.4) },
+            Position = UDim2.fromOffset((I.Viewport.X - 70) / s, (I.Viewport.Y * 0.35 + count * 56) / s),
         })
-        I.Bind(widget, "BackgroundColor3", "Surface")
-        local wMaid = I.Maid.new()
-        wMaid:Link(widget)
-        QuickWidgets.Active[element] = { Frame = widget, Maid = wMaid }
+        local entry = { Frame = widget, Maid = wMaid }
+        QuickWidgets.Active[element] = entry
 
         local state = element:Get() == true
-        local hit = I.Create("TextButton", {
-            BackgroundTransparency = 1, Text = "",
-            Size = UDim2.fromScale(1, 1),
-            Parent = widget,
-        })
         local letter = I.Create("TextLabel", {
             BackgroundTransparency = 1,
             AnchorPoint = Vector2.new(0.5, 0.5),
@@ -2456,16 +2730,19 @@ Bundle["Core/Misc/QuickWidgets"] = function(ctx)
         local function refresh()
             dot.BackgroundColor3 = state and I.CurrentTheme.Accent or I.CurrentTheme.Stroke
         end
+        entry.Refresh = refresh
         refresh()
-        I.MakeDraggable(hit, widget, { Clamp = true })
-        wMaid:Give(hit.MouseButton1Click:Connect(function()
-            if hit:GetAttribute("Dragging") then return end
-            I.ApplyRipple(hit)
+
+        wMaid:Give(widget.MouseButton1Click:Connect(function()
+            if widget:GetAttribute("Dragging") then return end
+            I.ApplyRipple(widget)
             state = not state
             element:Set(state)
             refresh()
         end))
+
         wMaid:Give(closeB.MouseButton1Click:Connect(function() QuickWidgets.Destroy(element) end))
+
         wMaid:Give(element.Changed:Connect(function(v)
             state = v == true
             refresh()
@@ -2474,20 +2751,33 @@ Bundle["Core/Misc/QuickWidgets"] = function(ctx)
         local letterScale = I.Create("UIScale", { Parent = letter })
         letterScale.Scale = 0.2
         I.Tween(letterScale, "Pop", { Scale = 1 })
-        I.Tween(widget, "SpringBig", { Size = UDim2.fromOffset(46, 46) })
     end
 
-    table.insert(I.ViewportHooks, function()
-        for _, w in pairs(QuickWidgets.Active) do I.ClampFloat(w.Frame) end
-        if Kailex._mobileButton then I.ClampFloat(Kailex._mobileButton) end
+    local function onViewport()
+        for _, w in pairs(QuickWidgets.Active) do
+            if w.Frame and w.Frame.Parent then I.ClampFloat(w.Frame) end
+        end
+        local mb = Kailex._mobileButton
+        if mb and mb.Parent then I.ClampFloat(mb) end
+    end
+    table.insert(I.ViewportHooks, onViewport)
+    I.LibMaid:Give(function()
+        local idx = table.find(I.ViewportHooks, onViewport)
+        if idx then table.remove(I.ViewportHooks, idx) end
     end)
+
+    I.LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+        for _, w in pairs(QuickWidgets.Active) do
+            if w.Refresh then w.Refresh() end
+        end
+    end))
 end
 
 
 -- [[Core/Overlays/ContextMenu]]
 Bundle["Core/Overlays/ContextMenu"] = function(ctx)
     local I = ctx.Internal
-    local Setting = I.Setting
+    local TextService = I.TextService
 
     local ContextMenu = {}
     I.ContextMenu = ContextMenu
@@ -2495,13 +2785,55 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
     local frame, catcher, shadow
     local entry = nil
     local hideToken = 0
+    local buttons = {}
+    local actions = {}
+    local hl = 0
+
+    local function paintHl(idx, on)
+        local b = buttons[idx]
+        if not b then return end
+        if on then
+            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.ElementHover, BackgroundTransparency = 0.4 })
+        else
+            I.Tween(b, "Instant", { BackgroundColor3 = I.CurrentTheme.Element, BackgroundTransparency = 1 })
+        end
+    end
+
+    local function setHl(idx)
+        if idx == hl then return end
+        paintHl(hl, false)
+        hl = idx
+        paintHl(hl, true)
+    end
+
+    local function moveHl(dir)
+        local n = #buttons
+        if n == 0 then return end
+        local idx = hl
+        if idx == 0 then
+            idx = dir > 0 and 1 or n
+        else
+            idx += dir
+            if idx < 1 then idx = n elseif idx > n then idx = 1 end
+        end
+        setHl(idx)
+    end
+
+    local function activate(idx)
+        if idx < 1 or idx > #buttons then return end
+        ContextMenu.Hide()
+        local cb = actions[idx]
+        if type(cb) == "function" then
+            task.defer(function() I.SafeCall(cb) end)
+        end
+    end
 
     local function build()
         frame = I.Create("Frame", {
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
             Visible = false,
-            ZIndex = 320,
+            ZIndex = 301,
             Parent = I.LayerOverlay,
             Children = {
                 I.Corner(10), I.StrokeBind(1, "Stroke", 0.25),
@@ -2519,10 +2851,21 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
             BackgroundTransparency = 1,
             Text = "",
             Visible = false,
-            ZIndex = 310,
+            ZIndex = 300,
             Parent = I.LayerOverlay,
         })
         catcher.MouseButton1Click:Connect(function() ContextMenu.Hide() end)
+
+        I.LibMaid:Give(I.AddInputHook(function() return frame ~= nil and frame.Visible end, function(input, gp)
+            if gp then return end
+            if input.KeyCode == Enum.KeyCode.Up then
+                moveHl(-1)
+            elseif input.KeyCode == Enum.KeyCode.Down then
+                moveHl(1)
+            elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+                if hl > 0 then activate(hl) end
+            end
+        end))
     end
 
     function ContextMenu.Show(items, x, y)
@@ -2532,6 +2875,9 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
         for _, ch in ipairs(frame:GetChildren()) do
             if ch:IsA("TextButton") or (ch:IsA("Frame") and ch.Name == "__sep") then ch:Destroy() end
         end
+        table.clear(buttons)
+        table.clear(actions)
+        hl = 0
         local width = 140
         local totalH = 12
         for i, item in ipairs(items) do
@@ -2549,7 +2895,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
                 totalH += 3
             else
                 local text = tostring(item.Text or "")
-                local b = I.TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(400, 20))
+                local b = TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(400, 20))
                 if b.X + 26 > width then width = b.X + 26 end
                 local btn = I.Create("TextButton", {
                     Size = UDim2.new(1, 0, 0, 26),
@@ -2560,7 +2906,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
                     Font = Enum.Font.Gotham,
                     TextSize = 12,
                     TextColor3 = item.Danger and I.CurrentTheme.Error or I.CurrentTheme.Text,
-                    TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                    TextXAlignment = I.XAlign(),
                     AutoButtonColor = false,
                     LayoutOrder = i,
                     Parent = frame,
@@ -2572,8 +2918,11 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
                 else
                     I.Bind(btn, "TextColor3", "Text")
                 end
-                I.AddHover(btn)
-                I.AddPress(btn)
+                I.AddHover(btn, { BaseTransparency = 1, HoverTransparency = 0.4 })
+                local idx = #buttons + 1
+                buttons[idx] = btn
+                actions[idx] = item.Callback
+                btn.MouseEnter:Connect(function() setHl(idx) end)
                 btn.MouseButton1Click:Connect(function()
                     ContextMenu.Hide()
                     if type(item.Callback) == "function" then
@@ -2611,6 +2960,7 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
             frame.Visible = false
             catcher.Visible = false
         end
+        hl = 0
         I.ModalManager.Remove(entry)
         entry = nil
     end
@@ -2623,6 +2973,7 @@ end
 Bundle["Elements/Base"] = function(ctx)
     local I = ctx.Internal
     local Setting = I.Setting
+    local UserInputService = I.UserInputService
 
     local Elements = {}
     I.Elements = Elements
@@ -2630,6 +2981,11 @@ Bundle["Elements/Base"] = function(ctx)
     local Element = {}
     Element.__index = Element
     I.Element = Element
+
+    local function removeFrom(list, item)
+        local idx = table.find(list, item)
+        if idx then table.remove(list, idx) end
+    end
 
     function Element:_init(row, opts, tab)
         opts = opts or {}
@@ -2647,6 +3003,8 @@ Bundle["Elements/Base"] = function(ctx)
         self._disabled = false
         self._tooltip = { Text = opts.Tooltip }
         if opts.Tooltip then I.AddTooltip(row, self._tooltip) end
+        local desc = row:FindFirstChild("__desc", true)
+        if desc then self._descLabel = desc end
         if tab then
             table.insert(tab.Elements, self)
             if tab.CurrentSection then
@@ -2668,9 +3026,14 @@ Bundle["Elements/Base"] = function(ctx)
         if not list then list = {} reg[saveKey] = list end
         table.insert(list, fn)
         self.Maid:Give(function()
-            for i, f in ipairs(list) do
-                if f == fn then table.remove(list, i) break end
-            end
+            removeFrom(list, fn)
+        end)
+    end
+
+    function Element:_initialCallback(cond, value)
+        if not cond then return end
+        task.defer(function()
+            if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
         end)
     end
 
@@ -2687,7 +3050,7 @@ Bundle["Elements/Base"] = function(ctx)
             Children = {
                 I.Create("UIListLayout", {
                     FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                    HorizontalAlignment = I.HAlign(),
                     VerticalAlignment = Enum.VerticalAlignment.Center,
                     Padding = UDim.new(0, 8),
                     SortOrder = Enum.SortOrder.LayoutOrder,
@@ -2709,6 +3072,11 @@ Bundle["Elements/Base"] = function(ctx)
     function Element:SetTooltip(text)
         if self._destroyed then return end
         self._tooltip.Text = tostring(text or "")
+    end
+
+    function Element:SetDescription(text)
+        if self._destroyed then return end
+        if self._descLabel then self._descLabel.Text = tostring(text or "") end
     end
 
     function Element:Visible(state)
@@ -2750,12 +3118,19 @@ Bundle["Elements/Base"] = function(ctx)
 
     function Element:AddExtra(className, opts)
         if self._destroyed then return nil end
+        if not self.Tab then return nil end
         local elClass = Elements[className]
         if not elClass then return nil end
         local rc = self:EnsureRight()
         if not rc then return nil end
         opts = opts or {}
+        if self.Tab and self.Tab._pendingKeyRelease then
+            self.Tab._pendingKeyRelease = nil
+        end
         local el = elClass.new(self.Tab, opts)
+        if self.Tab and self.Tab._consumeKeyRelease then
+            self.Tab:_consumeKeyRelease(el)
+        end
 
         local row = el.Row
         local pad = row:FindFirstChildOfClass("UIPadding")
@@ -2780,13 +3155,9 @@ Bundle["Elements/Base"] = function(ctx)
         row.LayoutOrder = (#self._extras + 1) + 10
         row.Size = UDim2.new(0, el._width or 0, 0, el._extraH or I.ROW_H)
 
-        for i, v in ipairs(self.Tab.Elements) do
-            if v == el then table.remove(self.Tab.Elements, i) break end
-        end
+        removeFrom(self.Tab.Elements, el)
         if el.Section then
-            for i, v in ipairs(el.Section.Elements) do
-                if v == el then table.remove(el.Section.Elements, i) break end
-            end
+            removeFrom(el.Section.Elements, el)
             el.Section = nil
         end
 
@@ -2796,9 +3167,7 @@ Bundle["Elements/Base"] = function(ctx)
 
         el.Maid:Give(function()
             if self._destroyed then return end
-            for i, v in ipairs(self._extras) do
-                if v == el then table.remove(self._extras, i) break end
-            end
+            removeFrom(self._extras, el)
             self._extraW = math.max(0, (self._extraW or 0) - (el._width or 0))
             self:RecalcWidth()
         end)
@@ -2838,39 +3207,13 @@ Bundle["Elements/Base"] = function(ctx)
     end
 
     local function HookContextMenu(el, overlay)
-        if I.Device.IsTouch then
-            local token = nil
-            overlay.InputBegan:Connect(function(input)
-                if input.UserInputType ~= Enum.UserInputType.Touch then return end
-                local myToken = {}
-                token = myToken
-                task.delay(0.55, function()
-                    if token ~= myToken or el._destroyed then return end
-                    token = nil
-                    local items = el:_contextItems()
-                    if #items == 0 then return end
-                    overlay:SetAttribute("Dragging", true)
-                    local m = I.UserInputService:GetMouseLocation()
-                    I.ContextMenu.Show(items, m.X, m.Y)
-                end)
-            end)
-            overlay.InputEnded:Connect(function()
-                token = nil
-                if overlay:GetAttribute("Dragging") then
-                    task.defer(function()
-                        overlay:SetAttribute("Dragging", nil)
-                    end)
-                end
-            end)
-        else
-            overlay.MouseButton2Click:Connect(function()
-                if el._destroyed then return end
-                local items = el:_contextItems()
-                if #items == 0 then return end
-                local m = I.UserInputService:GetMouseLocation()
-                I.ContextMenu.Show(items, m.X, m.Y)
-            end)
+        local function open()
+            local items = el:_contextItems()
+            if #items == 0 then return false end
+            local m = UserInputService:GetMouseLocation()
+            I.ContextMenu.Show(items, m.X, m.Y)
         end
+        I.OnLongPress(overlay, function() return not el._destroyed end, open)
     end
     I.HookContextMenu = HookContextMenu
 
@@ -2878,26 +3221,13 @@ Bundle["Elements/Base"] = function(ctx)
         if self._destroyed then return end
         self._destroyed = true
         if I.HotElement == self then I.HotElement = nil end
-        local tab = self.Tab
-        if tab then
-            for i, el in ipairs(tab.Elements) do
-                if el == self then table.remove(tab.Elements, i) break end
-            end
-            if self.IsSection then
-                for i, s in ipairs(tab.Sections) do
-                    if s == self then table.remove(tab.Sections, i) break end
-                end
-                if tab.CurrentSection == self then tab.CurrentSection = nil end
-                for _, el in ipairs(self.Elements) do
-                    if not el._destroyed then el.Section = nil end
+            local tab = self.Tab
+            if tab then
+                removeFrom(tab.Elements, self)
+                if self.Section then
+                    removeFrom(self.Section.Elements, self)
                 end
             end
-            if self.Section then
-                for i, el in ipairs(self.Section.Elements) do
-                    if el == self then table.remove(self.Section.Elements, i) break end
-                end
-            end
-        end
         for _, ex in ipairs(self._extras) do
             if not ex._destroyed then ex:Destroy() end
         end
@@ -2906,6 +3236,29 @@ Bundle["Elements/Base"] = function(ctx)
         if self.Row then self.Row:Destroy() end
         self.Row, self.Maid, self.Tab, self.Section = nil, nil, nil, nil
     end
+
+    function Element:_initRow(title, right, left, baseW, width)
+        self.TitleLabel = title
+        self.LeftFrame = left
+        self.RightContainer = right
+        self._baseRightW = baseW
+        self._width = width or baseW
+    end
+
+    local function MakeElementClass()
+        local class = {}
+        class.__index = class
+        setmetatable(class, { __index = Element })
+        return class
+    end
+    I.MakeElementClass = MakeElementClass
+end
+
+
+-- [[Elements/Row]]
+Bundle["Elements/Row"] = function(ctx)
+    local I = ctx.Internal
+    local Setting = I.Setting
 
     local function CreateRow(parent, opts)
         opts = opts or {}
@@ -2936,7 +3289,7 @@ Bundle["Elements/Base"] = function(ctx)
             Size = UDim2.new(1, -rightW, 1, 0),
             Parent = row,
         })
-        local title, descLabel
+        local title
         if desc then
             title = I.Create("TextLabel", {
                 BackgroundTransparency = 1,
@@ -2945,12 +3298,12 @@ Bundle["Elements/Base"] = function(ctx)
                 Font = Enum.Font.GothamMedium,
                 TextSize = 13,
                 TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 Text = opts.Name or "",
                 Parent = leftFrame,
             })
-            descLabel = I.Create("TextLabel", {
+            local descLabel = I.Create("TextLabel", {
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, -4, 0, 13),
                 Position = UDim2.new(0, 0, 0, 17),
@@ -2958,11 +3311,12 @@ Bundle["Elements/Base"] = function(ctx)
                 TextSize = 11,
                 TextColor3 = I.CurrentTheme.SubText,
                 TextTransparency = 0.35,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 Text = desc,
                 Parent = leftFrame,
             })
+            descLabel.Name = "__desc"
             I.Bind(descLabel, "TextColor3", "SubText")
         else
             title = I.Create("TextLabel", {
@@ -2972,7 +3326,7 @@ Bundle["Elements/Base"] = function(ctx)
                 Font = Enum.Font.GothamMedium,
                 TextSize = 13,
                 TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 Text = opts.Name or "",
                 Parent = leftFrame,
@@ -2991,7 +3345,7 @@ Bundle["Elements/Base"] = function(ctx)
                 Children = {
                     I.Create("UIListLayout", {
                         FillDirection = Enum.FillDirection.Horizontal,
-                        HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                        HorizontalAlignment = I.HAlign(),
                         VerticalAlignment = Enum.VerticalAlignment.Center,
                         Padding = UDim.new(0, 8),
                         SortOrder = Enum.SortOrder.LayoutOrder,
@@ -3003,17 +3357,19 @@ Bundle["Elements/Base"] = function(ctx)
         if not opts.NoHover then
             I.AddHover(row, { StrokeTransparency = 0.65 })
         end
-        return row, title, right, leftFrame, descLabel
+        return row, title, right, leftFrame
     end
-    I.CreateRow = CreateRow
 
-    local function MakeElementClass()
-        local class = {}
-        class.__index = class
-        setmetatable(class, { __index = Element })
-        return class
+    local function BareRow(parent, width, height)
+        return I.Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(width or 1, -3, 0, height),
+            Parent = parent,
+        })
     end
-    I.MakeElementClass = MakeElementClass
+
+    I.CreateRow = CreateRow
+    I.BareRow = BareRow
 end
 
 
@@ -3025,20 +3381,17 @@ Bundle["Elements/Label"] = function(ctx)
     Elements.Label = I.MakeElementClass()
 
     function Elements.Label.new(tab, opts)
+        if type(opts) == "string" then opts = { Text = opts } end
         opts = opts or {}
         local self = setmetatable({}, Elements.Label)
-        local row = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new((opts.Width or 1), -3, 0, 20),
-            Parent = tab.Content,
-        })
+        local row = I.BareRow(tab.Content, opts.Width, 20)
         local label = I.Create("TextLabel", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 1, 0),
             Font = Enum.Font.GothamMedium,
             TextSize = 13,
             TextColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = opts.Text or opts.Name or "Label",
             Parent = row,
@@ -3091,7 +3444,7 @@ Bundle["Elements/Paragraph"] = function(ctx)
             Font = Enum.Font.GothamBold,
             TextSize = 13,
             TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = opts.Title or opts.Name or "",
             Parent = row,
@@ -3105,7 +3458,7 @@ Bundle["Elements/Paragraph"] = function(ctx)
             TextSize = 12,
             TextColor3 = I.CurrentTheme.SubText,
             TextWrapped = true,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             Text = tostring(opts.Text or ""),
             Parent = row,
         })
@@ -3133,11 +3486,7 @@ Bundle["Elements/Divider"] = function(ctx)
     function Elements.Divider.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Divider)
-        local row = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new((opts.Width or 1), -3, 0, 13),
-            Parent = tab.Content,
-        })
+        local row = I.BareRow(tab.Content, opts.Width, 13)
         local line = I.Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.fromScale(0.5, 0.5),
@@ -3162,6 +3511,13 @@ Bundle["Elements/Divider"] = function(ctx)
             })
             I.Bind(label, "BackgroundColor3", "Background")
             I.Bind(label, "TextColor3", "SubText")
+            self.TitleLabel = label
+            function self:SetTitle(text)
+                I.Element.SetTitle(self, text)
+                if self.TitleLabel and self.TitleLabel.Parent then
+                    self.TitleLabel.Text = " " .. tostring(text or "") .. " "
+                end
+            end
         end
         self:_init(row, { Name = opts.Text, Width = opts.Width }, tab)
         return self
@@ -3179,11 +3535,7 @@ Bundle["Elements/Section"] = function(ctx)
     function Elements.Section.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Section)
-        local row = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new((opts.Width or 1), -3, 0, 26),
-            Parent = tab.Content,
-        })
+        local row = I.BareRow(tab.Content, opts.Width, 26)
 
         local hit = I.Create("TextButton", {
             BackgroundTransparency = 1,
@@ -3245,12 +3597,7 @@ Bundle["Elements/Section"] = function(ctx)
         return self
     end
 
-    function Elements.Section:SetCollapsed(collapsed)
-        if self.Collapsed == collapsed then return end
-        self.Collapsed = collapsed
-        if self.Chevron then
-            I.Tween(self.Chevron, "PopSoft", { Rotation = collapsed and -90 or 0 })
-        end
+    function Elements.Section:_applyVisibility(collapsed)
         for _, el in ipairs(self.Elements) do
             if not el._destroyed then
                 if collapsed then
@@ -3261,13 +3608,22 @@ Bundle["Elements/Section"] = function(ctx)
             end
         end
     end
+
+    function Elements.Section:SetCollapsed(collapsed)
+        if self.Collapsed == collapsed then return end
+        self.Collapsed = collapsed
+        if self.Chevron then
+            I.Tween(self.Chevron, "PopSoft", { Rotation = collapsed and -90 or 0 })
+        end
+        if self._filterExpanded then return end
+        self:_applyVisibility(collapsed)
+    end
 end
 
 
 -- [[Elements/Button]]
 Bundle["Elements/Button"] = function(ctx)
     local I = ctx.Internal
-    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Button = I.MakeElementClass()
@@ -3285,13 +3641,8 @@ Bundle["Elements/Button"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
+        self:_initRow(title, right, left, rightW, 0)
         self.Callback = opts.Callback or function() end
-        self._width = 0
-        self._busy = false
 
         local overlay = I.Create("TextButton", {
             BackgroundTransparency = 1,
@@ -3300,70 +3651,13 @@ Bundle["Elements/Button"] = function(ctx)
             ZIndex = 0,
             Parent = row,
         })
-        I.AddPress(overlay, row)
-
-        local spinner
-        local spinTween
-        local function setSpinner(on)
-            if on then
-                if not spinner then
-                    spinner = I.Create("Frame", {
-                        AnchorPoint = Vector2.new(0.5, 0.5),
-                        Position = UDim2.fromScale(0.5, 0.5),
-                        Size = UDim2.fromOffset(14, 14),
-                        BackgroundTransparency = 1,
-                        ZIndex = 5,
-                        Parent = row,
-                        Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-                    })
-                    I.Bind(I.Create("UIStroke", { Thickness = 2, Parent = spinner }), "Color", "Accent")
-                end
-                spinner.Visible = true
-                spinTween = I.Tween(spinner, TweenInfo.new(0.7, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), { Rotation = 360 })
-                if title then I.Tween(title, "Fast", { TextTransparency = 0.55 }) end
-            else
-                if spinner then spinner.Visible = false end
-                if spinTween then pcall(function() spinTween:Cancel() end) spinTween = nil end
-                if title and not self._disabled then I.Tween(title, "Fast", { TextTransparency = 0 }) end
-            end
-        end
-
-        function self:SetBusy(busy)
-            if self._destroyed or self._busy == (busy == true) then return end
-            self._busy = busy == true
-            setSpinner(self._busy)
-        end
-
-        function self:HandleAsync(fn)
-            if self._destroyed or self._busy then return end
-            if type(fn) ~= "function" then return end
-            self:SetBusy(true)
-            task.spawn(function()
-                local ok, err = pcall(fn)
-                if not ok then
-                    warn("[Kailex] " .. tostring(err))
-                    Kailex:Notify({
-                        Title = "Task error",
-                        Text = tostring(err),
-                        Type = "Error", Duration = 6,
-                    })
-                end
-                self:SetBusy(false)
-            end)
-        end
 
         local function fire()
-            if self._busy or self._disabled then return end
-            I.ApplyRipple(overlay)
-            I.PlaySound("Click")
-            if opts.Confirm then
-                Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
-                    I.RunCallback(self.Callback, self.Title)
-                end)
-                return
+            if self._disabled then return end
+                I.ApplyRipple(overlay)
+                I.PlaySound("Click")
+                I.RunCallback(self.Callback, self.Title)
             end
-            I.RunCallback(self.Callback, self.Title)
-        end
 
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if overlay:GetAttribute("Dragging") then return end
@@ -3381,8 +3675,7 @@ Bundle["Elements/Button"] = function(ctx)
                 Parent = right,
             })
             local raw = tostring(opts.Icon)
-            local isAsset = tonumber(opts.Icon) ~= nil
-                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            local isAsset = I.IsAssetId(opts.Icon)
             if isAsset then
                 local img = I.Create("ImageLabel", {
                     BackgroundTransparency = 1,
@@ -3396,12 +3689,9 @@ Bundle["Elements/Button"] = function(ctx)
                 I.Bind(img, "ImageColor3", "SubText")
                 self.Maid:Give(iconBtn.MouseEnter:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.Text }) end))
                 self.Maid:Give(iconBtn.MouseLeave:Connect(function() I.Tween(img, "Fast", { ImageColor3 = I.CurrentTheme.SubText }) end))
-            else
-                local holder = I.Icon(iconBtn, raw, "SubText")
-                holder.AnchorPoint = Vector2.new(0.5, 0.5)
-                holder.Position = UDim2.fromScale(0.5, 0.5)
-                holder.Size = UDim2.fromOffset(16, 16)
-            end
+                else
+                    I.Icon(iconBtn, raw, "SubText", 16)
+                end
             self.Maid:Give(iconBtn.MouseButton1Click:Connect(fire))
         end
 
@@ -3424,6 +3714,7 @@ Bundle["Elements/Toggle"] = function(ctx)
 
     function Elements.Toggle.new(tab, opts)
         opts = opts or {}
+        if opts.Default == nil then opts.Default = opts.defaultVal end
         local self = setmetatable({}, Elements.Toggle)
         local saveKey = tab:GetSaveKey(opts)
         local hadSaved = I.SaveManager:Get(saveKey, nil) ~= nil
@@ -3439,11 +3730,7 @@ Bundle["Elements/Toggle"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self._extraH = switchH
 
         self.Callback = opts.Callback or function() end
@@ -3456,7 +3743,7 @@ Bundle["Elements/Toggle"] = function(ctx)
             BorderSizePixel = 0,
             LayoutOrder = 20,
             Parent = right,
-            Children = { I.Create("UICorner", { CornerRadius = opts.Style and UDim.new(0, 6) or UDim.new(1, 0) }) },
+            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
         })
         I.Bind(switch, "BackgroundColor3", "SurfaceLight")
         local stroke = I.Create("UIStroke", { Thickness = 1, Transparency = 0.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = switch })
@@ -3511,7 +3798,6 @@ Bundle["Elements/Toggle"] = function(ctx)
             ZIndex = 0,
             Parent = row,
         })
-        I.AddPress(overlay, row)
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if overlay:GetAttribute("Dragging") then return end
@@ -3556,20 +3842,14 @@ Bundle["Elements/Toggle"] = function(ctx)
 
         function self:Reset()
             if self._destroyed then return end
-            local d = opts.Default
-            if d == nil then d = opts.defaultVal end
-            self:Set(d == true)
+            self:Set(opts.Default == true)
         end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "boolean" then self:Set(v) end
         end)
 
-        if opts.Default ~= nil or opts.defaultVal ~= nil or hadSaved then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, self.State) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or hadSaved, self.State)
 
         self:RecalcWidth()
         return self
@@ -3582,50 +3862,34 @@ Bundle["Elements/Toggle"] = function(ctx)
 end
 
 
--- [[Elements/Slider]]
-Bundle["Elements/Slider"] = function(ctx)
+-- [[Elements/Slider/View]]
+Bundle["Elements/Slider/View"] = function(ctx)
     local I = ctx.Internal
-    local Elements = I.Elements
     local Setting = I.Setting
-    local UserInputService = I.UserInputService
 
-    Elements.Slider = I.MakeElementClass()
+    local View = {}
 
-    function Elements.Slider.new(tab, opts)
-        opts = opts or {}
-        local self = setmetatable({}, Elements.Slider)
-        local saveKey = tab:GetSaveKey(opts)
-        local min = tonumber(opts.Min or opts.MinVal or 0) or 0
-        local max = tonumber(opts.Max or opts.MaxVal or 100) or 100
-        if max <= min then max = min + 1 end
-        local increment = tonumber(opts.Increment)
-        local default = tonumber(opts.Default or opts.Value or min) or min
-        local value = I.SaveManager:Get(saveKey, default)
-        if type(value) ~= "number" then value = default end
-        value = math.clamp(value, min, max)
-
-        local prefix = opts.Prefix and tostring(opts.Prefix) or nil
-        local suffix = opts.Suffix and tostring(opts.Suffix) or nil
-        local onRelease = opts.FireOnRelease == true
-
+    function View.initRow(S)
+        local opts, tab = S.opts, S.tab
         local baseRowH = I.Device.IsTouch and 62 or 56
         local fullH = baseRowH + (opts.Description and 16 or 0)
+        S.fullH = fullH
+
         local row, title, right, left = I.CreateRow(tab.Content, {
             Name = opts.Name or "Slider", Height = fullH, RightWidth = 0, Width = opts.Width,
             Description = opts.Description,
         })
-        self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = 0
-        self._width = 0
+        S.row, S.title, S.right, S.left = row, title, right, left
 
-        self.Callback = opts.Callback or function() end
-        title.Size = UDim2.new(1, -84, 0, 16)
-        title.Position = UDim2.new(0, 0, 0, 5)
+        if opts.Description then
+            title.Position = UDim2.new(0, 0, 0, 2)
+            title.Size = UDim2.new(1, -84, 0, 15)
+        else
+            title.Position = UDim2.new(0, 0, 0, 5)
+            title.Size = UDim2.new(1, -84, 0, 16)
+        end
 
-        local box = I.Create("TextBox", {
+        S.box = I.Create("TextBox", {
             AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0),
             Position = Setting.RTL and UDim2.new(0, 0, 0, 3) or UDim2.new(1, 0, 0, 3),
             Size = UDim2.fromOffset(52, 18),
@@ -3638,9 +3902,9 @@ Bundle["Elements/Slider"] = function(ctx)
             ClearTextOnFocus = false,
             Parent = left,
         })
-        I.Bind(box, "TextColor3", "Text")
+        I.Bind(S.box, "TextColor3", "Text")
 
-        local track = I.Create("Frame", {
+        S.track = I.Create("Frame", {
             AnchorPoint = Vector2.new(0, 1),
             Position = UDim2.new(0, 0, 1, -9),
             Size = UDim2.new(1, 0, 0, 6),
@@ -3652,31 +3916,37 @@ Bundle["Elements/Slider"] = function(ctx)
                 I.StrokeBind(1, "Stroke", 0.7),
             },
         })
-        I.Bind(track, "BackgroundColor3", "SurfaceLight")
-        local fill = I.Create("Frame", {
+        I.Bind(S.track, "BackgroundColor3", "SurfaceLight")
+
+        S.fill = I.Create("Frame", {
             Size = UDim2.fromScale(0, 1),
             BackgroundColor3 = I.CurrentTheme.Accent,
             BorderSizePixel = 0,
-            Parent = track,
+            Parent = S.track,
             Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
         })
-        I.Bind(fill, "BackgroundColor3", "Accent")
-        local knob = I.Create("Frame", {
+        I.Bind(S.fill, "BackgroundColor3", "Accent")
+
+        S.knob = I.Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Size = UDim2.fromOffset(14, 14),
             Position = UDim2.fromScale(0, 0.5),
             BackgroundColor3 = Color3.new(1, 1, 1),
             BorderSizePixel = 0,
             ZIndex = 2,
-            Parent = track,
+            Parent = S.track,
             Children = {
                 I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
-                I.Create("UIStroke", { Thickness = 2, Color = I.CurrentTheme.Accent, Transparency = 0.35, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
+                I.Create("UIStroke", {
+                    Thickness = 2, Color = I.CurrentTheme.Accent, Transparency = 0.35,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                }),
             },
         })
-        local knobStroke = knob:FindFirstChildOfClass("UIStroke")
+        S.knobStroke = S.knob:FindFirstChildOfClass("UIStroke")
+        I.Bind(S.knobStroke, "Color", "Accent")
 
-        local bubble = I.Create("TextLabel", {
+        S.bubble = I.Create("TextLabel", {
             AnchorPoint = Vector2.new(0.5, 1),
             Position = UDim2.new(0.5, 0, 0, fullH - 26),
             Size = UDim2.fromOffset(44, 16),
@@ -3691,62 +3961,11 @@ Bundle["Elements/Slider"] = function(ctx)
             Parent = left,
             Children = { I.Corner(6), I.StrokeBind(1, "Stroke", 0.3) },
         })
-        I.Bind(bubble, "BackgroundColor3", "SurfaceLight")
-        I.Bind(bubble, "TextColor3", "Text")
+        I.Bind(S.bubble, "BackgroundColor3", "SurfaceLight")
+        I.Bind(S.bubble, "TextColor3", "Text")
+        S.bubbleScale = I.Create("UIScale", { Scale = 1, Parent = S.bubble })
 
-        local bubbleScale = I.Create("UIScale", { Scale = 1, Parent = bubble })
-
-        local step = (increment and increment > 0) and increment
-            or ((min % 1 == 0 and max % 1 == 0) and 1 or 0.01)
-        local decimals = step >= 1 and 0 or math.clamp(math.ceil(-math.log10(step)), 1, 3)
-        local pow = 10 ^ decimals
-        local function RoundStep(v)
-            return math.floor(v * pow + 0.5) / pow
-        end
-        local defaultValue = math.clamp(RoundStep(math.floor((default - min) / step + 0.5) * step + min), min, max)
-
-        local function fmt(val)
-            local s
-            if decimals <= 0 then
-                s = tostring(math.floor(val + 0.5))
-            else
-                s = string.format("%." .. decimals .. "f", val)
-            end
-            return (prefix or "") .. s .. (suffix or "")
-        end
-
-        local updateResetVisibility
-
-        local function apply(newValue, instant)
-            value = math.clamp(newValue, min, max)
-            local frac = (value - min) / (max - min)
-            if instant then
-                fill.Size = UDim2.fromScale(frac, 1)
-            else
-                I.Tween(fill, "Fast", { Size = UDim2.fromScale(frac, 1) })
-            end
-            knob.Position = UDim2.new(frac, 0, 0.5, 0)
-            local trackW = track.AbsoluteSize.X
-            local bx = frac
-            if trackW > 48 then
-                bx = math.clamp(frac * trackW, 24, trackW - 24) / trackW
-            end
-            bubble.Position = UDim2.new(bx, 0, 0, fullH - 26)
-            bubble.Text = fmt(value)
-            if not box:IsFocused() then box.Text = string.format("%." .. decimals .. "f", value) end
-            if updateResetVisibility then updateResetVisibility() end
-        end
-
-        local dragging = false
-        local function snap(f)
-            local v = min + (max - min) * f
-            if step > 0 then
-                v = math.floor((v - min) / step + 0.5) * step + min
-            end
-            return math.clamp(RoundStep(v), min, max)
-        end
-
-        local hit = I.Create("TextButton", {
+        S.hit = I.Create("TextButton", {
             BackgroundTransparency = 1,
             Text = "",
             AnchorPoint = Vector2.new(0, 1),
@@ -3756,7 +3975,7 @@ Bundle["Elements/Slider"] = function(ctx)
             Parent = left,
         })
 
-        local resetBtn = I.Create("TextButton", {
+        S.resetBtn = I.Create("TextButton", {
             AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0),
             Position = Setting.RTL and UDim2.new(0, 58, 0, 4) or UDim2.new(1, -72, 0, 4),
             Size = UDim2.fromOffset(16, 16),
@@ -3766,122 +3985,202 @@ Bundle["Elements/Slider"] = function(ctx)
             Visible = false,
             Parent = left,
         })
-        local resetIcon = I.Icon(resetBtn, "Reset", "SubText")
-        resetIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        resetIcon.Position = UDim2.fromScale(0.5, 0.5)
-        resetIcon.Size = UDim2.fromOffset(13, 13)
-        I.AddTooltip(resetBtn, { Text = "Reset to default (or right-click the slider)" })
-        local resetScale = I.Create("UIScale", { Scale = 1, Parent = resetBtn })
-        local resetShown = false
+        I.Icon(S.resetBtn, "Reset", "SubText", 13)
+        I.AddTooltip(S.resetBtn, { Text = "Reset to default (or right-click the slider)" })
+        S.resetScale = I.Create("UIScale", { Scale = 1, Parent = S.resetBtn })
+        S.resetShown = false
+    end
 
-        updateResetVisibility = function()
-            local show = math.abs(value - defaultValue) > 1e-4
-            if show == resetShown then return end
-            resetShown = show
-            if show then
-                resetBtn.Visible = true
-                resetScale.Scale = 0.4
-                I.Tween(resetScale, "PopSoft", { Scale = 1 })
+    function View.applyVisuals(S, instant)
+        local frac = (S.value - S.min) / (S.max - S.min)
+        if instant then
+            S.fill.Size = UDim2.fromScale(frac, 1)
+        else
+            I.Tween(S.fill, "Fast", { Size = UDim2.fromScale(frac, 1) })
+        end
+        S.knob.Position = UDim2.new(frac, 0, 0.5, 0)
+        local trackW = S.track.AbsoluteSize.X
+        local bx = frac
+        if trackW > 48 then
+            bx = math.clamp(frac * trackW, 24, trackW - 24) / trackW
+        end
+        S.bubble.Position = UDim2.new(bx, 0, 0, S.fullH - 26)
+        S.bubble.Text = S.fmt(S.value)
+        if not S.box:IsFocused() then
+            S.box.Text = string.format("%." .. S.decimals .. "f", S.value)
+        end
+    end
+
+    I.SliderView = View
+end
+
+
+-- [[Elements/Slider/Init]]
+Bundle["Elements/Slider/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Elements = I.Elements
+    local View = I.SliderView
+
+    Elements.Slider = I.MakeElementClass()
+
+    function Elements.Slider.new(tab, opts)
+        opts = opts or {}
+        local self = setmetatable({}, Elements.Slider)
+
+        local S = {
+            self = self, tab = tab, opts = opts,
+            saveKey = tab:GetSaveKey(opts),
+        }
+
+        local min, max, step, decimals, snapValue = I.NumSpec(opts, 0, 100)
+        S.min, S.max = min, max
+        S.step = step
+        S.decimals = decimals
+
+        local default = tonumber(opts.Default or opts.Value or min) or min
+        S.defaultValue = snapValue(default)
+
+        local value = I.SaveManager:Get(S.saveKey, default)
+        if type(value) ~= "number" then value = default end
+        S.value = math.clamp(value, min, max)
+
+        S.prefix = opts.Prefix and tostring(opts.Prefix) or nil
+        S.suffix = opts.Suffix and tostring(opts.Suffix) or nil
+        S.onRelease = opts.FireOnRelease == true
+        S.dragging = false
+
+        local function fmt(val)
+            local s
+            if S.decimals <= 0 then
+                s = tostring(math.floor(val + 0.5))
             else
-                I.Tween(resetScale, "Vanish", { Scale = 0.4 }, function()
-                    if not resetShown then resetBtn.Visible = false end
+                s = string.format("%." .. S.decimals .. "f", val)
+            end
+            return (S.prefix or "") .. s .. (S.suffix or "")
+        end
+        S.fmt = fmt
+
+        local function snap(f)
+            return snapValue(min + (max - min) * f)
+        end
+
+        View.initRow(S)
+        self:_init(S.row, opts, tab)
+        self:_initRow(S.title, S.right, S.left, 0, 0)
+        self.Callback = opts.Callback or function() end
+
+        S.apply = function(newValue, instant)
+            S.value = math.clamp(newValue, min, max)
+            View.applyVisuals(S, instant)
+            if S.updateResetVisibility then S.updateResetVisibility() end
+        end
+
+        S.updateResetVisibility = function()
+            local show = math.abs(S.value - S.defaultValue) > 1e-4
+            if show == S.resetShown then return end
+            S.resetShown = show
+            if show then
+                S.resetBtn.Visible = true
+                S.resetScale.Scale = 0.4
+                I.Tween(S.resetScale, "PopSoft", { Scale = 1 })
+            else
+                I.Tween(S.resetScale, "Vanish", { Scale = 0.4 }, function()
+                    if not S.resetShown then S.resetBtn.Visible = false end
                 end)
             end
         end
 
         local function resetToDefault()
             if self._destroyed then return end
-            if math.abs(value - defaultValue) > 1e-6 then
-                I.ApplyRipple(resetBtn)
+            if math.abs(S.value - S.defaultValue) > 1e-6 then
+                I.ApplyRipple(S.resetBtn)
                 I.PlaySound("ToggleOn", 0.5)
-                self:Set(defaultValue)
-                bubble.Visible = true
-                bubble.Text = fmt(value)
-                bubbleScale.Scale = 0.7
-                I.Tween(bubbleScale, "PopSoft", { Scale = 1 })
+                self:Set(S.defaultValue)
+                S.bubble.Visible = true
+                S.bubble.Text = fmt(S.value)
+                S.bubbleScale.Scale = 0.7
+                I.Tween(S.bubbleScale, "PopSoft", { Scale = 1 })
                 task.delay(0.55, function()
-                    if not dragging and not self._destroyed then
-                        I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-                            if not dragging and not self._destroyed then bubble.Visible = false end
+                    if not S.dragging and not self._destroyed then
+                        I.Tween(S.bubbleScale, "Vanish", { Scale = 0.7 }, function()
+                            if not S.dragging and not self._destroyed then S.bubble.Visible = false end
                         end)
                     end
                 end)
             end
         end
-        self.Maid:Give(resetBtn.MouseButton1Click:Connect(resetToDefault))
-        self.Maid:Give(hit.MouseButton2Click:Connect(resetToDefault))
+        self.Maid:Give(S.resetBtn.MouseButton1Click:Connect(resetToDefault))
+        self.Maid:Give(S.hit.MouseButton2Click:Connect(resetToDefault))
         function self:Reset() resetToDefault() end
 
-        hit.InputBegan:Connect(function(input)
-            if dragging or I.DragManager.Active then return end
+        S.hit.InputBegan:Connect(function(input)
+            if S.dragging or I.DragManager.Active then return end
             if self._disabled then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            dragging = true
+            S.dragging = true
             I.PlaySound("Slider")
-            I.Tween(knob, "Spring", { Size = UDim2.fromOffset(18, 18) })
-            I.Tween(knobStroke, "Fast", { Transparency = 0 })
-            bubble.Visible = true
-            bubbleScale.Scale = 0.7
-            I.Tween(bubbleScale, "PopSoft", { Scale = 1 })
+            I.Tween(S.knob, "Spring", { Size = UDim2.fromOffset(18, 18) })
+            I.Tween(S.knobStroke, "Fast", { Transparency = 0 })
+            S.bubble.Visible = true
+            S.bubbleScale.Scale = 0.7
+            I.Tween(S.bubbleScale, "PopSoft", { Scale = 1 })
 
             local function update(x)
-                local ap, as = track.AbsolutePosition, track.AbsoluteSize
+                local ap, as = S.track.AbsolutePosition, S.track.AbsoluteSize
                 if as.X <= 1 then return end
                 local frac = math.clamp((x - ap.X) / as.X, 0, 1)
                 local v = snap(frac)
-                if v ~= value then
-                    apply(v)
-                    if not onRelease then
-                        I.RunCallback(self.Callback, self.Title, value)
+                if v ~= S.value then
+                    S.apply(v)
+                    if not S.onRelease then
+                        I.RunCallback(self.Callback, self.Title, S.value)
                     end
                 end
             end
 
             update(input.Position.X)
 
-            local drag = I.BeginDrag(input, hit, {
-                ManagerKey = track,
+            local drag = I.BeginDrag(input, S.hit, {
+                ManagerKey = S.track,
                 NoAttr = true,
                 OnMove = function(pos)
                     update(pos.X)
                 end,
                 OnEnd = function()
-                    dragging = false
-                    I.Tween(knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
-                    I.Tween(knobStroke, "Fast", { Transparency = 0.35 })
-                    I.Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-                        if not dragging and not self._destroyed then bubble.Visible = false end
+                    S.dragging = false
+                    I.Tween(S.knob, "Spring", { Size = UDim2.fromOffset(14, 14) })
+                    I.Tween(S.knobStroke, "Fast", { Transparency = 0.35 })
+                    I.Tween(S.bubbleScale, "Vanish", { Scale = 0.7 }, function()
+                        if not S.dragging and not self._destroyed then S.bubble.Visible = false end
                     end)
-                    I.SaveValue(saveKey, value)
-                    if onRelease then
-                        I.RunCallback(self.Callback, self.Title, value)
+                    I.SaveValue(S.saveKey, S.value)
+                    if S.onRelease then
+                        I.RunCallback(self.Callback, self.Title, S.value)
                     end
                 end,
             })
             if not drag then
-                dragging = false
+                S.dragging = false
             end
         end)
 
-        track.MouseEnter:Connect(function()
-            if not dragging then I.Tween(knob, "Fast", { Size = UDim2.fromOffset(16, 16) }) end
+        S.track.MouseEnter:Connect(function()
+            if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(16, 16) }) end
         end)
-        track.MouseLeave:Connect(function()
-            if not dragging then I.Tween(knob, "Fast", { Size = UDim2.fromOffset(14, 14) }) end
+        S.track.MouseLeave:Connect(function()
+            if not S.dragging then I.Tween(S.knob, "Fast", { Size = UDim2.fromOffset(14, 14) }) end
         end)
 
-        I.Bind(knobStroke, "Color", "Accent")
-
-        self.Maid:Give(box.FocusLost:Connect(function()
-            local t = tostring(box.Text or "")
-            if prefix and t:sub(1, #prefix) == prefix then t = t:sub(#prefix + 1) end
-            if suffix and #suffix > 0 and t:sub(-#suffix) == suffix then t = t:sub(1, -#suffix - 1) end
+        self.Maid:Give(S.box.FocusLost:Connect(function()
+            local t = tostring(S.box.Text or "")
+            if S.prefix and t:sub(1, #S.prefix) == S.prefix then t = t:sub(#S.prefix + 1) end
+            if S.suffix and #S.suffix > 0 and t:sub(-#S.suffix) == S.suffix then t = t:sub(1, -#S.suffix - 1) end
             local num = tonumber((t:gsub(",", "."):gsub("%s", "")))
             if num then
                 self:Set(num)
             else
-                box.Text = string.format("%." .. decimals .. "f", value)
+                S.box.Text = string.format("%." .. S.decimals .. "f", S.value)
             end
         end))
 
@@ -3889,42 +4188,34 @@ Bundle["Elements/Slider"] = function(ctx)
             if self._destroyed then return end
             local nv = tonumber(newValue)
             if nv == nil then return end
-            nv = math.clamp(RoundStep(math.floor((nv - min) / step + 0.5) * step + min), min, max)
-            if decimals <= 0 then nv = math.floor(nv + 0.5) end
-            apply(nv)
-            I.SaveValue(saveKey, value)
-            if not silent then I.RunCallback(self.Callback, self.Title, value) end
+            nv = snapValue(nv)
+            local changed = nv ~= S.value
+            S.apply(nv)
+            if changed then I.SaveValue(S.saveKey, S.value) end
+            if changed and not silent then I.RunCallback(self.Callback, self.Title, S.value) end
         end
-        function self:Get() return value end
-        function self:CopyValue() return string.format("%." .. math.max(decimals, 0) .. "f", value) end
+
+        function self:Get()
+            return S.value
+        end
+
+        function self:CopyValue()
+            return string.format("%." .. math.max(S.decimals, 0) .. "f", S.value)
+        end
 
         function self:HandleArrow(dir)
             if self._destroyed or self._disabled then return end
-            local fine = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
-            local d = step * (fine and 0.2 or 1) * dir
-            self:Set(value + d)
+            self:Set(S.value + step * dir)
         end
 
-        self.Maid:Give(function()
-            if I.HotElement == self then I.HotElement = nil end
-        end)
-        if not I.Device.IsTouch then
-            row.MouseEnter:Connect(function() I.HotElement = self end)
-            row.MouseLeave:Connect(function()
-                if I.HotElement == self then I.HotElement = nil end
-            end)
-        end
+        I.TrackHot(self, S.row)
 
-        self:_bindSaveReload(saveKey, function(v)
+        self:_bindSaveReload(S.saveKey, function(v)
             if type(v) == "number" then self:Set(v, true) end
         end)
 
-        apply(value, true)
-        if opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
-            end)
-        end
+        S.apply(S.value, true)
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(S.saveKey, nil) ~= nil, S.value)
 
         self:RecalcWidth()
         return self
@@ -3941,6 +4232,22 @@ Bundle["Elements/Keybind"] = function(ctx)
 
     Elements.Keybind = I.MakeElementClass()
 
+    local dispatcher = nil
+    local function ensureDispatcher()
+        if dispatcher then return end
+        dispatcher = I.AddInputHook(function() return #I.KeybindRegistry > 0 end, function(input, gp)
+            local regs = table.clone(I.KeybindRegistry)
+            for i = 1, #regs do
+                local el = regs[i] and regs[i].el
+                if el and not el._destroyed and el._handleInput then
+                    local ok, err = pcall(el._handleInput, input, gp)
+                    if not ok then warn("[Kailex] " .. tostring(err)) end
+                end
+            end
+        end)
+        I.LibMaid:Give(function() I.RemoveInputHook(dispatcher) end)
+    end
+
     function Elements.Keybind.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Keybind)
@@ -3951,11 +4258,7 @@ Bundle["Elements/Keybind"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
 
         self.Callback = opts.Callback or function() end
 
@@ -3986,7 +4289,7 @@ Bundle["Elements/Keybind"] = function(ctx)
         end)
 
         local bindBtn = I.Create("TextButton", {
-            Size = UDim2.new(1, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, I.Device.IsTouch and 30 or 26),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
             Text = "None",
@@ -4040,6 +4343,7 @@ Bundle["Elements/Keybind"] = function(ctx)
             if self._destroyed then return end
             if listening then
                 if input.KeyCode ~= Enum.KeyCode.Unknown then
+                    if gp then return end
                     listenToken += 1
                     setListening(false)
                     if input.KeyCode == Enum.KeyCode.Escape then
@@ -4090,9 +4394,9 @@ Bundle["Elements/Keybind"] = function(ctx)
             end
         end
 
-        local hook = I.AddInputHook(function() return not self._destroyed end, self._handleInput)
+        ensureDispatcher()
+
         self.Maid:Give(function()
-            I.RemoveInputHook(hook)
             if listening then
                 listening = false
                 if I.ActiveKeybindListener == self then I.ActiveKeybindListener = nil end
@@ -4160,30 +4464,9 @@ Bundle["Elements/Keybind"] = function(ctx)
             I.ContextMenu.Show(items, m.X, m.Y)
         end
 
-        if I.Device.IsTouch then
-            local token = nil
-            bindBtn.InputBegan:Connect(function(input)
-                if input.UserInputType ~= Enum.UserInputType.Touch then return end
-                local myToken = {}
-                token = myToken
-                task.delay(0.55, function()
-                    if token ~= myToken or listening or self._destroyed then return end
-                    token = nil
-                    bindBtn:SetAttribute("Dragging", true)
-                    showMenu()
-                end)
-            end)
-            bindBtn.InputEnded:Connect(function()
-                token = nil
-                if bindBtn:GetAttribute("Dragging") then
-                    task.defer(function()
-                        bindBtn:SetAttribute("Dragging", nil)
-                    end)
-                end
-            end)
-        else
-            bindBtn.MouseButton2Click:Connect(showMenu)
-        end
+        I.OnLongPress(bindBtn, function()
+            return not listening and not self._destroyed
+        end, showMenu)
 
         function self:Set(v, silent)
             local b = I.ToBinding(v)
@@ -4214,10 +4497,12 @@ Bundle["Elements/Keybind"] = function(ctx)
         end
 
         self:_bindSaveReload(saveKey, function(v)
-            if v ~= "__none" then
-                local b = I.ToBinding(v)
-                if b then setBinding(b) end
+            if v == "__none" then
+                setBinding(nil)
+                return
             end
+            local b = I.ToBinding(v)
+            if b then setBinding(b) end
         end)
         self.Maid:Give(Kailex.ThemeChanged:Connect(refresh))
         refresh()
@@ -4228,100 +4513,111 @@ Bundle["Elements/Keybind"] = function(ctx)
 end
 
 
--- [[Elements/Dropdown]]
-Bundle["Elements/Dropdown"] = function(ctx)
+-- [[Elements/Dropdown/View]]
+Bundle["Elements/Dropdown/View"] = function(ctx)
     local I = ctx.Internal
-    local Elements = I.Elements
     local Setting = I.Setting
 
     local DROP_VIRTUALIZE = 60
     local DROP_SEARCH_AT = 12
 
-    Elements.Dropdown = I.MakeElementClass()
+    local View = {}
 
-    function Elements.Dropdown.new(tab, opts)
-        opts = opts or {}
-        local self = setmetatable({}, Elements.Dropdown)
-        local saveKey = tab:GetSaveKey(opts)
-        local multi = opts.Multi == true
-
-        local function normalize(list)
-            local out = {}
-            for _, v in ipairs(list or {}) do
-                if type(v) == "table" and v.Text ~= nil then
-                    local val = (v.Value ~= nil) and v.Value or v.Text
-                    out[#out + 1] = { Text = tostring(v.Text), Value = val, Key = tostring(val) }
-                else
-                    out[#out + 1] = { Text = tostring(v), Value = v, Key = tostring(v) }
-                end
-            end
-            return out
+    function View.findOpt(S, key)
+        for _, o in ipairs(S.options) do
+            if o.Key == key then return o end
         end
-        local options = normalize(opts.Options or opts.Items)
+        return nil
+    end
 
-        local function findOpt(key)
-            for _, o in ipairs(options) do
-                if o.Key == key then return o end
-            end
-            return nil
-        end
-
-        local selSet = {}
-        do
-            local defaults
-            if multi then
-                local sv = I.SaveManager:Get(saveKey, nil)
-                if sv ~= nil and type(sv) == "table" then
-                    defaults = sv
-                elseif type(opts.Defaults) == "table" then
-                    defaults = opts.Defaults
-                end
-            else
-                local d
-                local sv = I.SaveManager:Get(saveKey, nil)
-                if sv ~= nil and type(sv) ~= "table" then
-                    d = sv
-                elseif opts.Default ~= nil then
-                    d = opts.Default
-                end
-                if d ~= nil then defaults = { d } end
-            end
-            if defaults then
-                for _, d in ipairs(defaults) do
-                    local o = findOpt(tostring(d))
-                    if o then selSet[o.Key] = true end
-                end
+    function View.setSelection(S, items)
+        local ns = {}
+        for _, x in ipairs(items) do
+            if x ~= nil then
+                local o = View.findOpt(S, tostring(x))
+                if o then ns[o.Key] = true end
             end
         end
+        S.selSet = ns
+    end
 
-        local function selectedOpts()
-            local out = {}
-            for _, o in ipairs(options) do
-                if selSet[o.Key] then out[#out + 1] = o end
+    function View.selectedOpts(S)
+        local out = {}
+        for _, o in ipairs(S.options) do
+            if S.selSet[o.Key] then out[#out + 1] = o end
+        end
+        return out
+    end
+
+    function View.valuesOf(list)
+        local out = {}
+        for _, o in ipairs(list) do out[#out + 1] = o.Value end
+        return out
+    end
+
+    function View.saveSelection(S)
+        local sel = View.selectedOpts(S)
+        I.SaveValue(S.saveKey, S.multi and View.valuesOf(sel) or (sel[1] and sel[1].Value or nil))
+    end
+
+    function View.initOptions(S)
+        S.options = I.NormalizeOptions(S.opts.Options or S.opts.Items)
+        S.display = S.options
+        S.searchShown = (#S.options > DROP_SEARCH_AT) or S.opts.Searchable == true
+    end
+
+    function View.setOptions(S, newOptions)
+        S.options = I.NormalizeOptions(newOptions)
+        S.display = S.options
+        local valid = {}
+        for _, opt in ipairs(S.options) do valid[opt.Key] = true end
+        local ns = {}
+        for k in pairs(S.selSet) do
+            if valid[k] then ns[k] = true end
+        end
+        S.selSet = ns
+    end
+
+    function View.initSelection(S)
+        local opts, multi = S.opts, S.multi
+        local defaults
+        if multi then
+            local sv = I.SaveManager:Get(S.saveKey, nil)
+            if type(sv) == "table" then
+                defaults = sv
+            elseif type(opts.Defaults) == "table" then
+                defaults = opts.Defaults
             end
-            return out
-        end
-
-        local function valuesOf(list)
-            local out = {}
-            for _, o in ipairs(list) do out[#out + 1] = o.Value end
-            return out
-        end
-
-        local function measureWidth()
-            local w = 96
-            local cap = math.min(#options, 120)
-            for i = 1, cap do
-                local text = options[i].Text
-                if #text > 64 then text = text:sub(1, 64) end
-                local b = I.TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(2000, 20))
-                if b.X > w then w = b.X end
+        else
+            local sv = I.SaveManager:Get(S.saveKey, nil)
+            local d
+            if sv ~= nil and type(sv) ~= "table" then
+                d = sv
+            elseif opts.Default ~= nil then
+                d = opts.Default
             end
-            return math.clamp(w + 30, 122, 280)
+            if d ~= nil then defaults = { d } end
         end
+        S.selSet = {}
+        if defaults then View.setSelection(S, defaults) end
+    end
 
+    function View.measureWidth(S)
+        local w = 96
+        local cap = math.min(#S.options, 120)
+        for i = 1, cap do
+            local text = S.options[i].Text
+            if #text > 64 then text = text:sub(1, 64) end
+            local b = I.TextService:GetTextSize(text, I.TS(12), Enum.Font.Gotham, Vector2.new(2000, 20))
+            if b.X > w then w = b.X end
+        end
+        return math.clamp(w + 30, 122, 220)
+    end
+
+    function View.initRow(S)
+        local opts, tab = S.opts, S.tab
         local baseH = I.ROW_H + (opts.Description and 16 or 0)
-        local rightW = measureWidth()
+        local rightW = View.measureWidth(S)
         local row, title, right, left = I.CreateRow(tab.Content, {
             Name = opts.Name or "Dropdown",
             RightWidth = rightW,
@@ -4329,15 +4625,11 @@ Bundle["Elements/Dropdown"] = function(ctx)
             Width = opts.Width,
             Description = opts.Description,
         })
-        self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
-        self.Callback = opts.Callback or function() end
+        S.row, S.title, S.right, S.left = row, title, right, left
+        S.rightW = rightW
+        S.baseH = baseH
 
-        local valueLabel = I.Create("TextLabel", {
+        S.valueLabel = I.Create("TextLabel", {
             Size = UDim2.new(0, rightW - 26, 1, 0),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham,
@@ -4348,62 +4640,70 @@ Bundle["Elements/Dropdown"] = function(ctx)
             LayoutOrder = 1,
             Parent = right,
         })
-        local chevHolder = I.Icon(right, "Chevron", "SubText")
-        chevHolder.LayoutOrder = 2
+        S.chevHolder = I.Icon(right, "Chevron", "SubText")
+        S.chevHolder.LayoutOrder = 2
 
-        local list = I.Create("CanvasGroup", {
+        S.headerH = (S.searchShown or S.multi) and 28 or 0
+        S.optH = I.Device.IsTouch and 38 or 30
+        S.pad = 4
+        S.innerList = 26
+        S.query = ""
+        S.optionButtons = {}
+        S.virtual = false
+        S.virtualButtons = {}
+        S.virtualPool = {}
+        S.expanded = false
+        S.hl = nil
+    end
+
+    function View.buildUI(S)
+        if S.list then return end
+        local self = S.self
+
+        S.mc = I.ModalCard.MakeAnchor({
             Size = UDim2.new(0, 120, 0, 0),
-            BackgroundColor3 = I.CurrentTheme.SurfaceLight,
-            BackgroundTransparency = 0.05,
-            BorderSizePixel = 0,
-            Visible = false,
-            GroupTransparency = 1,
+            BgKey = "SurfaceLight",
+            BgTransparency = 0.05,
+            Corner = 10,
+            StrokeT = 0.2,
+            ShadowR = 10,
             ZIndex = 100,
-            Parent = I.LayerOverlay,
-            Children = { I.Corner(10), I.StrokeBind(1, "Stroke", 0.2) },
+            Owner = S.tab.Window,
+            Closer = S.closeFn,
+            OnCatcherClick = S.closeFn,
         })
-        I.Bind(list, "BackgroundColor3", "SurfaceLight")
-        local shadow = I.DropShadow(list, { Radius = 10 })
+        S.list = S.mc.Card
+        S.catcher = S.mc.Catcher
+        S.shadow = S.mc.Shadow
 
-        local header = I.Create("Frame", {
+        S.header = I.Create("Frame", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 0, 0),
-            Parent = list,
+            Parent = S.list,
             Children = {
                 I.Create("UIListLayout", {
                     FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                    HorizontalAlignment = I.HAlign(),
                     Padding = UDim.new(0, 4),
                     SortOrder = Enum.SortOrder.LayoutOrder,
                 }),
             },
         })
 
-        local listCanvas = I.Create("ScrollingFrame", {
+        S.listCanvas = I.Create("ScrollingFrame", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 1, 0),
             CanvasSize = UDim2.new(),
             ScrollingDirection = Enum.ScrollingDirection.Y,
             ScrollBarThickness = 3,
             BorderSizePixel = 0,
-            Parent = list,
+            Parent = S.list,
         })
-        I.Bind(listCanvas, "ScrollBarImageColor3", "Stroke")
+        I.Bind(S.listCanvas, "ScrollBarImageColor3", "Stroke")
 
-        local catcher = I.Create("TextButton", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            Text = "",
-            Visible = false,
-            ZIndex = 99,
-            Parent = I.LayerOverlay,
-        })
-
-        local searchShown = (#options > DROP_SEARCH_AT) or opts.Searchable == true
-        local searchBox
-        if searchShown then
-            searchBox = I.Create("TextBox", {
-                Size = UDim2.new(1, multi and -60 or -8, 1, -6),
+        if S.searchShown then
+            S.searchBox = I.Create("TextBox", {
+                Size = UDim2.new(1, S.multi and -84 or -32, 1, -6),
                 BackgroundColor3 = I.CurrentTheme.Surface,
                 BorderSizePixel = 0,
                 Font = Enum.Font.Gotham,
@@ -4411,605 +4711,658 @@ Bundle["Elements/Dropdown"] = function(ctx)
                 TextColor3 = I.CurrentTheme.Text,
                 PlaceholderText = "Search...",
                 PlaceholderColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 ClearTextOnFocus = false,
                 Text = "",
                 LayoutOrder = 1,
-                Parent = header,
+                Parent = S.header,
                 Children = {
                     I.Corner(6),
                     I.Create("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }),
                     I.StrokeBind(1, "Stroke", 0.5),
                 },
             })
-            I.Bind(searchBox, "BackgroundColor3", "Surface")
-            I.Bind(searchBox, "TextColor3", "Text")
-            I.Bind(searchBox, "PlaceholderColor3", "SubText")
+            I.Bind(S.searchBox, "BackgroundColor3", "Surface")
+            I.Bind(S.searchBox, "TextColor3", "Text")
+            I.Bind(S.searchBox, "PlaceholderColor3", "SubText")
+
+            local clearBtn = I.Create("TextButton", {
+                Size = UDim2.fromOffset(20, 20),
+                BackgroundTransparency = 1,
+                Text = "×",
+                Font = Enum.Font.GothamBold,
+                TextSize = 12,
+                TextColor3 = I.CurrentTheme.SubText,
+                AutoButtonColor = false,
+                LayoutOrder = 4,
+                Visible = false,
+                Parent = S.header,
+                Children = { I.Corner(5) },
+            })
+            I.Bind(clearBtn, "TextColor3", "SubText")
+
+            S.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                clearBtn.Visible = S.searchBox.Text ~= ""
+                S.query = S.searchBox.Text:lower()
+                if S.query == "" then
+                    S.display = S.options
+                else
+                    local out = {}
+                    for _, o in ipairs(S.options) do
+                        if o.Text:lower():find(S.query, 1, true) then out[#out + 1] = o end
+                    end
+                    S.display = out
+                end
+                S.hl = nil
+                S.listCanvas.CanvasPosition = Vector2.new(0, 0)
+                View.buildOptions(S)
+            end)
+            clearBtn.MouseButton1Click:Connect(function()
+                S.searchBox.Text = ""
+                pcall(function() S.searchBox:CaptureFocus() end)
+            end)
         end
 
-        local allBtn, noneBtn
-        if multi then
+        if S.multi then
             local function mkMini(text, order)
-                local b = I.Create("TextButton", {
+                return I.MkButton(S.header, {
                     Size = UDim2.fromOffset(26, 20),
-                    BackgroundColor3 = I.CurrentTheme.Element,
-                    BorderSizePixel = 0,
                     Text = text,
                     Font = Enum.Font.GothamBold,
                     TextSize = 9,
-                    TextColor3 = I.CurrentTheme.SubText,
-                    AutoButtonColor = false,
                     LayoutOrder = order,
-                    Parent = header,
-                    Children = { I.Corner(5) },
-                })
-                I.Bind(b, "BackgroundColor3", "Element")
-                I.Bind(b, "TextColor3", "SubText")
-                I.AddHover(b)
-                return b
+                }, { Text = "SubText", Corner = 5 })
             end
-            allBtn = mkMini("All", 2)
-            noneBtn = mkMini("None", 3)
+            S.allBtn = mkMini("All", 2)
+            S.noneBtn = mkMini("None", 3)
+
+            S.allBtn.MouseButton1Click:Connect(function()
+                for _, o in ipairs(S.options) do S.selSet[o.Key] = true end
+                View.refreshOptions(S)
+                View.refreshLabel(S)
+                View.saveSelection(S)
+                I.RunCallback(self.Callback, self.Title, self:Get())
+            end)
+            S.noneBtn.MouseButton1Click:Connect(function()
+                S.selSet = {}
+                View.refreshOptions(S)
+                View.refreshLabel(S)
+                I.SaveValue(S.saveKey, {})
+                I.RunCallback(self.Callback, self.Title, self:Get())
+            end)
         end
 
-        local headerH = (searchShown or multi) and 28 or 0
-
-        local emptyLabel = I.Create("TextLabel", {
+        S.emptyLabel = I.Create("TextLabel", {
+            Position = UDim2.new(0, 0, 0, 6),
             Size = UDim2.new(1, 0, 0, 20),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham,
             TextSize = 11,
             TextColor3 = I.CurrentTheme.SubText,
+            TextXAlignment = I.XAlign(),
             Text = "No options",
+            LayoutOrder = 1000000000,
             Visible = false,
-            Parent = listCanvas,
+            Parent = S.listCanvas,
         })
-        I.Bind(emptyLabel, "TextColor3", "SubText")
+        I.Bind(S.emptyLabel, "TextColor3", "SubText")
 
-        local query = ""
-        local display = options
-        local optionButtons = {}
-        local innerList = 26
-        local optH = I.Device.IsTouch and 38 or 30
-        local pad = 4
-        local virtual = false
-        local virtualButtons = {}
-        local virtualPool = {}
-        local expanded = false
-        local modalEntry
-        local selectOption
-        local closeFn
-        local setExpanded
-        local buildOptions
-        local refreshOptions
-        local refreshLabel
-        local hl = nil
+        S.listCanvas:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            if S.virtual and S.expanded then View.updateVirtualWindow(S) end
+        end)
+        S.listCanvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if S.virtual and S.expanded then View.updateVirtualWindow(S) end
+        end)
+    end
 
-        local function paintRec(rec, opt)
-            local isSel = opt ~= nil and selSet[opt.Key] == true
-            local btn = rec.Button
-            btn.Text = opt and (multi and ("    " .. opt.Text) or ("  " .. opt.Text)) or ""
-            btn.BackgroundColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element
-            btn.BackgroundTransparency = isSel and 0.75 or 1
-            btn.TextColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Text
-            if multi and rec.Box then
-                rec.Box.BackgroundColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.SurfaceLight
-                rec.BoxStroke.Color = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Stroke
-                rec.BoxStroke.Transparency = isSel and 0 or 0.4
-                rec.Fill.Visible = isSel
-                rec.Fill.Size = isSel and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 0)
-            elseif rec.Check then
-                rec.Check.Visible = isSel
-                if isSel and rec.Check.Rotation < -10 then rec.Check.Rotation = -80 end
+    function View.paintRec(S, rec, opt)
+        local isSel = opt ~= nil and S.selSet[opt.Key] == true
+        local btn = rec.Button
+        btn.Text = opt and opt.Text or ""
+        btn.BackgroundColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element
+        btn.BackgroundTransparency = isSel and 0.75 or 1
+        btn.TextColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Text
+        if S.multi and rec.Box then
+            rec.Box.BackgroundColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.SurfaceLight
+            rec.BoxStroke.Color = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Stroke
+            rec.BoxStroke.Transparency = isSel and 0 or 0.4
+            rec.Fill.Visible = isSel
+            rec.Fill.Size = isSel and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 0)
+        elseif rec.Check then
+            rec.Check.Visible = isSel
+            if isSel and rec.Check.Rotation < -10 then rec.Check.Rotation = -80 end
+        end
+    end
+
+    function View.recAt(S, idx)
+        if S.virtual then return S.virtualButtons[idx] end
+        return S.optionButtons[idx]
+    end
+
+    function View.paintHl(S, rec, on)
+        if not rec or not rec.Button then return end
+        local opt = S.display[rec._idx]
+        local isSel = opt ~= nil and S.selSet[opt.Key] == true
+        I.Tween(rec.Button, "Instant", {
+            BackgroundColor3 = on
+                and (isSel and I.CurrentTheme.AccentHover or I.CurrentTheme.ElementHover)
+                or (isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element),
+            BackgroundTransparency = on
+                and (isSel and 0.6 or 0.35)
+                or (isSel and 0.75 or 1),
+        })
+    end
+
+    function View.clearHl(S)
+        if S.hl == nil then return end
+        local rec = View.recAt(S, S.hl)
+        if rec then View.paintHl(S, rec, false) end
+        S.hl = nil
+    end
+
+    function View.setHl(S, idx)
+        if idx == S.hl then return end
+        View.clearHl(S)
+        if idx == nil or idx < 1 or idx > #S.display then return end
+        S.hl = idx
+        local rowStep = S.optH + S.pad
+        local target = (idx - 1) * rowStep
+        local viewH = S.listCanvas.AbsoluteSize.Y
+        local top = S.listCanvas.CanvasPosition.Y
+        if target < top or target + S.optH > top + viewH then
+            S.listCanvas.CanvasPosition = Vector2.new(0, math.max(0, target - math.max(0, (viewH - S.optH) / 2)))
+        end
+        local rec = View.recAt(S, idx)
+        if rec then View.paintHl(S, rec, true) end
+    end
+
+    function View.moveHl(S, dir)
+        local n = #S.display
+        if n == 0 then return end
+        local idx = S.hl or 0
+        if dir > 0 then
+            idx += 1
+            if idx > n then idx = 1 end
+        else
+            idx -= 1
+            if idx < 1 then idx = n end
+        end
+        View.setHl(S, idx)
+    end
+
+    function View.refreshOptions(S)
+        if S.virtual then
+            for idx, rec in pairs(S.virtualButtons) do
+                View.paintRec(S, rec, S.display[idx])
             end
-        end
-
-        local function recAt(idx)
-            if virtual then
-                return virtualButtons[idx]
-            end
-            return optionButtons[idx]
-        end
-
-        local function paintHl(rec, on)
-            if not rec or not rec.Button then return end
-            local opt = display[rec._idx]
-            local isSel = opt ~= nil and selSet[opt.Key] == true
-            I.Tween(rec.Button, "Instant", {
-                BackgroundColor3 = on and (isSel and I.CurrentTheme.AccentHover or I.CurrentTheme.ElementHover)
-                    or (isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element),
-                BackgroundTransparency = on and (isSel and 0.6 or 0.35) or (isSel and 0.75 or 1),
-            })
-        end
-
-        local function clearHl()
-            if hl == nil then return end
-            local rec = recAt(hl)
-            if rec then paintHl(rec, false) end
-            hl = nil
-        end
-
-        local function setHl(idx)
-            if idx == hl then return end
-            clearHl()
-            if idx == nil or idx < 1 or idx > #display then return end
-            hl = idx
-            local rowStep = optH + pad
-            local target = (idx - 1) * rowStep
-            local viewH = listCanvas.AbsoluteSize.Y
-            local top = listCanvas.CanvasPosition.Y
-            if target < top or target + optH > top + viewH then
-                listCanvas.CanvasPosition = Vector2.new(0, math.max(0, target - math.max(0, (viewH - optH) / 2)))
-            end
-            local rec = recAt(idx)
-            if rec then paintHl(rec, true) end
-        end
-
-        local function moveHl(dir)
-            local n = #display
-            if n == 0 then return end
-            local idx = hl or 0
-            if dir > 0 then
-                idx += 1
-                if idx > n then idx = 1 end
-            else
-                idx -= 1
-                if idx < 1 then idx = n end
-            end
-            setHl(idx)
-        end
-
-        refreshOptions = function()
-            if virtual then
-                for idx, rec in pairs(virtualButtons) do
-                    paintRec(rec, display[idx])
-                end
-            else
-                for i, opt in ipairs(display) do
-                    local rec = optionButtons[i]
-                    if rec then
-                        paintRec(rec, opt)
-                        if rec.Check and rec.Check.Visible then
-                            I.Tween(rec.Check, "Spring", { Rotation = 0 })
-                        end
+        else
+            for i, opt in ipairs(S.display) do
+                local rec = S.optionButtons[i]
+                if rec then
+                    View.paintRec(S, rec, opt)
+                    if rec.Check and rec.Check.Visible then
+                        I.Tween(rec.Check, "Spring", { Rotation = 0 })
                     end
                 end
             end
-            if hl ~= nil then
-                local rec = recAt(hl)
-                if rec then paintHl(rec, true) end
-            end
         end
-
-        refreshLabel = function()
-            local text
-            if multi then
-                local sel = selectedOpts()
-                if #sel == 0 then text = "-"
-                elseif #sel == 1 then text = sel[1].Text
-                else text = #sel .. " selected" end
-            else
-                local sel = selectedOpts()
-                text = (#sel > 0) and sel[1].Text or "-"
-            end
-            valueLabel.Text = text
-            local has = next(selSet) ~= nil
-            valueLabel.TextColor3 = has and I.CurrentTheme.Text or I.CurrentTheme.SubText
+        if S.hl ~= nil then
+            local rec = View.recAt(S, S.hl)
+            if rec then View.paintHl(S, rec, true) end
         end
+    end
 
-        local function newRec()
-            local btn = I.Create("TextButton", {
-                Size = UDim2.new(1, 0, 0, optH),
-                BackgroundTransparency = 1,
-                BackgroundColor3 = I.CurrentTheme.Element,
+    function View.refreshLabel(S)
+        local sel = View.selectedOpts(S)
+        local text
+        if S.multi then
+            if #sel == 0 then text = "-"
+            elseif #sel == 1 then text = sel[1].Text
+            else text = #sel .. " selected" end
+        else
+            text = (#sel > 0) and sel[1].Text or "-"
+        end
+        S.valueLabel.Text = text
+        S.valueLabel.TextColor3 = (next(S.selSet) ~= nil) and I.CurrentTheme.Text or I.CurrentTheme.SubText
+    end
+
+    function View.newRec(S)
+        local btn = I.Create("TextButton", {
+            Size = UDim2.new(1, 0, 0, S.optH),
+            BackgroundTransparency = 1,
+            BackgroundColor3 = I.CurrentTheme.Element,
+            BorderSizePixel = 0,
+            Text = "",
+            TextXAlignment = I.XAlign(),
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.Text,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            AutoButtonColor = false,
+            Parent = S.listCanvas,
+            Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 6) }) },
+        })
+        I.Create("UIPadding", {
+            [Setting.RTL and "PaddingRight" or "PaddingLeft"] = UDim.new(0, 24),
+            Parent = btn,
+        })
+        local rec = { Button = btn, _idx = nil }
+
+        if S.multi then
+            local box = I.Create("Frame", {
+                AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
+                Position = Setting.RTL and UDim2.new(1, -8, 0.5, 0) or UDim2.new(0, 8, 0.5, 0),
+                Size = UDim2.fromOffset(16, 16),
+                BackgroundColor3 = I.CurrentTheme.SurfaceLight,
                 BorderSizePixel = 0,
-                Text = "",
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-                Font = Enum.Font.Gotham,
-                TextSize = 12,
-                TextColor3 = I.CurrentTheme.Text,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                AutoButtonColor = false,
-                Parent = listCanvas,
-                Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 6) }) },
+                Parent = btn,
+                Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 5) }) },
             })
-            local rec = { Button = btn, _idx = nil }
-            if multi then
-                local box = I.Create("Frame", {
-                    AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
-                    Position = Setting.RTL and UDim2.new(1, -8, 0.5, 0) or UDim2.new(0, 8, 0.5, 0),
-                    Size = UDim2.fromOffset(16, 16),
-                    BackgroundColor3 = I.CurrentTheme.SurfaceLight,
-                    BorderSizePixel = 0,
-                    Parent = btn,
-                    Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 5) }) },
-                })
-                rec.BoxStroke = I.Create("UIStroke", {
-                    Thickness = 1, Transparency = 0.4,
-                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                    Color = I.CurrentTheme.Stroke, Parent = box,
-                })
-                rec.Fill = I.Create("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.fromScale(0.5, 0.5),
-                    Size = UDim2.fromOffset(0, 0),
-                    BackgroundColor3 = I.CurrentTheme.Accent,
-                    BorderSizePixel = 0,
-                    Visible = false,
-                    Parent = box,
-                    Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
-                })
-            else
-                local chk = I.Icon(btn, "Check", "Accent")
-                chk.AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5)
-                chk.Position = Setting.RTL and UDim2.new(0, 8, 0.5, 0) or UDim2.new(1, -8, 0.5, 0)
-                chk.Size = UDim2.fromOffset(11, 11)
-                chk.Visible = false
-                rec.Check = chk
+            rec.BoxStroke = I.Create("UIStroke", {
+                Thickness = 1,
+                Transparency = 0.4,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Color = I.CurrentTheme.Stroke,
+                Parent = box,
+            })
+            rec.Fill = I.Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(0, 0),
+                BackgroundColor3 = I.CurrentTheme.Accent,
+                BorderSizePixel = 0,
+                Visible = false,
+                Parent = box,
+                Children = { I.Create("UICorner", { CornerRadius = UDim.new(0, 2) }) },
+            })
+        else
+            local chk = I.Icon(btn, "Check", "Accent")
+            chk.AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5)
+            chk.Position = Setting.RTL and UDim2.new(0, 8, 0.5, 0) or UDim2.new(1, -8, 0.5, 0)
+            chk.Size = UDim2.fromOffset(11, 11)
+            chk.Visible = false
+            rec.Check = chk
+        end
+
+        btn.MouseEnter:Connect(function()
+            if I.Device.IsTouch or not S.expanded or not rec._idx then return end
+            if S.hl ~= nil and S.hl ~= rec._idx then
+                local prev = View.recAt(S, S.hl)
+                if prev and prev ~= rec then View.paintHl(S, prev, false) end
             end
-            btn.MouseEnter:Connect(function()
-                if I.Device.IsTouch or not expanded or not rec._idx then return end
-                hl = rec._idx
-                I.PlaySound("Hover", 0.1)
-                local opt = display[rec._idx]
-                local isSel = opt ~= nil and selSet[opt.Key] == true
-                I.Tween(btn, "HoverIn", {
-                    BackgroundColor3 = isSel and I.CurrentTheme.AccentHover or I.CurrentTheme.ElementHover,
-                    BackgroundTransparency = isSel and 0.6 or 0.35,
-                })
-            end)
-            btn.MouseLeave:Connect(function()
-                if not rec._idx then return end
-                if hl == rec._idx then return end
-                local opt = display[rec._idx]
-                local isSel = opt ~= nil and selSet[opt.Key] == true
-                I.Tween(btn, "HoverOut", {
-                    BackgroundColor3 = isSel and I.CurrentTheme.Accent or I.CurrentTheme.Element,
-                    BackgroundTransparency = isSel and 0.75 or 1,
-                })
-            end)
-            btn.MouseButton1Click:Connect(function()
-                local idx = rec._idx
-                if not idx then return end
-                selectOption(display[idx], btn)
-            end)
+            S.hl = rec._idx
+            I.PlaySound("Hover", 0.1)
+            View.paintHl(S, rec, true)
+        end)
+        btn.MouseLeave:Connect(function()
+            if not rec._idx then return end
+            if S.hl == rec._idx then return end
+            View.paintHl(S, rec, false)
+        end)
+        btn.MouseButton1Click:Connect(function()
+            local idx = rec._idx
+            if not idx then return end
+            S.selectOption(S.display[idx], btn)
+        end)
+        return rec
+    end
+
+    function View.buildOptions(S)
+        if not S.listCanvas then return end
+        if S._builtOpts == S.options and S._builtQuery == S.query then
+            View.refreshOptions(S)
+            if S.expanded then
+                local sc = I.GetScale()
+                S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
+            end
+            return
+        end
+        View.clearButtons(S)
+        local count = #S.display
+        S.virtual = count > DROP_VIRTUALIZE
+        S.emptyLabel.Visible = count == 0
+
+        local layout = S.listCanvas:FindFirstChildOfClass("UIListLayout")
+        if not S.virtual and not layout then
+            I.Create("UIListLayout", {
+                Padding = UDim.new(0, S.pad),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = S.listCanvas,
+            })
+        elseif S.virtual and layout then
+            layout:Destroy()
+        end
+
+        if S.virtual then
+            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.None
+            S.listCanvas.CanvasSize = UDim2.new(0, 0, 0, count * (S.optH + S.pad) + 8)
+            S.innerList = math.min(count, 6) * S.optH + math.min(count, 5) * S.pad + 12
+            View.updateVirtualWindow(S)
+        else
+            S.listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            S.listCanvas.CanvasSize = UDim2.new()
+            local rows = math.clamp(count, 1, 6)
+            S.innerList = count > 0 and (rows * S.optH + (rows - 1) * S.pad + 12) or 26
+            for i, opt in ipairs(S.display) do
+                local rec = View.newRec(S)
+                rec._idx = i
+                rec.Button.LayoutOrder = i
+                S.optionButtons[i] = rec
+                View.paintRec(S, rec, opt)
+            end
+        end
+        S.header.Size = UDim2.new(1, 0, 0, S.headerH)
+        S.listCanvas.Position = UDim2.new(0, 0, 0, S.headerH)
+        S.listCanvas.Size = UDim2.new(1, 0, 1, -S.headerH)
+        View.refreshOptions(S)
+        if S.expanded then
+            local sc = I.GetScale()
+            S.list.Size = UDim2.new(0, math.max(140, S.row.AbsoluteSize.X / sc), 0, S.headerH + S.innerList)
+        end
+        S._builtOpts, S._builtQuery = S.options, S.query
+    end
+
+    I.DropdownView = View
+end
+
+
+-- [[Elements/Dropdown/Virtual]]
+Bundle["Elements/Dropdown/Virtual"] = function(ctx)
+    local View = ctx.Internal.DropdownView
+
+    function View.releaseRec(S, rec)
+        rec._idx = nil
+        rec.Button.Visible = false
+        table.insert(S.virtualPool, rec)
+    end
+
+    function View.acquireRec(S)
+        local rec = table.remove(S.virtualPool)
+        if rec then
+            rec.Button.Visible = true
             return rec
         end
+        return View.newRec(S)
+    end
 
-        local function releaseRec(rec)
-            rec._idx = nil
-            rec.Button.Visible = false
-            table.insert(virtualPool, rec)
-        end
-
-        local function acquireRec()
-            local rec = table.remove(virtualPool)
-            if rec then
-                rec.Button.Visible = true
-                return rec
-            end
-            return newRec()
-        end
-
-        local function updateVirtualWindow()
-            if not virtual or not expanded then return end
-            local viewH = listCanvas.AbsoluteSize.Y
-            local top = listCanvas.CanvasPosition.Y
-            local rowStep = optH + pad
-            local first = math.max(1, math.floor(top / rowStep) - 2)
-            local count = math.ceil(viewH / rowStep) + 5
-            local last = math.min(#display, first + count)
-            for idx, rec in pairs(virtualButtons) do
-                if idx < first or idx > last then
-                    virtualButtons[idx] = nil
-                    releaseRec(rec)
-                end
-            end
-            for idx = first, last do
-                if not virtualButtons[idx] then
-                    local rec = acquireRec()
-                    virtualButtons[idx] = rec
-                    rec._idx = idx
-                    rec.Button.Position = UDim2.fromOffset(0, (idx - 1) * rowStep)
-                    paintRec(rec, display[idx])
-                end
+    function View.updateVirtualWindow(S)
+        if not S.virtual or not S.expanded then return end
+        local viewH = S.listCanvas.AbsoluteSize.Y
+        local top = S.listCanvas.CanvasPosition.Y
+        local rowStep = S.optH + S.pad
+        local first = math.max(1, math.floor(top / rowStep) - 2)
+        local count = math.ceil(viewH / rowStep) + 5
+        local last = math.min(#S.display, first + count)
+        for idx, rec in pairs(S.virtualButtons) do
+            if idx < first or idx > last then
+                S.virtualButtons[idx] = nil
+                View.releaseRec(S, rec)
             end
         end
+        for idx = first, last do
+            if not S.virtualButtons[idx] then
+                local rec = View.acquireRec(S)
+                S.virtualButtons[idx] = rec
+                rec._idx = idx
+                rec.Button.Position = UDim2.fromOffset(0, (idx - 1) * rowStep)
+                View.paintRec(S, rec, S.display[idx])
+            end
+        end
+    end
 
-        setExpanded = function(state)
-            if expanded == state then return end
-            expanded = state
-            I.Tween(chevHolder, "PopSoft", { Rotation = state and 180 or 0 })
-            if state then
-                if tab._openDropdown and tab._openDropdown ~= closeFn then
-                    tab._openDropdown()
-                end
-                tab._openDropdown = closeFn
-                I.HotElement = nil
+    function View.clearButtons(S)
+        for _, rec in ipairs(S.optionButtons) do
+            if rec.Button then rec.Button:Destroy() end
+        end
+        table.clear(S.optionButtons)
+        for _, rec in pairs(S.virtualButtons) do
+            rec.Button:Destroy()
+        end
+        table.clear(S.virtualButtons)
+        for _, rec in ipairs(S.virtualPool) do
+            rec.Button:Destroy()
+        end
+        table.clear(S.virtualPool)
+    end
+end
 
-                local sc = I.GetScale()
-                local ap, asz = row.AbsolutePosition, row.AbsoluteSize
-                local rowX, rowY = ap.X / sc, ap.Y / sc
-                local rowW, rowH2 = asz.X / sc, asz.Y / sc
-                local vw, vh = I.Viewport.X / sc, I.Viewport.Y / sc
-                local pw = math.max(140, rowW)
-                local totalH = headerH + innerList
-                local below = vh - (rowY + rowH2) - 10
-                local above = rowY - 10
-                if below < totalH and above < totalH then
-                    totalH = headerH + math.max(optH + 14, math.min(innerList, math.max(below, above)))
-                end
-                local y, slideFrom
-                if below >= totalH then
-                    y, slideFrom = rowY + rowH2 - 2, -6
-                elseif above >= totalH then
-                    y, slideFrom = rowY - totalH + 2, 6
-                else
-                    y = math.clamp(rowY + rowH2 + 4, 8, math.max(8, vh - totalH - 8))
-                    slideFrom = -6
-                end
-                local x = math.clamp(rowX, 8, math.max(8, vw - pw - 8))
 
-                hl = nil
-                if not multi then
-                    for i, o in ipairs(display) do
-                        if selSet[o.Key] == true then hl = i break end
-                    end
-                end
+-- [[Elements/Dropdown/Actions]]
+Bundle["Elements/Dropdown/Actions"] = function(ctx)
+    local I = ctx.Internal
+    local View = I.DropdownView
 
-                listCanvas.CanvasPosition = Vector2.new(0, 0)
-                listCanvas.Position = UDim2.new(0, 0, 0, headerH)
-                listCanvas.Size = UDim2.new(1, 0, 1, -headerH)
-                list.Size = UDim2.new(0, pw, 0, 0)
-                list.Position = UDim2.fromOffset(x, y + slideFrom)
-                list.Visible = true
-                catcher.Visible = true
-                if shadow then shadow.SetFade(1) end
-                list.GroupTransparency = 1
-                I.Tween(list, "Snappy", { Size = UDim2.new(0, pw, 0, totalH), GroupTransparency = 0 })
-                I.Tween(list, "Smooth", { Position = UDim2.fromOffset(x, y) })
-                if shadow then
-                    task.delay(0.1, function()
-                        if expanded and shadow then shadow.SetFade(0) end
-                    end)
-                end
+    local Actions = {}
 
-                I.ModalManager.Remove(modalEntry)
-                modalEntry = I.ModalManager.Push(tab.Window, closeFn)
-
-                if virtual then
-                    updateVirtualWindow()
-                else
-                    refreshOptions()
-                    for i, opt in ipairs(display) do
-                        local rec = optionButtons[i]
-                        if rec then
-                            local btn = rec.Button
-                            local isSel = selSet[opt.Key] == true
-                            btn.TextTransparency = 1
-                            btn.BackgroundTransparency = 1
-                            local delayT = math.min(i * 0.02, 0.16)
-                            task.delay(delayT, function()
-                                if not expanded then return end
-                                I.Tween(btn, "Fast", { TextTransparency = 0, BackgroundTransparency = isSel and 0.75 or 1 })
-                            end)
-                        end
-                    end
-                end
+    function Actions.selectOption(S, opt, rippleTarget)
+        local self = S.self
+        if not opt then return end
+        if self._disabled then return end
+        I.PlaySound("Click", 0.7)
+        if rippleTarget then I.ApplyRipple(rippleTarget) end
+        if S.multi then
+            if S.selSet[opt.Key] then
+                S.selSet[opt.Key] = nil
             else
-                hl = nil
-                if tab._openDropdown == closeFn then tab._openDropdown = nil end
-                I.ModalManager.Remove(modalEntry)
-                modalEntry = nil
-                catcher.Visible = false
-                if shadow then shadow.FadeOut() end
-                I.Tween(list, "Fast", { Size = UDim2.new(0, list.AbsoluteSize.X / I.GetScale(), 0, 0) })
-                I.Tween(list, "Fast", { GroupTransparency = 1 }, function()
-                    if not expanded then list.Visible = false end
+                S.selSet[opt.Key] = true
+            end
+            View.refreshOptions(S)
+            View.refreshLabel(S)
+            View.saveSelection(S)
+            I.RunCallback(self.Callback, self.Title, self:Get())
+        else
+            S.selSet = { [opt.Key] = true }
+            View.refreshOptions(S)
+            View.refreshLabel(S)
+            I.SaveValue(S.saveKey, opt.Value)
+            Actions.setExpanded(S, false)
+            I.RunCallback(self.Callback, self.Title, self:Get())
+        end
+    end
+
+    function Actions.setExpanded(S, state)
+        if S.expanded == state then return end
+        S.expanded = state
+        I.Tween(S.chevHolder, "PopSoft", { Rotation = state and 180 or 0 })
+
+        if state then
+            View.buildUI(S)
+            local tab = S.tab
+            if tab._openDropdown and tab._openDropdown ~= S.closeFn then
+                tab._openDropdown()
+            end
+            tab._openDropdown = S.closeFn
+            if not S.keyHook then
+                S.keyHook = I.AddInputHook(function() return not S.self._destroyed end, S.keyHandler)
+            end
+            I.HotElement = nil
+
+            S.hl = nil
+            if not S.multi then
+                for i, o in ipairs(S.display) do
+                    if S.selSet[o.Key] == true then S.hl = i break end
+                end
+            end
+
+            View.buildOptions(S)
+
+            local sc = I.GetScale()
+            local ap, asz = S.row.AbsolutePosition, S.row.AbsoluteSize
+            local rowX, rowY = ap.X / sc, ap.Y / sc
+            local rowW, rowH = asz.X / sc, asz.Y / sc
+            local vw, vh = I.Viewport.X / sc, I.Viewport.Y / sc
+            local pw = math.max(140, rowW)
+            local totalH = S.headerH + S.innerList
+            local below = vh - (rowY + rowH) - 10
+            local above = rowY - 10
+            if below < totalH and above < totalH then
+                totalH = S.headerH + math.max(S.optH + 14, math.min(S.innerList, math.max(below, above)))
+            end
+            local y, slideFrom
+            if below >= totalH then
+                y, slideFrom = rowY + rowH - 2, -6
+            elseif above >= totalH then
+                y, slideFrom = rowY - totalH + 2, 6
+            else
+                y = math.clamp(rowY + rowH + 4, 8, math.max(8, vh - totalH - 8))
+                slideFrom = -6
+            end
+            local x = math.clamp(rowX, 8, math.max(8, vw - pw - 8))
+
+            local list, listCanvas = S.list, S.listCanvas
+            listCanvas.CanvasPosition = Vector2.new(0, 0)
+            listCanvas.Position = UDim2.new(0, 0, 0, S.headerH)
+            listCanvas.Size = UDim2.new(1, 0, 1, -S.headerH)
+            list.Size = UDim2.new(0, pw, 0, 0)
+            list.Position = UDim2.fromOffset(x, y + slideFrom)
+            S.mc.Show()
+            I.Tween(list, "Snappy", { Size = UDim2.new(0, pw, 0, totalH) })
+            I.Tween(list, "Smooth", { Position = UDim2.fromOffset(x, y) })
+
+            if S.virtual then
+                View.updateVirtualWindow(S)
+            else
+                View.refreshOptions(S)
+                for _, rec in ipairs(S.optionButtons) do
+                    rec.Button.TextTransparency = 1
+                    rec.Button.BackgroundTransparency = 1
+                end
+                task.spawn(function()
+                    for i, opt in ipairs(S.display) do
+                        if not S.expanded then return end
+                        local rec = S.optionButtons[i]
+                        if rec then
+                            local isSel = S.selSet[opt.Key] == true
+                            I.Tween(rec.Button, "Fast", {
+                                TextTransparency = 0,
+                                BackgroundTransparency = isSel and 0.75 or 1,
+                            })
+                        end
+                        task.wait(0.02)
+                    end
                 end)
             end
-        end
-
-        closeFn = function() setExpanded(false) end
-
-        selectOption = function(opt, rippleTarget)
-            if not opt then return end
-            if self._disabled then return end
-            I.PlaySound("Click", 0.7)
-            if rippleTarget then I.ApplyRipple(rippleTarget) end
-            if multi then
-                if selSet[opt.Key] then selSet[opt.Key] = nil
-                else selSet[opt.Key] = true end
-                refreshOptions()
-                refreshLabel()
-                I.SaveValue(saveKey, valuesOf(selectedOpts()))
-                I.RunCallback(self.Callback, self.Title, self:Get())
-            else
-                selSet = { [opt.Key] = true }
-                refreshOptions()
-                refreshLabel()
-                I.SaveValue(saveKey, opt.Value)
-                setExpanded(false)
-                I.RunCallback(self.Callback, self.Title, self:Get())
+        else
+            S.hl = nil
+            local tab = S.tab
+            if tab._openDropdown == S.closeFn then tab._openDropdown = nil end
+            if S.keyHook then
+                I.RemoveInputHook(S.keyHook)
+                S.keyHook = nil
             end
+            S.mc.Hide()
+            I.Tween(S.list, "Fast", { Size = UDim2.new(0, S.list.AbsoluteSize.X / I.GetScale(), 0, 0) })
         end
+    end
 
-        local keyHook = I.AddInputHook(function() return not self._destroyed end, function(input)
-            if not expanded then return end
+    function Actions.init(S)
+        local self = S.self
+        S.selectOption = function(opt, rippleTarget)
+            Actions.selectOption(S, opt, rippleTarget)
+        end
+        S.setExpanded = function(state)
+            Actions.setExpanded(S, state)
+        end
+        S.closeFn = function() Actions.setExpanded(S, false) end
+
+        S.keyHandler = function(input, gp)
+            if not S.expanded then return end
+            if gp then return end
             if input.KeyCode == Enum.KeyCode.Up then
-                moveHl(-1)
+                View.moveHl(S, -1)
             elseif input.KeyCode == Enum.KeyCode.Down then
-                moveHl(1)
+                View.moveHl(S, 1)
             elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
-                if hl ~= nil and display[hl] then
-                    local rec = recAt(hl)
-                    selectOption(display[hl], rec and rec.Button or nil)
+                if S.hl ~= nil and S.display[S.hl] then
+                    local rec = View.recAt(S, S.hl)
+                    Actions.selectOption(S, S.display[S.hl], rec and rec.Button or nil)
                 end
             end
+        end
+
+        self.Maid:Give(function()
+            if S.keyHook then I.RemoveInputHook(S.keyHook) end
+            if S.tab._openDropdown == S.closeFn then S.tab._openDropdown = nil end
+            if S.mc then S.mc.Maid:Destroy() end
         end)
-        self.Maid:Give(function() I.RemoveInputHook(keyHook) end)
+    end
 
-        local function clearButtons()
-            for _, rec in ipairs(optionButtons) do
-                if rec.Button then rec.Button:Destroy() end
-            end
-            table.clear(optionButtons)
-            for _, rec in pairs(virtualButtons) do
-                rec.Button:Destroy()
-            end
-            table.clear(virtualButtons)
-            for _, rec in ipairs(virtualPool) do
-                rec.Button:Destroy()
-            end
-            table.clear(virtualPool)
-        end
+    I.DropdownActions = Actions
+end
 
-        buildOptions = function()
-            clearButtons()
-            local count = #display
-            virtual = count > DROP_VIRTUALIZE
-            emptyLabel.Visible = count == 0
 
-            local layout = listCanvas:FindFirstChildOfClass("UIListLayout")
-            if not virtual and not layout then
-                I.Create("UIListLayout", { Padding = UDim.new(0, pad), SortOrder = Enum.SortOrder.LayoutOrder, Parent = listCanvas })
-            elseif virtual and layout then
-                layout:Destroy()
-            end
+-- [[Elements/Dropdown/Init]]
+Bundle["Elements/Dropdown/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Elements = I.Elements
+    local View = I.DropdownView
+    local Actions = I.DropdownActions
 
-            if virtual then
-                listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.None
-                listCanvas.CanvasSize = UDim2.new(0, 0, 0, count * (optH + pad) + 8)
-                innerList = math.min(count, 6) * optH + math.min(count, 5) * pad + 12
-                updateVirtualWindow()
-            else
-                listCanvas.AutomaticCanvasSize = Enum.AutomaticSize.Y
-                listCanvas.CanvasSize = UDim2.new()
-                local rows = math.clamp(count, 1, 6)
-                innerList = count > 0 and (rows * optH + (rows - 1) * pad + 12) or 26
-                for i, opt in ipairs(display) do
-                    local rec = newRec()
-                    rec._idx = i
-                    rec.Button.LayoutOrder = i
-                    optionButtons[i] = rec
-                    paintRec(rec, opt)
-                end
-            end
-            header.Size = UDim2.new(1, 0, 0, headerH)
-            listCanvas.Position = UDim2.new(0, 0, 0, headerH)
-            listCanvas.Size = UDim2.new(1, 0, 1, -headerH)
-            refreshOptions()
-            if expanded then
-                local sc = I.GetScale()
-                list.Size = UDim2.new(0, row.AbsoluteSize.X / sc, 0, headerH + innerList)
-            end
-        end
+    Elements.Dropdown = I.MakeElementClass()
 
-        if searchBox then
-            searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-                query = searchBox.Text:lower()
-                if query == "" then
-                    display = options
-                else
-                    local out = {}
-                    for _, o in ipairs(options) do
-                        if o.Text:lower():find(query, 1, true) then out[#out + 1] = o end
-                    end
-                    display = out
-                end
-                hl = nil
-                listCanvas.CanvasPosition = Vector2.new(0, 0)
-                buildOptions()
-                refreshOptions()
-                if expanded then
-                    list.Size = UDim2.new(0, row.AbsoluteSize.X / I.GetScale(), 0, headerH + innerList)
-                end
-            end)
-        end
+    function Elements.Dropdown.new(tab, opts)
+        opts = opts or {}
+        local self = setmetatable({}, Elements.Dropdown)
 
-        if allBtn then
-            allBtn.MouseButton1Click:Connect(function()
-                for _, o in ipairs(options) do selSet[o.Key] = true end
-                refreshOptions()
-                refreshLabel()
-                I.SaveValue(saveKey, valuesOf(selectedOpts()))
-                I.RunCallback(self.Callback, self.Title, self:Get())
-            end)
-        end
-        if noneBtn then
-            noneBtn.MouseButton1Click:Connect(function()
-                selSet = {}
-                refreshOptions()
-                refreshLabel()
-                I.SaveValue(saveKey, {})
-                I.RunCallback(self.Callback, self.Title, self:Get())
-            end)
-        end
+        local S = {
+            self = self,
+            tab = tab,
+            opts = opts,
+            saveKey = tab:GetSaveKey(opts),
+            multi = opts.Multi == true,
+        }
 
-        listCanvas:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-            if virtual and expanded then updateVirtualWindow() end
-        end)
-        listCanvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-            if virtual and expanded then updateVirtualWindow() end
-        end)
+        View.initOptions(S)
+        View.initSelection(S)
+        View.initRow(S)
 
-        catcher.MouseButton1Click:Connect(function()
-            if expanded then setExpanded(false) end
-        end)
+        self:_init(S.row, opts, tab)
+        self:_initRow(S.title, S.right, S.left, S.rightW)
+        self.Callback = opts.Callback or function() end
+
+        Actions.init(S)
 
         local overlay = I.Create("TextButton", {
             BackgroundTransparency = 1,
             Text = "",
-            Size = UDim2.new(1, 0, 0, baseH),
+            Size = UDim2.new(1, 0, 0, S.baseH),
             ZIndex = 1,
-            Parent = row,
+            Parent = S.row,
         })
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if overlay:GetAttribute("Dragging") then return end
             I.ApplyRipple(overlay)
             I.PlaySound("Click", 0.7)
-            setExpanded(not expanded)
+            S.setExpanded(not S.expanded)
         end))
         I.HookContextMenu(self, overlay)
 
-        self.Maid:Give(function()
-            if tab._openDropdown == closeFn then tab._openDropdown = nil end
-            I.ModalManager.Remove(modalEntry)
-            if list and list.Parent then list:Destroy() end
-            if catcher and catcher.Parent then catcher:Destroy() end
-        end)
-
         function self:Set(v, silent)
             if self._destroyed then return end
-            local items = (multi and type(v) == "table") and v or { v }
-            local ns = {}
-            for _, x in ipairs(items) do
-                if x ~= nil then
-                    local o = findOpt(tostring(x))
-                    if o then ns[o.Key] = true end
-                end
-            end
-            selSet = ns
-            I.SaveValue(saveKey, multi and valuesOf(selectedOpts()) or (selectedOpts()[1] and selectedOpts()[1].Value or nil))
-            refreshOptions()
-            refreshLabel()
+            View.setSelection(S, (S.multi and type(v) == "table") and v or { v })
+            View.saveSelection(S)
+            View.refreshOptions(S)
+            View.refreshLabel(S)
             if not silent then I.RunCallback(self.Callback, self.Title, self:Get()) end
         end
+
         function self:Get()
-            if multi then return valuesOf(selectedOpts()) end
-            local sel = selectedOpts()
+            if S.multi then return View.valuesOf(View.selectedOpts(S)) end
+            local sel = View.selectedOpts(S)
             return sel[1] and sel[1].Value or nil
         end
+
         function self:GetText()
-            if multi then
+            if S.multi then
                 local out = {}
-                for _, o in ipairs(selectedOpts()) do out[#out + 1] = o.Text end
+                for _, o in ipairs(View.selectedOpts(S)) do out[#out + 1] = o.Text end
                 return out
             end
-            local sel = selectedOpts()
+            local sel = View.selectedOpts(S)
             return sel[1] and sel[1].Text or nil
         end
+
         function self:CopyValue()
             local t = self:GetText()
             if type(t) == "table" then
@@ -5017,62 +5370,47 @@ Bundle["Elements/Dropdown"] = function(ctx)
             end
             return tostring(t or "")
         end
+
         function self:Reset()
             if self._destroyed then return end
             local defaults
-            if multi then
+            if S.multi then
                 defaults = type(opts.Defaults) == "table" and opts.Defaults or {}
             else
                 defaults = (opts.Default ~= nil) and { opts.Default } or {}
             end
-            local ns = {}
-            for _, d in ipairs(defaults) do
-                local o = findOpt(tostring(d))
-                if o then ns[o.Key] = true end
-            end
-            selSet = ns
-            I.SaveValue(saveKey, multi and valuesOf(selectedOpts()) or (selectedOpts()[1] and selectedOpts()[1].Value or nil))
-            refreshOptions()
-            refreshLabel()
+            View.setSelection(S, defaults)
+            View.saveSelection(S)
+            View.refreshOptions(S)
+            View.refreshLabel(S)
             I.RunCallback(self.Callback, self.Title, self:Get())
         end
+
         function self:SetOptions(newOptions)
             if self._destroyed then return end
-            options = normalize(newOptions)
-            local valid = {}
-            for _, opt in ipairs(options) do valid[opt.Key] = true end
-            local ns = {}
-            for k in pairs(selSet) do
-                if valid[k] then ns[k] = true end
-            end
-            selSet = ns
-            local newW = measureWidth()
-            if newW ~= rightW then
-                rightW = newW
-                self._baseRightW = rightW
-                self._width = rightW
-                valueLabel.Size = UDim2.new(0, rightW - 26, 1, 0)
+            View.setOptions(S, newOptions)
+            local newW = View.measureWidth(S)
+            if newW ~= S.rightW then
+                S.rightW = newW
+                self._baseRightW = newW
+                self._width = newW
+                S.valueLabel.Size = UDim2.new(0, newW - 26, 1, 0)
                 self:RecalcWidth()
             end
-            buildOptions()
-            refreshLabel()
+            View.buildOptions(S)
+            View.refreshLabel(S)
         end
 
-        self:_bindSaveReload(saveKey, function(v)
+        self:_bindSaveReload(S.saveKey, function(v)
             self:Set(v, true)
         end)
         self.Maid:Give(ctx.Kailex.ThemeChanged:Connect(function()
-            refreshLabel()
-            if expanded then refreshOptions() end
+            View.refreshLabel(S)
+            if S.expanded then View.refreshOptions(S) end
         end))
 
-        buildOptions()
-        refreshLabel()
-        if next(selSet) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, self:Get()) end
-            end)
-        end
+        View.refreshLabel(S)
+        self:_initialCallback(next(S.selSet) ~= nil, self:Get())
 
         self:RecalcWidth()
         return self
@@ -5084,7 +5422,6 @@ end
 Bundle["Elements/TextInput"] = function(ctx)
     local I = ctx.Internal
     local Elements = I.Elements
-    local Setting = I.Setting
 
     Elements.TextInput = I.MakeElementClass()
 
@@ -5098,11 +5435,7 @@ Bundle["Elements/TextInput"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local value = I.SaveManager:Get(saveKey, opts.Default or "")
@@ -5111,7 +5444,7 @@ Bundle["Elements/TextInput"] = function(ctx)
         local validator = type(opts.Validator) == "function" and opts.Validator or nil
 
         local box = I.Create("TextBox", {
-            Size = UDim2.new(1, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, I.Device.IsTouch and 30 or 26),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
             Text = value,
@@ -5120,7 +5453,7 @@ Bundle["Elements/TextInput"] = function(ctx)
             Font = Enum.Font.Gotham,
             TextSize = 12,
             TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             ClearTextOnFocus = false,
             Parent = right,
             Children = {
@@ -5198,534 +5531,512 @@ Bundle["Elements/TextInput"] = function(ctx)
             if type(v) == "string" then self:Set(v, true) end
         end)
 
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
         self:RecalcWidth()
         return self
     end
 end
 
 
--- [[Elements/ColorPicker]]
-Bundle["Elements/ColorPicker"] = function(ctx)
+-- [[Elements/ColorPicker/View]]
+Bundle["Elements/ColorPicker/View"] = function(ctx)
     local I = ctx.Internal
-    local Elements = I.Elements
-    local Kailex = ctx.Kailex
 
-    Elements.ColorPicker = I.MakeElementClass()
+    local View = {}
 
-    function Elements.ColorPicker.new(tab, opts)
-        opts = opts or {}
-        local self = setmetatable({}, Elements.ColorPicker)
-        local saveKey = tab:GetSaveKey(opts)
-        local default = opts.Default or opts.Color or Color3.fromRGB(122, 162, 247)
-        if typeof(default) ~= "Color3" then default = Color3.fromRGB(122, 162, 247) end
-
-        local function loadColor()
-            local sv = I.SaveManager:Get(saveKey, nil)
-            if type(sv) == "string" then
-                local c = I.HexToColor(sv)
-                if c then return c end
-            end
-            return default
-        end
-
-        local color = loadColor()
-        local hadSaved = I.SaveManager:Get(saveKey, nil) ~= nil
-        local h, s, v = I.RGBtoHSV(color)
-
+    function View.initRow(S)
+        local opts, tab = S.opts, S.tab
         local rightW = 44
         local row, title, right, left = I.CreateRow(tab.Content, {
-            Name = opts.Name or "Color", RightWidth = rightW, Width = opts.Width,
+            Name = opts.Name or "Color",
+            RightWidth = rightW, Width = opts.Width,
             Description = opts.Description,
         })
-        self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
-        self.Callback = opts.Callback or function() end
+        S.row, S.title, S.right, S.left = row, title, right, left
+        S.rightW = rightW
 
-        local swatchBtn = I.Create("TextButton", {
+        S.swatchBtn = I.Create("TextButton", {
             Size = UDim2.fromOffset(38, 22),
             Text = "",
-            BackgroundColor3 = color,
+            BackgroundColor3 = S.color,
             BorderSizePixel = 0,
             AutoButtonColor = false,
             LayoutOrder = 1,
             Parent = right,
             Children = {
                 I.Corner(6),
-                I.Create("UIStroke", { Thickness = 1, Color = Color3.new(1, 1, 1), Transparency = 0.55, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
+                I.Create("UIStroke", {
+                    Thickness = 1, Color = Color3.new(1, 1, 1), Transparency = 0.55,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                }),
+            },
+        })
+    end
+
+    function View.pushRecent(S, hex)
+        hex = tostring(hex or "")
+        if hex == "" then return end
+        local list = I.SaveManager:Get("__recentColors", {})
+        if type(list) ~= "table" then list = {} end
+        local out = { hex }
+        for _, h2 in ipairs(list) do
+            if h2 ~= hex and #out < 8 then
+                out[#out + 1] = h2
+            end
+        end
+        I.SaveManager:Set("__recentColors", out)
+        if S.recentSwatches then View.refreshRecents(S) end
+    end
+
+    function View.refreshRecents(S)
+        if not S.recentSwatches then return end
+        local list = I.SaveManager:Get("__recentColors", {})
+        if type(list) ~= "table" then list = {} end
+        for i = 1, 8 do
+            local sw = S.recentSwatches[i]
+            local hex = list[i]
+            local c = type(hex) == "string" and I.HexToColor(hex) or nil
+            S.recentColors[i] = c
+            if c then
+                sw.BackgroundColor3 = c
+                sw.Visible = true
+            else
+                sw.Visible = false
+            end
+        end
+    end
+
+    function View.sync(S)
+        S.square.BackgroundColor3 = Color3.fromHSV(S.h, 1, 1)
+        S.svKnob.Position = UDim2.new(S.s, 0, 1 - S.v, 0)
+        S.hueKnob.Position = UDim2.new(S.h, 0, 0.5, 0)
+        S.hueKnob.BackgroundColor3 = Color3.fromHSV(S.h, 1, 1)
+        if not S.hexBox:IsFocused() then S.hexBox.Text = I.ColorToHex(S.color) end
+    end
+
+    function View.build(S)
+        if S.popup then return end
+        local self = S.self
+
+        S.mc = I.ModalCard.MakeAnchor({
+            Size = UDim2.fromOffset(240, 250),
+            StrokeT = 0.35,
+            HasScale = true,
+            ZIndex = 100,
+            Owner = S.tab.Window,
+            Closer = S.closePopup,
+            OnCatcherClick = S.closePopup,
+        })
+        S.popup = S.mc.Card
+        S.catcher = S.mc.Catcher
+        S.pickerScale = S.mc.Scale
+        S.shadow = S.mc.Shadow
+
+        local ttl = I.Create("TextLabel", {
+            Position = UDim2.fromOffset(12, 10),
+            Size = UDim2.new(1, -56, 0, 16),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = self.Title,
+            ZIndex = 31,
+            Parent = S.popup,
+        })
+        I.Bind(ttl, "TextColor3", "Text")
+
+        local resetBtn = I.Create("TextButton", {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -10, 0, 8),
+            Size = UDim2.fromOffset(20, 20),
+            BackgroundTransparency = 1,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 31,
+            Parent = S.popup,
+        })
+        I.Icon(resetBtn, "Reset", "SubText", 13)
+        I.AddTooltip(resetBtn, { Text = "Reset" })
+        resetBtn.MouseButton1Click:Connect(function()
+            I.ApplyRipple(resetBtn)
+            I.PlaySound("Click", 0.6)
+            S.fromColor(S.default, true)
+            S.commit()
+        end)
+
+        S.square = I.Create("Frame", {
+            Position = UDim2.fromOffset(12, 32),
+            Size = UDim2.fromOffset(216, 120),
+            BackgroundColor3 = Color3.fromHSV(S.h, 1, 1),
+            BorderSizePixel = 0,
+            ZIndex = 31,
+            Parent = S.popup,
+            Children = { I.Corner(8) },
+        })
+        I.Create("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            ZIndex = 31,
+            Parent = S.square,
+            Children = {
+                I.Corner(8),
+                I.Create("UIGradient", {
+                    Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1)),
+                    Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0, 0),
+                        NumberSequenceKeypoint.new(1, 1),
+                    }),
+                }),
+            },
+        })
+        I.Create("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = Color3.new(0, 0, 0),
+            BorderSizePixel = 0,
+            ZIndex = 32,
+            Parent = S.square,
+            Children = {
+                I.Corner(8),
+                I.Create("UIGradient", {
+                    Rotation = 90,
+                    Color = ColorSequence.new(Color3.new(0, 0, 0), Color3.new(0, 0, 0)),
+                    Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0, 1),
+                        NumberSequenceKeypoint.new(1, 0),
+                    }),
+                }),
+            },
+        })
+        S.svKnob = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(12, 12),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            ZIndex = 33,
+            Parent = S.square,
+            Children = {
+                I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
+                I.Create("UIStroke", { Thickness = 2, Color = Color3.new(0, 0, 0), Transparency = 0.5 }),
             },
         })
 
-        local popup, catcher, square, svKnob, hueBar, hueKnob, hexBox
-        local pickerScale
-        local closePopup
-        local open = false
-        local modalEntry
-        local shadow
-        local recentSwatches
-        local recentColors = {}
+        S.hueBar = I.Create("Frame", {
+            Position = UDim2.fromOffset(12, 158),
+            Size = UDim2.fromOffset(216, 12),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            ZIndex = 31,
+            Parent = S.popup,
+            Children = {
+                I.Corner(6),
+                I.Create("UIGradient", {
+                    Color = ColorSequence.new({
+                        ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+                        ColorSequenceKeypoint.new(1 / 6, Color3.fromRGB(255, 255, 0)),
+                        ColorSequenceKeypoint.new(2 / 6, Color3.fromRGB(0, 255, 0)),
+                        ColorSequenceKeypoint.new(3 / 6, Color3.fromRGB(0, 255, 255)),
+                        ColorSequenceKeypoint.new(4 / 6, Color3.fromRGB(0, 0, 255)),
+                        ColorSequenceKeypoint.new(5 / 6, Color3.fromRGB(255, 0, 255)),
+                        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
+                    }),
+                }),
+            },
+        })
+        S.hueKnob = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(14, 14),
+            Position = UDim2.new(S.h, 0, 0.5, 0),
+            BackgroundColor3 = Color3.fromHSV(S.h, 1, 1),
+            BorderSizePixel = 0,
+            ZIndex = 32,
+            Parent = S.hueBar,
+            Children = {
+                I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
+                I.Create("UIStroke", { Thickness = 2, Color = Color3.new(1, 1, 1), Transparency = 0.2 }),
+            },
+        })
 
-        local refreshRecents
-        local function pushRecent(hex)
-            hex = tostring(hex or "")
-            if hex == "" then return end
-            local list = I.SaveManager:Get("__recentColors", {})
-            if type(list) ~= "table" then list = {} end
-            local out = { hex }
-            for _, h2 in ipairs(list) do
-                if h2 ~= hex and #out < 8 then
-                    out[#out + 1] = h2
-                end
+        S.hexBox = I.Create("TextBox", {
+            Position = UDim2.fromOffset(12, 182),
+            Size = UDim2.fromOffset(70, 24),
+            BackgroundColor3 = I.CurrentTheme.SurfaceLight,
+            BorderSizePixel = 0,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            TextColor3 = I.CurrentTheme.Text,
+            PlaceholderText = "#RRGGBB",
+            PlaceholderColor3 = I.CurrentTheme.SubText,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ClearTextOnFocus = false,
+            Text = I.ColorToHex(S.color),
+            ZIndex = 31,
+            Parent = S.popup,
+            Children = {
+                I.Corner(6),
+                I.Create("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }),
+                I.StrokeBind(1, "Stroke", 0.5),
+            },
+        })
+        I.Bind(S.hexBox, "BackgroundColor3", "SurfaceLight")
+        I.Bind(S.hexBox, "TextColor3", "Text")
+
+        local hexCopy = I.MkButton(S.popup, {
+            Position = UDim2.fromOffset(88, 182),
+            Size = UDim2.fromOffset(50, 24),
+            Text = "Copy",
+            Font = Enum.Font.GothamBold,
+            TextSize = 10,
+            ZIndex = 31,
+        }, { Text = "SubText", Corner = 6 })
+        hexCopy.MouseButton1Click:Connect(function()
+            I.CopyToClipboard(I.ColorToHex(S.color))
+        end)
+
+        S.hexBox.FocusLost:Connect(function()
+            local c = I.HexToColor(S.hexBox.Text)
+            if c then
+                S.fromColor(c, true)
+                S.commit()
+            else
+                S.hexBox.Text = I.ColorToHex(S.color)
             end
-            I.SaveManager:Set("__recentColors", out)
-            if recentSwatches then refreshRecents() end
-        end
-        refreshRecents = function()
-            if not recentSwatches then return end
-            local list = I.SaveManager:Get("__recentColors", {})
-            if type(list) ~= "table" then list = {} end
-            for i = 1, 8 do
-                local sw = recentSwatches[i]
-                local hex = list[i]
-                local c = type(hex) == "string" and I.HexToColor(hex) or nil
-                recentColors[i] = c
-                if c then
-                    sw.BackgroundColor3 = c
-                    sw.Visible = true
-                else
-                    sw.Visible = false
-                end
-            end
-        end
+        end)
 
-        local function apply(nh, ns, nv, notify)
-            h, s, v = nh, ns, nv
-            color = Color3.fromHSV(h, s, v)
-            swatchBtn.BackgroundColor3 = color
-            if popup and open then
-                square.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
-                svKnob.Position = UDim2.new(s, 0, 1 - v, 0)
-                hueKnob.Position = UDim2.new(h, 0, 0.5, 0)
-                hueKnob.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
-                if not hexBox:IsFocused() then hexBox.Text = I.ColorToHex(color) end
-            end
-            if notify then I.RunCallback(self.Callback, self.Title, color) end
-        end
+        local recentTitle = I.Create("TextLabel", {
+            Position = UDim2.fromOffset(12, 212),
+            Size = UDim2.new(1, -24, 0, 12),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Gotham,
+            TextSize = 10,
+            TextColor3 = I.CurrentTheme.SubText,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = "Recent",
+            ZIndex = 31,
+            Parent = S.popup,
+        })
+        I.Bind(recentTitle, "TextColor3", "SubText")
 
-        local function build()
-            popup = I.Create("CanvasGroup", {
-                Size = UDim2.fromOffset(240, 250),
-                BackgroundColor3 = I.CurrentTheme.Surface,
-                BorderSizePixel = 0,
-                Visible = false,
-                ZIndex = 30,
-                Parent = I.LayerOverlay,
-                Children = { I.Corner(12), I.StrokeBind(1, "Stroke", 0.35) },
-            })
-            I.Bind(popup, "BackgroundColor3", "Surface")
-            pickerScale = I.Create("UIScale", { Scale = 1, Parent = popup })
-            shadow = I.DropShadow(popup, { Radius = 12 })
-
-            catcher = I.Create("TextButton", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundTransparency = 1,
-                Text = "",
-                ZIndex = 29,
-                Visible = false,
-                Parent = I.LayerOverlay,
-            })
-            catcher.MouseButton1Click:Connect(function() closePopup() end)
-
-            local ttl = I.Create("TextLabel", {
-                Position = UDim2.fromOffset(12, 10),
-                Size = UDim2.new(1, -56, 0, 16),
-                BackgroundTransparency = 1,
-                Font = Enum.Font.GothamBold,
-                TextSize = 12,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = self.Title,
-                ZIndex = 31,
-                Parent = popup,
-            })
-            I.Bind(ttl, "TextColor3", "Text")
-
-            local resetBtn = I.Create("TextButton", {
-                AnchorPoint = Vector2.new(1, 0),
-                Position = UDim2.new(1, -10, 0, 8),
+        local recentRow = I.Create("Frame", {
+            Position = UDim2.fromOffset(12, 226),
+            Size = UDim2.new(1, -24, 0, 20),
+            BackgroundTransparency = 1,
+            ZIndex = 31,
+            Parent = S.popup,
+            Children = {
+                I.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    Padding = UDim.new(0, 4),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+            },
+        })
+        S.recentSwatches = {}
+        for i = 1, 8 do
+            local idx = i
+            local sw = I.Create("TextButton", {
                 Size = UDim2.fromOffset(20, 20),
-                BackgroundTransparency = 1,
+                BackgroundColor3 = Color3.new(1, 1, 1),
+                BorderSizePixel = 0,
                 Text = "",
                 AutoButtonColor = false,
+                LayoutOrder = i,
                 ZIndex = 31,
-                Parent = popup,
+                Parent = recentRow,
+                Children = {
+                    I.Corner(5),
+                    I.Create("UIStroke", {
+                        Thickness = 1, Color = Color3.new(0, 0, 0), Transparency = 0.6,
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                    }),
+                },
             })
-            local resetIcon = I.Icon(resetBtn, "Reset", "SubText")
-            resetIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-            resetIcon.Position = UDim2.fromScale(0.5, 0.5)
-            resetIcon.Size = UDim2.fromOffset(13, 13)
-            I.AddTooltip(resetBtn, { Text = "Reset" })
-            resetBtn.MouseButton1Click:Connect(function()
-                I.ApplyRipple(resetBtn)
-                I.PlaySound("Click", 0.6)
-                local rh, rs, rv = I.RGBtoHSV(default)
-                apply(rh, rs, rv, true)
-                I.SaveValue(saveKey, I.ColorToHex(color))
-                pushRecent(I.ColorToHex(color))
+            S.recentSwatches[i] = sw
+            sw.MouseButton1Click:Connect(function()
+                local c = S.recentColors[idx]
+                if not c or S.open ~= true then return end
+                S.fromColor(c, true)
+                S.commit()
             end)
+        end
+        View.refreshRecents(S)
 
-            square = I.Create("Frame", {
-                Position = UDim2.fromOffset(12, 32),
-                Size = UDim2.fromOffset(216, 120),
-                BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-                BorderSizePixel = 0,
-                ZIndex = 31,
-                Parent = popup,
-                Children = { I.Corner(8) },
-            })
-            I.Create("Frame", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundColor3 = Color3.new(1, 1, 1),
-                BorderSizePixel = 0,
-                ZIndex = 31,
-                Parent = square,
-                Children = {
-                    I.Corner(8),
-                    I.Create("UIGradient", {
-                        Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1)),
-                        Transparency = NumberSequence.new({
-                            NumberSequenceKeypoint.new(0, 0),
-                            NumberSequenceKeypoint.new(1, 1),
-                        }),
-                    }),
-                },
-            })
-            I.Create("Frame", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundColor3 = Color3.new(0, 0, 0),
-                BorderSizePixel = 0,
-                ZIndex = 32,
-                Parent = square,
-                Children = {
-                    I.Corner(8),
-                    I.Create("UIGradient", {
-                        Rotation = 90,
-                        Color = ColorSequence.new(Color3.new(0, 0, 0), Color3.new(0, 0, 0)),
-                        Transparency = NumberSequence.new({
-                            NumberSequenceKeypoint.new(0, 1),
-                            NumberSequenceKeypoint.new(1, 0),
-                        }),
-                    }),
-                },
-            })
-            svKnob = I.Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Size = UDim2.fromOffset(12, 12),
-                BackgroundColor3 = Color3.new(1, 1, 1),
-                BorderSizePixel = 0,
-                ZIndex = 33,
-                Parent = square,
-                Children = {
-                    I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
-                    I.Create("UIStroke", { Thickness = 2, Color = Color3.new(0, 0, 0), Transparency = 0.5 }),
-                },
-            })
-
-            hueBar = I.Create("Frame", {
-                Position = UDim2.fromOffset(12, 158),
-                Size = UDim2.fromOffset(216, 12),
-                BackgroundColor3 = Color3.new(1, 1, 1),
-                BorderSizePixel = 0,
-                ZIndex = 31,
-                Parent = popup,
-                Children = {
-                    I.Corner(6),
-                    I.Create("UIGradient", {
-                        Color = ColorSequence.new({
-                            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
-                            ColorSequenceKeypoint.new(1 / 6, Color3.fromRGB(255, 255, 0)),
-                            ColorSequenceKeypoint.new(2 / 6, Color3.fromRGB(0, 255, 0)),
-                            ColorSequenceKeypoint.new(3 / 6, Color3.fromRGB(0, 255, 255)),
-                            ColorSequenceKeypoint.new(4 / 6, Color3.fromRGB(0, 0, 255)),
-                            ColorSequenceKeypoint.new(5 / 6, Color3.fromRGB(255, 0, 255)),
-                            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
-                        }),
-                    }),
-                },
-            })
-            hueKnob = I.Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Size = UDim2.fromOffset(14, 14),
-                Position = UDim2.new(h, 0, 0.5, 0),
-                BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-                BorderSizePixel = 0,
-                ZIndex = 32,
-                Parent = hueBar,
-                Children = {
-                    I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
-                    I.Create("UIStroke", { Thickness = 2, Color = Color3.new(1, 1, 1), Transparency = 0.2 }),
-                },
-            })
-
-            hexBox = I.Create("TextBox", {
-                Position = UDim2.fromOffset(12, 182),
-                Size = UDim2.fromOffset(70, 24),
-                BackgroundColor3 = I.CurrentTheme.SurfaceLight,
-                BorderSizePixel = 0,
-                Font = Enum.Font.GothamBold,
-                TextSize = 11,
-                TextColor3 = I.CurrentTheme.Text,
-                PlaceholderText = "#RRGGBB",
-                PlaceholderColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                ClearTextOnFocus = false,
-                Text = I.ColorToHex(color),
-                ZIndex = 31,
-                Parent = popup,
-                Children = {
-                    I.Corner(6),
-                    I.Create("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }),
-                    I.StrokeBind(1, "Stroke", 0.5),
-                },
-            })
-            I.Bind(hexBox, "BackgroundColor3", "SurfaceLight")
-            I.Bind(hexBox, "TextColor3", "Text")
-
-            local hexCopy = I.Create("TextButton", {
-                Position = UDim2.fromOffset(88, 182),
-                Size = UDim2.fromOffset(50, 24),
-                BackgroundColor3 = I.CurrentTheme.Element,
-                BorderSizePixel = 0,
-                Text = "Copy",
-                Font = Enum.Font.GothamBold,
-                TextSize = 10,
-                TextColor3 = I.CurrentTheme.SubText,
-                AutoButtonColor = false,
-                ZIndex = 31,
-                Parent = popup,
-                Children = { I.Corner(6) },
-            })
-            I.Bind(hexCopy, "BackgroundColor3", "Element")
-            I.Bind(hexCopy, "TextColor3", "SubText")
-            I.AddHover(hexCopy)
-            hexCopy.MouseButton1Click:Connect(function()
-                I.CopyToClipboard(I.ColorToHex(color))
-            end)
-
-            hexBox.FocusLost:Connect(function()
-                local c = I.HexToColor(hexBox.Text)
-                if c then
-                    local rh, rs, rv = I.RGBtoHSV(c)
-                    apply(rh, rs, rv, true)
-                    I.SaveValue(saveKey, I.ColorToHex(color))
-                    pushRecent(I.ColorToHex(color))
-                else
-                    hexBox.Text = I.ColorToHex(color)
-                end
-            end)
-
-            local recentTitle = I.Create("TextLabel", {
-                Position = UDim2.fromOffset(12, 212),
-                Size = UDim2.new(1, -24, 0, 12),
-                BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham,
-                TextSize = 10,
-                TextColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Text = "Recent",
-                ZIndex = 31,
-                Parent = popup,
-            })
-            I.Bind(recentTitle, "TextColor3", "SubText")
-            local recentRow = I.Create("Frame", {
-                Position = UDim2.fromOffset(12, 226),
-                Size = UDim2.new(1, -24, 0, 20),
-                BackgroundTransparency = 1,
-                ZIndex = 31,
-                Parent = popup,
-                Children = {
-                    I.Create("UIListLayout", {
-                        FillDirection = Enum.FillDirection.Horizontal,
-                        Padding = UDim.new(0, 4),
-                        SortOrder = Enum.SortOrder.LayoutOrder,
-                    }),
-                },
-            })
-            recentSwatches = {}
-            for i = 1, 8 do
-                local idx = i
-                local sw = I.Create("TextButton", {
-                    Size = UDim2.fromOffset(20, 20),
-                    BackgroundColor3 = Color3.new(1, 1, 1),
-                    BorderSizePixel = 0,
-                    Text = "",
-                    AutoButtonColor = false,
-                    LayoutOrder = i,
-                    ZIndex = 31,
-                    Parent = recentRow,
-                    Children = {
-                        I.Corner(5),
-                        I.Create("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0), Transparency = 0.6, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
-                    },
+        local function dragTracker(handle, onMove)
+            handle.InputBegan:Connect(function(input)
+                if I.DragManager.Active then return end
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                    and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                I.BeginDrag(input, handle, {
+                    ManagerKey = handle,
+                    NoAttr = true,
+                    OnMove = onMove,
+                    OnEnd = function() S.commit() end,
                 })
-                recentSwatches[i] = sw
-                sw.MouseButton1Click:Connect(function()
-                    local c = recentColors[idx]
-                    if not c or open ~= true then return end
-                    local rh, rs, rv = I.RGBtoHSV(c)
-                    apply(rh, rs, rv, true)
-                    I.SaveValue(saveKey, I.ColorToHex(color))
-                    pushRecent(I.ColorToHex(color))
-                end)
-            end
-            refreshRecents()
-
-            local function dragTracker(handle, onMove)
-                handle.InputBegan:Connect(function(input)
-                    if I.DragManager.Active then return end
-                    if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                        and input.UserInputType ~= Enum.UserInputType.Touch then return end
-                    I.BeginDrag(input, handle, {
-                        ManagerKey = handle,
-                        NoAttr = true,
-                        OnMove = onMove,
-                        OnEnd = function()
-                            I.SaveValue(saveKey, I.ColorToHex(color))
-                            pushRecent(I.ColorToHex(color))
-                        end,
-                    })
-                end)
-            end
-
-            dragTracker(square, function(pos)
-                local ap, as = square.AbsolutePosition, square.AbsoluteSize
-                s = math.clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
-                v = 1 - math.clamp((pos.Y - ap.Y) / math.max(1, as.Y), 0, 1)
-                apply(h, s, v, true)
-            end)
-            dragTracker(hueBar, function(pos)
-                local ap, as = hueBar.AbsolutePosition, hueBar.AbsoluteSize
-                h = math.clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
-                apply(h, s, v, true)
             end)
         end
 
-        local function openPopup()
-            if not popup then build() end
-            if open then return end
-            open = true
-            if shadow then shadow.SetFade(1) end
+        dragTracker(S.square, function(pos)
+            local ap, as = S.square.AbsolutePosition, S.square.AbsoluteSize
+            S.s = math.clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
+            S.v = 1 - math.clamp((pos.Y - ap.Y) / math.max(1, as.Y), 0, 1)
+            S.apply(S.h, S.s, S.v, true)
+        end)
+        dragTracker(S.hueBar, function(pos)
+            local ap, as = S.hueBar.AbsolutePosition, S.hueBar.AbsoluteSize
+            S.h = math.clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
+            S.apply(S.h, S.s, S.v, true)
+        end)
+    end
+
+    I.ColorPickerView = View
+end
+
+
+-- [[Elements/ColorPicker/Init]]
+Bundle["Elements/ColorPicker/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Elements = I.Elements
+    local View = I.ColorPickerView
+
+    Elements.ColorPicker = I.MakeElementClass()
+
+    function Elements.ColorPicker.new(tab, opts)
+        opts = opts or {}
+        local self = setmetatable({}, Elements.ColorPicker)
+
+        local S = {
+            self = self,
+            tab = tab,
+            opts = opts,
+            saveKey = tab:GetSaveKey(opts),
+        }
+
+        local default = opts.Default or opts.Color or Color3.fromRGB(122, 162, 247)
+        if typeof(default) ~= "Color3" then default = Color3.fromRGB(122, 162, 247) end
+        S.default = default
+
+        local sv = I.SaveManager:Get(S.saveKey, nil)
+        local color
+        if type(sv) == "string" then
+            local c = I.HexToColor(sv)
+            if c then color = c end
+        end
+        color = color or default
+        S.hadSaved = sv ~= nil
+        S.color = color
+        S.h, S.s, S.v = I.RGBtoHSV(color)
+
+        View.initRow(S)
+        self:_init(S.row, opts, tab)
+        self:_initRow(S.title, S.right, S.left, S.rightW)
+        self.Callback = opts.Callback or function() end
+
+        S.open = false
+        S.recentColors = {}
+
+        S.apply = function(nh, ns, nv, notify)
+            S.h, S.s, S.v = nh, ns, nv
+            S.color = Color3.fromHSV(S.h, S.s, S.v)
+            S.swatchBtn.BackgroundColor3 = S.color
+            if S.popup and S.open then
+                View.sync(S)
+            end
+            if notify then I.RunCallback(self.Callback, self.Title, S.color) end
+        end
+
+        S.fromColor = function(c, notify)
+            local rh, rs, rv = I.RGBtoHSV(c)
+            S.apply(rh, rs, rv, notify)
+        end
+
+        S.commit = function()
+            local hex = I.ColorToHex(S.color)
+            I.SaveValue(S.saveKey, hex)
+            View.pushRecent(S, hex)
+        end
+
+        S.closePopup = function()
+            if not S.open then return end
+            S.open = false
+            I.SaveValue(S.saveKey, I.ColorToHex(S.color))
+            if S.mc then S.mc.Hide() end
+        end
+
+        S.openPopup = function()
+            View.build(S)
+            if S.open then return end
+            S.open = true
             I.HotElement = nil
-            refreshRecents()
+            View.refreshRecents(S)
             local sc = I.GetScale()
-            local ap = swatchBtn.AbsolutePosition
-            local asz = swatchBtn.AbsoluteSize
+            local ap = S.swatchBtn.AbsolutePosition
+            local asz = S.swatchBtn.AbsoluteSize
             local pw, ph = 240 * sc, 250 * sc
             local px = ap.X + asz.X + 10
             if px + pw > I.Viewport.X - 8 then px = ap.X - pw - 10 end
             px = math.clamp(px, 8, math.max(8, I.Viewport.X - pw - 8))
             local py = math.clamp(ap.Y + asz.Y / 2 - ph / 2, 8, math.max(8, I.Viewport.Y - ph - 8))
-            popup.Position = UDim2.fromOffset(px / sc, py / sc)
-            catcher.Visible = true
-            popup.Visible = true
-            pickerScale.Scale = 0.94
-            I.Tween(pickerScale, "Pop", { Scale = 1 })
-            popup.GroupTransparency = 1
-            I.Tween(popup, "Snappy", { GroupTransparency = 0 })
-            if shadow then
-                task.delay(0.1, function()
-                    if open and shadow then shadow.SetFade(0) end
-                end)
-            end
-            I.ModalManager.Remove(modalEntry)
-            modalEntry = I.ModalManager.Push(tab.Window, closePopup)
-            apply(h, s, v, false)
+            S.popup.Position = UDim2.fromOffset(px / sc, py / sc)
+            S.mc.Show()
+            S.apply(S.h, S.s, S.v, false)
         end
 
-        function closePopup()
-            if not open then return end
-            open = false
-            I.ModalManager.Remove(modalEntry)
-            modalEntry = nil
-            I.SaveValue(saveKey, I.ColorToHex(color))
-            if shadow then shadow.FadeOut() end
-            I.Tween(pickerScale, "Vanish", { Scale = 0.95 })
-            I.Tween(popup, "Fast", { GroupTransparency = 1 }, function()
-                if not open then
-                    popup.Visible = false
-                    catcher.Visible = false
-                end
-            end)
-        end
-
-        self.Maid:Give(swatchBtn.MouseButton1Click:Connect(function()
+        self.Maid:Give(S.swatchBtn.MouseButton1Click:Connect(function()
             if self._disabled then return end
-            if swatchBtn:GetAttribute("Dragging") then return end
-            I.ApplyRipple(swatchBtn)
+            if S.swatchBtn:GetAttribute("Dragging") then return end
+            I.ApplyRipple(S.swatchBtn)
             I.PlaySound("Click", 0.6)
-            if open then closePopup() else openPopup() end
+            if S.open then S.closePopup() else S.openPopup() end
         end))
-        I.HookContextMenu(self, swatchBtn)
-        local escHook = I.AddInputHook(function() return not self._destroyed end, function(input, gp)
-            if open ~= true then return end
-            if input.KeyCode ~= Enum.KeyCode.Escape then return end
-            if gp then
-                local focused = I.UserInputService:GetFocusedTextBox()
-                if hexBox and focused == hexBox then
-                    closePopup()
-                end
-                return
-            end
-            closePopup()
-        end)
-        self.Maid:Give(function() I.RemoveInputHook(escHook) end)
+        I.HookContextMenu(self, S.swatchBtn)
+
         self.Maid:Give(function()
-            I.ModalManager.Remove(modalEntry)
+            if S.mc then S.mc.Maid:Destroy() end
         end)
+
         self.Maid:Give(tab.Page:GetPropertyChangedSignal("Visible"):Connect(function()
-            if not tab.Page.Visible then closePopup() end
+            if not tab.Page.Visible then S.closePopup() end
         end))
         if tab.Window and tab.Window.MinimizedChanged then
             self.Maid:Give(tab.Window.MinimizedChanged:Connect(function(min)
-                if min then closePopup() end
+                if min then S.closePopup() end
             end))
         end
 
         function self:Set(c, silent)
             if self._destroyed then return end
             if typeof(c) ~= "Color3" then return end
-            local rh, rs, rv = I.RGBtoHSV(c)
-            apply(rh, rs, rv, false)
-            I.SaveValue(saveKey, I.ColorToHex(color))
-            pushRecent(I.ColorToHex(color))
-            if not silent then I.RunCallback(self.Callback, self.Title, color) end
-        end
-        function self:Get() return color end
-        function self:CopyValue() return I.ColorToHex(color) end
-        function self:Reset()
-            if self._destroyed then return end
-            self:Set(default, false)
+            S.fromColor(c, false)
+            S.commit()
+            if not silent then I.RunCallback(self.Callback, self.Title, S.color) end
         end
 
-        self:_bindSaveReload(saveKey, function(v)
+        function self:Get()
+            return S.color
+        end
+
+        function self:CopyValue()
+            return I.ColorToHex(S.color)
+        end
+
+        function self:Reset()
+            if self._destroyed then return end
+            self:Set(S.default, false)
+        end
+
+        self:_bindSaveReload(S.saveKey, function(v)
             if type(v) == "string" then
                 local c = I.HexToColor(v)
                 if c then
-                    local rh, rs, rv = I.RGBtoHSV(c)
-                    apply(rh, rs, rv, false)
-                    I.SaveValue(saveKey, I.ColorToHex(color))
+                    S.fromColor(c, false)
+                    I.SaveValue(S.saveKey, I.ColorToHex(S.color))
                 end
             end
         end)
-        if hadSaved or opts.Default ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, color) end
-            end)
-        end
+
+        self:_initialCallback(S.hadSaved or opts.Default ~= nil, S.color)
 
         self:RecalcWidth()
         return self
@@ -5744,7 +6055,7 @@ Bundle["Elements/ProgressBar"] = function(ctx)
     function Elements.ProgressBar.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.ProgressBar)
-        local barW = opts.BarWidth or 150
+        local barW = 150
         local showText = opts.ShowText ~= false
         local rightW = barW + (showText and 36 or 0)
         local maxValue = tonumber(opts.Max) or 1
@@ -5754,11 +6065,7 @@ Bundle["Elements/ProgressBar"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or nil
 
         local track = I.Create("Frame", {
@@ -5794,32 +6101,13 @@ Bundle["Elements/ProgressBar"] = function(ctx)
             I.Bind(textLabel, "TextColor3", "SubText")
         end
 
-        local indeterminate = false
-        local indTween
-
-        local function setIndeterminate(on)
-            indeterminate = on
-            if indTween then pcall(function() indTween:Cancel() end) indTween = nil end
-            if on then
-                fill.Size = UDim2.fromScale(0.35, 1)
-                indTween = I.Tween(fill, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Size = UDim2.fromScale(0.05, 1) })
-                if textLabel then textLabel.Text = "..." end
-            else
-                fill.Position = UDim2.fromScale(0, 0)
-            end
-        end
+        local _value = 0
 
         function self:Set(val)
             if self._destroyed then return end
-            if val == true or val == "indeterminate" then
-                setIndeterminate(true)
-                return
-            elseif val == false then
-                setIndeterminate(false)
-                return
-            end
-            setIndeterminate(false)
-            local n = tonumber(val) or 0
+            local n = tonumber(val)
+            if n == nil then return end
+            _value = math.clamp(n, 0, maxValue)
             local frac = math.clamp(n / maxValue, 0, 1)
             I.Tween(fill, "Normal", { Size = UDim2.fromScale(frac, 1) })
             if textLabel then
@@ -5831,12 +6119,10 @@ Bundle["Elements/ProgressBar"] = function(ctx)
             end
             if self.Callback then I.RunCallback(self.Callback, self.Title, n) end
         end
-        function self:Get() return fill.Size.X.Scale * maxValue end
+        function self:Get() return _value end
         function self:CopyValue() return tostring(math.floor(self:Get() + 0.5)) end
 
-        if opts.Indeterminate then
-            setIndeterminate(true)
-        elseif opts.Value ~= nil then
+        if opts.Value ~= nil then
             self:Set(opts.Value)
         end
 
@@ -5858,17 +6144,12 @@ Bundle["Elements/Stepper"] = function(ctx)
         opts = opts or {}
         local self = setmetatable({}, Elements.Stepper)
         local saveKey = tab:GetSaveKey(opts)
-        local min = tonumber(opts.Min) or 0
-        local max = tonumber(opts.Max) or 10
-        if max <= min then max = min + 1 end
-        local step = tonumber(opts.Step) or 1
-        if step <= 0 then step = 1 end
+        local min, max, step, decimals = I.NumSpec(opts, 0, 10, 1)
         local default = tonumber(opts.Default or min) or min
         local value = I.SaveManager:Get(saveKey, default)
         if type(value) ~= "number" then value = default end
         value = math.clamp(value, min, max)
 
-        local decimals = step >= 1 and 0 or math.clamp(math.ceil(-math.log10(step)), 1, 3)
         local fmt = opts.Format
         if type(fmt) ~= "function" then
             local prefix = opts.Prefix or ""
@@ -5878,43 +6159,37 @@ Bundle["Elements/Stepper"] = function(ctx)
             end
         end
 
-        local rightW = 118
+        local labelW = 48
+        do
+            local w = 0
+            for _, v in ipairs({ min, max, default, (min + max) / 2 }) do
+                local b = I.TextService:GetTextSize(fmt(v), I.TS(12), Enum.Font.GothamBold, Vector2.new(400, 20))
+                if b.X > w then w = b.X end
+            end
+            labelW = math.clamp(math.floor(w + 0.5) + 10, 48, 170)
+        end
+        local rightW = 68 + labelW
         local row, title, right, left = I.CreateRow(tab.Content, {
             Name = opts.Name or "Stepper", RightWidth = rightW, Width = opts.Width,
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local function mkStepBtn(text, order)
-            local b = I.Create("TextButton", {
+            return I.MkButton(right, {
                 Size = UDim2.fromOffset(26, 26),
-                BackgroundColor3 = I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = text,
                 Font = Enum.Font.GothamBold,
                 TextSize = 14,
-                TextColor3 = I.CurrentTheme.Text,
-                AutoButtonColor = false,
                 LayoutOrder = order,
-                Parent = right,
-                Children = { I.Corner(8) },
             })
-            I.Bind(b, "BackgroundColor3", "Element")
-            I.Bind(b, "TextColor3", "Text")
-            I.AddHover(b)
-            I.AddPress(b)
-            return b
         end
 
         local minus = mkStepBtn("-", 1)
         local valLabel = I.Create("TextLabel", {
-            Size = UDim2.fromOffset(56, 26),
+            Size = UDim2.fromOffset(labelW, 26),
             BackgroundTransparency = 1,
             Font = Enum.Font.GothamBold,
             TextSize = 12,
@@ -5989,25 +6264,13 @@ Bundle["Elements/Stepper"] = function(ctx)
             self:Set(value + dir * step)
         end
 
-        if not I.Device.IsTouch then
-            row.MouseEnter:Connect(function() I.HotElement = self end)
-            row.MouseLeave:Connect(function()
-                if I.HotElement == self then I.HotElement = nil end
-            end)
-            self.Maid:Give(function()
-                if I.HotElement == self then I.HotElement = nil end
-            end)
-        end
+        I.TrackHot(self, row)
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "number" then self:Set(v, true) end
         end)
 
-        if opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
 
         self:RecalcWidth()
         return self
@@ -6018,6 +6281,7 @@ end
 -- [[Elements/Segmented]]
 Bundle["Elements/Segmented"] = function(ctx)
     local I = ctx.Internal
+    local Kailex = ctx.Kailex
     local Elements = I.Elements
 
     Elements.Segmented = I.MakeElementClass()
@@ -6027,16 +6291,9 @@ Bundle["Elements/Segmented"] = function(ctx)
         local self = setmetatable({}, Elements.Segmented)
         local saveKey = tab:GetSaveKey(opts)
 
-        local options = {}
-        for _, v in ipairs(opts.Options or {}) do
-            if type(v) == "table" and v.Text ~= nil then
-                options[#options + 1] = { Text = tostring(v.Text), Value = (v.Value ~= nil) and v.Value or v.Text }
-            else
-                options[#options + 1] = { Text = tostring(v), Value = v }
-            end
-        end
-        local itemW = opts.ItemWidth or 56
-        local rightW = math.clamp(#options * (itemW + 4), 60, 280)
+        local options = I.NormalizeOptions(opts.Options)
+        local itemW = opts.ItemWidth or 48
+        local rightW = math.clamp(#options * (itemW + 4), 60, 200)
         local selected = nil
 
         local row, title, right, left = I.CreateRow(tab.Content, {
@@ -6044,11 +6301,7 @@ Bundle["Elements/Segmented"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local holder = I.Create("Frame", {
@@ -6065,11 +6318,32 @@ Bundle["Elements/Segmented"] = function(ctx)
         })
 
         local buttons = {}
-        local function paint()
+        local indicator = I.Create("Frame", {
+            Size = UDim2.fromOffset(itemW, 26),
+            BackgroundColor3 = I.CurrentTheme.Accent,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 0,
+            Parent = holder,
+            Children = { I.Corner(8) },
+        })
+        I.Bind(indicator, "BackgroundColor3", "Accent")
+        local function paint(instant)
+            local idx = selected and table.find(options, selected) or nil
             for i, b in ipairs(buttons) do
-                local sel = options[i] == selected
-                b.BackgroundColor3 = sel and I.CurrentTheme.Accent or I.CurrentTheme.Element
-                b.TextColor3 = sel and I.CurrentTheme.OnAccent or I.CurrentTheme.SubText
+                b.BackgroundTransparency = 1
+                b.TextColor3 = (i == idx) and I.CurrentTheme.OnAccent or I.CurrentTheme.SubText
+            end
+            if idx then
+                indicator.BackgroundTransparency = 0
+                local target = UDim2.fromOffset((idx - 1) * (itemW + 4), 0)
+                if instant then
+                    indicator.Position = target
+                else
+                    I.Tween(indicator, "Snappy", { Position = target })
+                end
+            else
+                indicator.BackgroundTransparency = 1
             end
         end
 
@@ -6088,10 +6362,7 @@ Bundle["Elements/Segmented"] = function(ctx)
                 Parent = holder,
                 Children = { I.Corner(8) },
             })
-            I.Bind(b, "BackgroundColor3", "Element")
-            I.Bind(b, "TextColor3", "SubText")
-            I.AddHover(b)
-            I.AddPress(b)
+            I.AddHover(b, { BaseTransparency = 1, HoverTransparency = 0.8, IgnoreStroke = true })
             buttons[i] = b
             b.MouseButton1Click:Connect(function()
                 if self._disabled then return end
@@ -6118,7 +6389,9 @@ Bundle["Elements/Segmented"] = function(ctx)
                 end
             end
         end
-        paint()
+
+        paint(true)
+        self.Maid:Give(Kailex.ThemeChanged:Connect(function() paint(true) end))
 
         function self:Set(v, silent)
             if self._destroyed then return end
@@ -6151,11 +6424,7 @@ Bundle["Elements/Segmented"] = function(ctx)
         self:_bindSaveReload(saveKey, function(v)
             self:Set(v, true)
         end)
-        if selected then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, selected.Value) end
-            end)
-        end
+        self:_initialCallback(selected ~= nil, selected and selected.Value)
 
         self:RecalcWidth()
         return self
@@ -6181,11 +6450,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
             Height = rowH, Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local function load()
@@ -6272,11 +6537,7 @@ Bundle["Elements/Vector3Input"] = function(ctx)
             end
         end)
 
-        if opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
 
         self:RecalcWidth()
         return self
@@ -6288,7 +6549,6 @@ end
 Bundle["Elements/DataTable"] = function(ctx)
     local I = ctx.Internal
     local Elements = I.Elements
-    local Setting = I.Setting
 
     Elements.DataTable = I.MakeElementClass()
 
@@ -6310,11 +6570,7 @@ Bundle["Elements/DataTable"] = function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = 0
-        self._width = 0
+        self:_initRow(title, right, left, 0, 0)
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
@@ -6354,13 +6610,18 @@ Bundle["Elements/DataTable"] = function(ctx)
                 local col = sortCol
                 local asc = sortAsc
                 list = table.clone(rows)
+                local allNum = true
+                for _, r in ipairs(list) do
+                    if tonumber(r.Cells[col]) == nil then allNum = false break end
+                end
                 table.sort(list, function(a, b)
                     local av, bv = a.Cells[col], b.Cells[col]
-                    local an, bn = tonumber(av), tonumber(bv)
-                    if an and bn then
-                        return asc and an < bn or an > bn
+                    if allNum then
+                        local an, bn = tonumber(av), tonumber(bv)
+                        if asc then return an < bn else return an > bn end
                     end
-                    return asc and tostring(av) < tostring(bv) or tostring(av) > tostring(bv)
+                    av, bv = tostring(av), tostring(bv)
+                    if asc then return av < bv else return av > bv end
                 end)
             end
             for ri, r in ipairs(list) do
@@ -6386,7 +6647,7 @@ Bundle["Elements/DataTable"] = function(ctx)
                         Font = Enum.Font.Gotham,
                         TextSize = 11,
                         TextColor3 = I.CurrentTheme.SubText,
-                        TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                        TextXAlignment = I.XAlign(),
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         Text = tostring(r.Cells[ci] or ""),
                         Parent = rBtn,
@@ -6401,6 +6662,7 @@ Bundle["Elements/DataTable"] = function(ctx)
             end
         end
 
+        local headerButtons = {}
         for i, col in ipairs(columns) do
             local w = col.Width or math.floor(300 / math.max(1, #columns))
             local hb = I.Create("TextButton", {
@@ -6411,7 +6673,7 @@ Bundle["Elements/DataTable"] = function(ctx)
                 Font = Enum.Font.GothamBold,
                 TextSize = 11,
                 TextColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 AutoButtonColor = false,
                 Parent = header,
@@ -6419,12 +6681,16 @@ Bundle["Elements/DataTable"] = function(ctx)
             })
             I.Bind(hb, "TextColor3", "SubText")
             I.AddHover(hb, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+            headerButtons[i] = hb
             hb.MouseButton1Click:Connect(function()
                 if sortCol == i then
                     sortAsc = not sortAsc
                 else
                     sortCol = i
                     sortAsc = true
+                end
+                for j, b2 in ipairs(headerButtons) do
+                    b2.Text = columns[j].Name .. (sortCol == j and (sortAsc and " ▲" or " ▼") or "")
                 end
                 buildRows()
             end)
@@ -6458,6 +6724,783 @@ Bundle["Elements/DataTable"] = function(ctx)
 
         if opts.Rows then self:SetRows(opts.Rows) end
         return self
+    end
+end
+
+
+-- [[Window/Class]]
+Bundle["Window/Class"] = function(ctx)
+    local I = ctx.Internal
+
+    local Window = {}
+    Window.__index = Window
+
+    I.WindowClass = Window
+end
+
+
+-- [[Window/Chrome]]
+Bundle["Window/Chrome"] = function(ctx)
+    local I = ctx.Internal
+    local UserInputService = I.UserInputService
+    local Window = I.WindowClass
+
+    local Chrome = {}
+
+    local TIPS = {
+        Close = "Close",
+        Minimize = "Minimize",
+        Search = "Search (Ctrl+F)",
+    }
+
+    function Window:SetTitle(t)
+        self.Title = tostring(t or "")
+        self.TitleLabel.Text = self.Title
+    end
+
+    function Chrome.build(self)
+        local cfg = self._cfg
+
+        local introMaid = I.Maid.new()
+        self.Maid:Give(introMaid)
+        self._introMaid = introMaid
+
+        local titleBar = I.Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 46),
+            BackgroundTransparency = 1,
+            Parent = self.Root,
+        })
+        self.TitleBar = titleBar
+
+        local body = I.Create("Frame", {
+            Position = UDim2.new(0, 0, 0, 56),
+            Size = UDim2.new(1, 0, 1, -46),
+            BackgroundTransparency = 1,
+            Parent = self.Root,
+        })
+        self.Body = body
+
+        local titleX = 14
+        if cfg.Icon ~= nil then
+            titleX = 40
+            local raw = tostring(cfg.Icon)
+            local isAsset = I.IsAssetId(cfg.Icon)
+            if isAsset then
+                self.IconImg = I.Create("ImageLabel", {
+                    Position = UDim2.fromOffset(14, 5),
+                    Size = UDim2.fromOffset(20, 20),
+                    BackgroundTransparency = 1,
+                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
+                    ImageColor3 = I.CurrentTheme.SubText,
+                    Parent = titleBar,
+                })
+                I.Bind(self.IconImg, "ImageColor3", "SubText")
+            else
+                self.IconImg = I.Icon(titleBar, raw, "SubText")
+                self.IconImg.Position = UDim2.fromOffset(14, 5)
+                self.IconImg.Size = UDim2.fromOffset(20, 20)
+            end
+        end
+
+        self._titleReserve = 130 + (titleX - 14)
+
+        local titleLabel = I.Create("TextLabel", {
+            Position = UDim2.fromOffset(titleX, 7),
+            Size = UDim2.new(1, -self._titleReserve, 0, 20),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 15,
+            TextColor3 = I.CurrentTheme.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = self.Title,
+            Parent = titleBar,
+        })
+        I.Bind(titleLabel, "TextColor3", "Text")
+        self.TitleLabel = titleLabel
+
+        local subLabel = I.Create("TextLabel", {
+            Position = UDim2.fromOffset(titleX, 26),
+            Size = UDim2.new(1, -self._titleReserve, 0, 14),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = I.CurrentTheme.SubText,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = tostring(self.SubTitle or ""),
+            Parent = titleBar,
+        })
+        I.Bind(subLabel, "TextColor3", "SubText")
+        self.SubLabel = subLabel
+
+        local titleDivider = I.Create("Frame", {
+            Position = UDim2.new(0, 0, 1, -1),
+            Size = UDim2.new(1, 0, 0, 1),
+            BackgroundColor3 = I.CurrentTheme.Stroke,
+            BackgroundTransparency = 0.45,
+            BorderSizePixel = 0,
+            Parent = titleBar,
+        })
+        I.Bind(titleDivider, "BackgroundColor3", "Stroke")
+
+        local searchBox = I.Create("TextBox", {
+            Position = UDim2.fromOffset(14, 11),
+            Size = UDim2.new(0, 220, 0, 24),
+            BackgroundTransparency = 1,
+            Visible = false,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.Text,
+            PlaceholderText = "Search ...",
+            PlaceholderColor3 = I.CurrentTheme.SubText,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            Parent = titleBar,
+        })
+        I.Bind(searchBox, "TextColor3", "Text")
+        I.Bind(searchBox, "PlaceholderColor3", "SubText")
+        self._searchBox = searchBox
+
+        local searchLine = I.Create("Frame", {
+            Position = UDim2.fromOffset(14, 35),
+            Size = UDim2.new(0, 0, 0, 1),
+            BackgroundColor3 = I.CurrentTheme.Accent,
+            BackgroundTransparency = 0.1,
+            BorderSizePixel = 0,
+            Visible = false,
+            Parent = titleBar,
+        })
+        I.Bind(searchLine, "BackgroundColor3", "Accent")
+        self._searchLine = searchLine
+
+        local function titleButton(kind, xPos, colorKey)
+            local b = I.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, xPos, 0.5, 0),
+                Size = UDim2.fromOffset(28, 28),
+                BackgroundTransparency = 1,
+                BackgroundColor3 = I.CurrentTheme.Element,
+                BorderSizePixel = 0,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = titleBar,
+            })
+            I.Icon(b, kind, colorKey or "SubText", 12)
+            I.AddTooltip(b, { Text = TIPS[kind] or kind })
+            return b
+        end
+
+        local closeB = titleButton("Close", -10, "Text")
+        closeB.MouseEnter:Connect(function()
+            I.Tween(closeB, "Fast", { BackgroundColor3 = I.CurrentTheme.Error, BackgroundTransparency = 0.15 })
+        end)
+        closeB.MouseLeave:Connect(function()
+            I.Tween(closeB, "Fast", { BackgroundTransparency = 1 })
+        end)
+        self.Maid:Give(closeB.MouseButton1Click:Connect(function()
+            I.PlaySound("Click", 0.5)
+            self:Close()
+        end))
+
+        local minB = titleButton("Minimize", -44)
+        I.AddHover(minB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+        self.Maid:Give(minB.MouseButton1Click:Connect(function()
+            I.PlaySound("Click", 0.5)
+            self:SetMinimized(true)
+        end))
+
+        local searchB = titleButton("Search", -78)
+        I.AddHover(searchB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+        self.Maid:Give(searchB.MouseButton1Click:Connect(function()
+            I.PlaySound("Click", 0.5)
+            self._setSearch(nil, not self._searchActive)
+        end))
+
+        self._titleButtons = { searchB, minB, closeB }
+
+        I.MakeDraggable(titleBar, self.Root, {
+            Clamp = true,
+            ModalOwner = self,
+            OnEnd = function() self:SavePlacement() end,
+        })
+
+        titleBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                self._focus()
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                local m = UserInputService:GetMouseLocation()
+                I.ContextMenu.Show({
+                    {
+                        Text = self.Minimized and "Expand" or "Minimize",
+                        Callback = function()
+                            if not self._destroyed then self:SetMinimized(not self.Minimized) end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = self._alwaysTop and "Disable always on top" or "Always on top",
+                        Callback = function()
+                            if self._destroyed then return end
+                            self._alwaysTop = not self._alwaysTop
+                            if self._alwaysTop then
+                                self.Root.ZIndex = 100
+                            else
+                                self._focus()
+                            end
+                        end,
+                    },
+                    { Separator = true },
+                    {
+                        Text = "Close",
+                        Danger = true,
+                        Callback = function()
+                            if not self._destroyed then self:Close() end
+                        end,
+                    },
+                }, m.X, m.Y)
+            end
+        end)
+
+        local expandIcon = I.Icon(self.Root, "Chevron", "SubText")
+        expandIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        expandIcon.Position = UDim2.new(1, -18, 0.5, 0)
+        expandIcon.Size = UDim2.fromOffset(12, 12)
+        expandIcon.Rotation = 180
+        expandIcon.Visible = false
+        self._expandIcon = expandIcon
+
+        local pillHit = I.Create("TextButton", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "",
+            Visible = false,
+            ZIndex = 60,
+            Parent = self.Root,
+        })
+        I.MakeDraggable(pillHit, self.Root, { Clamp = true, ModalOwner = self })
+        self.Maid:Give(pillHit.MouseButton1Click:Connect(function()
+            if pillHit:GetAttribute("Dragging") then return end
+            self._focus()
+            I.PlaySound("Click", 0.6)
+            self:SetMinimized(false)
+        end))
+        self._pillHit = pillHit
+    end
+
+    I.WindowChrome = Chrome
+end
+
+
+-- [[Window/Search]]
+Bundle["Window/Search"] = function(ctx)
+    local I = ctx.Internal
+    local UserInputService = I.UserInputService
+
+    local Search = {}
+
+    function Search.build(self)
+        local searchBox = self._searchBox
+        local searchLine = self._searchLine
+        local searchDebounce = nil
+        self._searchActive = false
+        searchBox.ClipsDescendants = true
+
+        local function setSearch(on)
+            if self._searchActive == on then return end
+            self._searchActive = on
+            if on then
+                searchBox.Visible = true
+                searchLine.Visible = true
+                self.TitleLabel.Visible = false
+                self.SubLabel.Visible = false
+                searchBox.Text = ""
+                self._filterQuery = ""
+                self:ApplyFilter("")
+                searchBox.Size = UDim2.new(0, 0, 0, 24)
+                searchLine.Size = UDim2.new(0, 0, 0, 1)
+                I.Tween(searchBox, "Snappy", { Size = UDim2.new(0, 220, 0, 24) }, function()
+                    if self._searchActive then pcall(function() searchBox:CaptureFocus() end) end
+                end)
+                I.Tween(searchLine, "Snappy", { Size = UDim2.new(0, 220, 0, 1) })
+            else
+                pcall(function() searchBox:ReleaseFocus() end)
+                I.Tween(searchBox, "Fast", { Size = UDim2.new(0, 0, 0, 24) }, function()
+                    if not self._searchActive then
+                        searchBox.Visible = false
+                        searchLine.Visible = false
+                        self.TitleLabel.Visible = true
+                        self.SubLabel.Visible = true
+                    end
+                end)
+                I.Tween(searchLine, "Fast", { Size = UDim2.new(0, 0, 0, 1) })
+                self._filterQuery = ""
+                self:ApplyFilter("")
+            end
+        end
+
+        self._setSearch = function(_, on) setSearch(on) end
+
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            local text = searchBox.Text
+            if searchDebounce then pcall(task.cancel, searchDebounce) end
+            if text == "" then
+                self._filterQuery = ""
+                self:ApplyFilter("")
+                return
+            end
+            searchDebounce = task.delay(0.15, function()
+                self._filterQuery = text
+                self:ApplyFilter(text)
+            end)
+        end)
+
+        searchBox.FocusLost:Connect(function(enter)
+            if not enter and searchBox.Text == "" then setSearch(false) end
+        end)
+
+        self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
+            if not self._searchActive then return end
+            if input.KeyCode ~= Enum.KeyCode.Escape then return end
+            if #I.ModalManager.Stack > 0 then return end
+            if gp and UserInputService:GetFocusedTextBox() ~= searchBox then return end
+            setSearch(false)
+        end))
+    end
+
+    I.WindowSearch = Search
+end
+
+
+-- [[Window/Layout]]
+Bundle["Window/Layout"] = function(ctx)
+    local I = ctx.Internal
+    local UserInputService = I.UserInputService
+    local Window = I.WindowClass
+
+    local Layout = {}
+
+    function Layout.build(self)
+        self._sidebarWidth = math.clamp(tonumber(I.SaveManager:Get("__sidebarWidth", 152)) or 152, 110, 320)
+
+        local sidebar = I.Create("Frame", {
+            Size = UDim2.new(0, self._sidebarWidth, 1, 0),
+            BackgroundColor3 = I.CurrentTheme.TabBar,
+            BorderSizePixel = 0,
+            Parent = self.Body,
+        })
+        I.Bind(sidebar, "BackgroundColor3", "TabBar")
+        I.StrokeBind(1, "Stroke", 0.55).Parent = sidebar
+        self.Sidebar = sidebar
+
+        self.TabList = I.Create("ScrollingFrame", {
+            Position = UDim2.fromOffset(6, 6),
+            Size = UDim2.new(1, -12, 1, -12),
+            BackgroundTransparency = 1,
+            CanvasSize = UDim2.new(),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            ScrollBarThickness = 3,
+            BorderSizePixel = 0,
+            Parent = sidebar,
+        })
+        I.Bind(self.TabList, "ScrollBarImageColor3", "Stroke")
+        I.Create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.TabList })
+        I.Create("Frame", {
+            Name = "__BottomSpacer",
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(0, 0, 0, 8),
+            LayoutOrder = 1000000000,
+            Parent = self.TabList,
+        })
+
+        self.Pages = I.Create("Frame", {
+            Position = UDim2.fromOffset(self._sidebarWidth, 0),
+            Size = UDim2.new(1, -self._sidebarWidth, 1, 0),
+            BackgroundTransparency = 1,
+            Parent = self.Body,
+        })
+
+        self.EmptyLabel = I.Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(240, 40),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.SubText,
+            TextWrapped = true,
+            Text = "",
+            Visible = false,
+            ZIndex = 5,
+            Parent = self.Pages,
+        })
+        I.Bind(self.EmptyLabel, "TextColor3", "SubText")
+
+        local splitW = I.Device.IsTouch and 26 or 9
+        self._splitW = splitW
+
+        local splitter = I.Create("TextButton", {
+            BackgroundTransparency = 1,
+            Text = "",
+            Position = UDim2.new(0, self._sidebarWidth - math.floor(splitW / 2), 0, 0),
+            Size = UDim2.new(0, splitW, 1, 0),
+            ZIndex = 4,
+            AutoButtonColor = false,
+            Parent = self.Body,
+        })
+        self.Splitter = splitter
+
+        local splitLine = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.new(0.5, 0, 0, 10),
+            Size = UDim2.new(0, 1, 1, -20),
+            BackgroundColor3 = I.CurrentTheme.Stroke,
+            BackgroundTransparency = 0.5,
+            BorderSizePixel = 0,
+            Parent = splitter,
+        })
+        I.Bind(splitLine, "BackgroundColor3", "Stroke")
+
+        splitter.InputBegan:Connect(function(input)
+            if self.Minimized or I.DragManager.Active then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            I.BeginDrag(input, splitter, {
+                ManagerKey = splitter,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local rel = (mouse.X - self.Body.AbsolutePosition.X) / sc + math.floor(splitW / 2)
+                    self:SetSidebarWidth(rel)
+                end,
+                OnEnd = function()
+                    I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
+                end,
+            })
+        end)
+
+        local gripSize = I.Device.IsTouch and 44 or 18
+        local grip = I.Create("TextButton", {
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -3, 1, -3),
+            Size = UDim2.fromOffset(gripSize, gripSize),
+            BackgroundTransparency = 1,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = self.Root,
+        })
+        I.Icon(grip, "Grip", "SubText", I.Device.IsTouch and 18 or 12)
+        self.ResizeGrip = grip
+
+        grip.InputBegan:Connect(function(input)
+            if self.Minimized or I.DragManager.Active then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            local startMouse = UserInputService:GetMouseLocation()
+            local startSize = self.Root.AbsoluteSize / I.GetScale()
+            I.BeginDrag(input, grip, {
+                ManagerKey = grip,
+                ModalOwner = self,
+                NoAttr = true,
+                OnFrame = function(mouse)
+                    local sc = I.GetScale()
+                    local vw, vh = I.Viewport.X / sc, I.Viewport.Y / sc
+                    local minW = math.min(self.MinSize.X, math.max(200, vw - 12))
+                    local minH = math.min(self.MinSize.Y, math.max(160, vh - 12))
+                    local w = math.clamp(startSize.X + (mouse.X - startMouse.X) / sc, minW, math.max(minW, vw - 8))
+                    local h = math.clamp(startSize.Y + (mouse.Y - startMouse.Y) / sc, minH, math.max(minH, vh - 8))
+                    self.Root.Size = UDim2.fromOffset(w, h)
+                end,
+                OnEnd = function()
+                    I.ClampWindowToScreen(self.Root)
+                    self:SavePlacement()
+                end,
+            })
+        end)
+
+        self.Maid:Give(self.Root:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            self:UpdateLayout()
+        end))
+    end
+
+    function Layout.geom(self, horizontal, multi)
+        local w = self.Root.Size.X.Offset
+        local maxSw = math.max(110, math.min(320, w - 240))
+        local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
+        local halfSplit = math.floor((self._splitW or 9) / 2)
+        if not multi then
+            self.Sidebar.Visible = false
+            self.Splitter.Visible = false
+            self.Pages.Position = UDim2.fromOffset(0, 0)
+            self.Pages.Size = UDim2.fromScale(1, 1)
+        elseif horizontal then
+            self.Sidebar.Visible = true
+            self.Splitter.Visible = false
+            self.Sidebar.Size = UDim2.new(1, 0, 0, 44)
+            self.TabList.Size = UDim2.new(1, -12, 0, 32)
+            self.TabList.ScrollingDirection = Enum.ScrollingDirection.X
+            self.TabList.AutomaticCanvasSize = Enum.AutomaticSize.X
+            self.Pages.Position = UDim2.fromOffset(0, 44)
+            self.Pages.Size = UDim2.new(1, 0, 1, -44)
+        else
+            self.Sidebar.Visible = true
+            self.Splitter.Visible = true
+            self.Sidebar.Size = UDim2.new(0, sw, 1, 0)
+            self.TabList.Size = UDim2.new(1, -12, 1, -12)
+            self.TabList.ScrollingDirection = Enum.ScrollingDirection.Y
+            self.TabList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            self.Pages.Position = UDim2.fromOffset(sw, 0)
+            self.Pages.Size = UDim2.new(1, -sw, 1, 0)
+            self.Splitter.Position = UDim2.new(0, sw - halfSplit, 0, 0)
+        end
+    end
+
+    function Window:SetSidebarWidth(w)
+        w = tonumber(w)
+        if not w then return end
+        local maxSw = math.max(110, math.min(320, self.Root.Size.X.Offset - 240))
+        w = math.floor(math.clamp(w, 110, maxSw) + 0.5)
+        if w == self._sidebarWidth then return end
+        self._sidebarWidth = w
+        Layout.geom(self, self._lastHorizontal == true, #self.Tabs > 1)
+    end
+
+    function Window:UpdateLayout()
+        if self._destroyed or self._layoutQueued then return end
+        self._layoutQueued = true
+        task.defer(function()
+            self._layoutQueued = false
+            if self._destroyed then return end
+            local w = self.Root.Size.X.Offset
+            local multi = #self.Tabs > 1
+            local horizontal = multi and w < 500
+            local maxSw = math.max(110, math.min(320, w - 240))
+            local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
+            local changed = (horizontal ~= self._lastHorizontal)
+                or (multi ~= self._lastMulti)
+                or (sw ~= self._lastSw)
+            self._lastHorizontal = horizontal
+            self._lastMulti = multi
+            self._lastSw = sw
+            if changed then
+                Layout.geom(self, horizontal, multi)
+                for _, tab in ipairs(self.Tabs) do
+                    tab:_setHorizontal(horizontal)
+                end
+            end
+        end)
+    end
+
+    I.WindowLayout = Layout
+end
+
+
+-- [[Window/State]]
+Bundle["Window/State"] = function(ctx)
+    local I = ctx.Internal
+    local Kailex = ctx.Kailex
+    local TextService = I.TextService
+    local Window = I.WindowClass
+
+    local State = {}
+
+    function State.bringToFront(self)
+        local z = 20
+        local isTop = true
+        for _, w in ipairs(Kailex.Windows) do
+            if w ~= self and not w._destroyed and w.Root and w.Root.Visible and not w._alwaysTop then
+                if w.Root.ZIndex >= self.Root.ZIndex then
+                    isTop = false
+                end
+                if w.Root.ZIndex > z then
+                    z = w.Root.ZIndex
+                end
+            end
+        end
+        if self._alwaysTop then
+            self.Root.ZIndex = 100
+        elseif not isTop or self.Root.ZIndex >= 100 then
+            self.Root.ZIndex = math.min(99, z + 1)
+        end
+        for _, w in ipairs(Kailex.Windows) do
+            if w ~= self and not w._destroyed and w.TitleLabel then
+                I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0.45 })
+            end
+        end
+        if self.TitleLabel then
+            I.Tween(self.TitleLabel, "Fast", { TextTransparency = 0 })
+        end
+        Kailex._lastActive = self
+    end
+
+    function State.killIntro(self)
+        I.Tween(self.Root, "Instant", { Position = self._rootFinal, GroupTransparency = 0 })
+        I.Tween(self._winScale, "Instant", { Scale = 1 })
+        I.Tween(self.TitleBar, "Instant", { Position = self._titleFinal })
+        I.Tween(self.Body, "Instant", { Position = self._bodyFinal })
+        if self._shadow then self._shadow.SetFade(0) end
+        if self._introMaid then self._introMaid:Destroy() end
+    end
+
+    function Window:SetMinimized(state)
+        if self._destroyed or self.Minimized == state then return end
+        self.Minimized = state
+        self.MinimizedChanged:Fire(state)
+        I.Tween(self._winScale, "Snappy", { Scale = 0.97 }, function()
+            if not self._destroyed then I.Tween(self._winScale, "PopSoft", { Scale = 1 }) end
+        end)
+        if state then
+            State.killIntro(self)
+            I.ModalManager.CloseAll(self)
+            if self.Root.AnchorPoint.X ~= 0 or self.Root.AnchorPoint.Y ~= 0 then
+                local sc = I.GetScale()
+                self.Root.AnchorPoint = Vector2.new(0, 0)
+                self.Root.Position = UDim2.fromOffset(self.Root.AbsolutePosition.X / sc, self.Root.AbsolutePosition.Y / sc)
+            end
+            self._preMin = { Size = self.Root.Size, Position = self.Root.Position }
+            self.Body.Visible = false
+            self.ResizeGrip.Visible = false
+            self.SubLabel.Visible = false
+            self.TitleLabel.Size = UDim2.new(1, -44, 0, 20)
+            for _, b in ipairs(self._titleButtons) do b.Visible = false end
+            local expandIcon = self._expandIcon
+            expandIcon.Visible = true
+            expandIcon.Size = UDim2.fromOffset(8, 8)
+            I.Tween(expandIcon, "Pop", { Size = UDim2.fromOffset(12, 12) })
+            self._pillHit.Visible = true
+            if self._searchActive then self._setSearch(nil, false) end
+            local tw = TextService:GetTextSize(self.Title, I.TS(15), Enum.Font.GothamBold, Vector2.new(10000, 100)).X
+            I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74 + (self.IconImg and 24 or 0), 38) })
+        else
+            self._pillHit.Visible = false
+            self._expandIcon.Visible = false
+            for _, b in ipairs(self._titleButtons) do b.Visible = true end
+            self.SubLabel.Visible = true
+            self.TitleLabel.Size = UDim2.new(1, -self._titleReserve, 0, 20)
+            I.Tween(self.Root, "Smooth", { Size = self._preMin and self._preMin.Size or UDim2.fromOffset(580, 420) }, function()
+                if not self._destroyed and not self.Minimized then
+                    self.Body.Visible = true
+                    self.ResizeGrip.Visible = true
+                end
+            end)
+            I.ClampWindowToScreen(self.Root)
+        end
+    end
+
+    function Window:RemoveTab(tab)
+        if self._destroyed then return end
+        local idx = table.find(self.Tabs, tab)
+        if not idx then return end
+        if self.CurrentTab == tab then
+            local nxt = self.Tabs[idx + 1] or self.Tabs[idx - 1]
+            if nxt then nxt:Select() else self.CurrentTab = nil end
+        end
+        table.remove(self.Tabs, idx)
+        tab.Maid:Destroy()
+        tab.Page:Destroy()
+        tab.Button:Destroy()
+        self:UpdateLayout()
+        if not self.CurrentTab then
+            self.EmptyLabel.Text = "No tabs"
+            self.EmptyLabel.Visible = true
+        end
+    end
+
+    function Window:ToggleHidden()
+        if self._destroyed then return end
+        self._hidden = not self._hidden
+        if self._hidden then
+            I.ModalManager.CloseAll(self)
+            self.Root.Visible = false
+        else
+            self.Root.Visible = true
+            self._focus()
+        end
+    end
+
+    function Window:OnViewport()
+        if self._destroyed then return end
+        local sc = I.GetScale()
+        I.ClampWindowToScreen(self.Root)
+        if self.Minimized then return end
+        I.ModalManager.CloseAll(self)
+        local vw, vh = I.Viewport.X / sc, I.Viewport.Y / sc
+        local minW = math.min(self.MinSize.X, math.max(200, vw - 12))
+        local minH = math.min(self.MinSize.Y, math.max(160, vh - 12))
+        self.Root.Size = UDim2.fromOffset(
+            math.clamp(self.Root.Size.X.Offset, minW, math.max(minW, vw - 12)),
+            math.clamp(self.Root.Size.Y.Offset, minH, math.max(minH, vh - 12))
+        )
+        self:UpdateLayout()
+    end
+
+    function Window:Close(skipConfirm)
+        if self._destroyed then return end
+        if not skipConfirm and self._cfg.ConfirmClose then
+            Kailex:Confirm({
+                Title = "Close " .. self.Title .. "?",
+                Text = tostring(self._cfg.ConfirmClose),
+            }, function()
+                self:Destroy()
+            end)
+            return
+        end
+        self:Destroy()
+    end
+
+    function Window:Destroy()
+        if self._destroyed then return end
+        self._destroyed = true
+        if Kailex._lastActive == self then Kailex._lastActive = nil end
+        for _, w in ipairs(Kailex.Windows) do
+            if w ~= self and not w._destroyed and w.TitleLabel then
+                I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0 })
+            end
+        end
+        self:SavePlacement()
+        self.Closed:Fire()
+        local i = table.find(Kailex.Windows, self)
+        if i then table.remove(Kailex.Windows, i) end
+        I.ModalManager.CloseAll(self)
+        State.killIntro(self)
+        if self._shadow then self._shadow.FadeOut() end
+        local root = self.Root
+        local done = false
+        local function finish()
+            if done then return end
+            done = true
+            self.Maid:Destroy()
+            if root and root.Parent then root:Destroy() end
+        end
+        I.Once(root.Destroying, finish)
+        task.delay(0.3, finish)
+        I.Tween(self._winScale, "Vanish", { Scale = 0.96 })
+        I.Tween(root, "Vanish", { Position = root.Position + UDim2.fromOffset(0, -10) })
+        I.Tween(root, "Vanish", { GroupTransparency = 1 }, finish)
+    end
+
+    I.WindowState = State
+end
+
+
+-- [[Window/Placement]]
+Bundle["Window/Placement"] = function(ctx)
+    local I = ctx.Internal
+    local Window = I.WindowClass
+
+    function Window:SavePlacement()
+        if self._destroyed or self.Minimized or self._hidden then return end
+        if not self._remember then return end
+        I.SaveManager:Set("__win:" .. self.SavePrefix, {
+            X = math.floor(self.Root.Position.X.Offset + 0.5),
+            Y = math.floor(self.Root.Position.Y.Offset + 0.5),
+            W = math.floor(self.Root.Size.X.Offset + 0.5),
+            H = math.floor(self.Root.Size.Y.Offset + 0.5),
+        })
     end
 end
 
@@ -6552,18 +7595,21 @@ Bundle["Window/Tab"] = function(ctx)
         self._gridFrames = {}
         self.CurrentSection = nil
         self._order = 0
-        self._saveKeys = {}
+        self._liveKeys = {}
+        self._pendingKeyRelease = nil
         self._selected = false
         self._openDropdown = nil
         self._autoRow = nil
 
-        self.Page = I.Create("CanvasGroup", {
+        local useGroup = not I.Device.IsTouch
+        self.Page = I.Create(useGroup and "CanvasGroup" or "Frame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
             Visible = false,
-            GroupTransparency = 1,
             Parent = window.Pages,
         })
+        if useGroup then self.Page.GroupTransparency = 1 end
+
         self.Content = I.Create("ScrollingFrame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
@@ -6637,8 +7683,7 @@ Bundle["Window/Tab"] = function(ctx)
         if opts.Icon then
             iconOffset = 32
             local raw = tostring(opts.Icon)
-            local isAsset = tonumber(opts.Icon) ~= nil
-                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
+            local isAsset = I.IsAssetId(opts.Icon)
             if isAsset then
                 self.IconImg = I.Create("ImageLabel", {
                     AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
@@ -6665,7 +7710,7 @@ Bundle["Window/Tab"] = function(ctx)
             Font = Enum.Font.GothamMedium,
             TextSize = 12,
             TextColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = self.Title,
             Parent = self.Button,
@@ -6724,17 +7769,27 @@ Bundle["Window/Tab"] = function(ctx)
         win:_closeDropdowns()
         I.ModalManager.CloseAll(win)
         if prev then
-            I.Tween(prev.Page, "Vanish", { GroupTransparency = 1 }, function()
-                if win.CurrentTab ~= prev then prev.Page.Visible = false end
-            end)
+            if prev.Page:IsA("CanvasGroup") then
+                I.Tween(prev.Page, "Vanish", { GroupTransparency = 1 }, function()
+                    if win.CurrentTab ~= prev then prev.Page.Visible = false end
+                end)
+            else
+                prev.Page.Visible = false
+            end
             prev:_setSelected(false)
         end
         self.Page.Visible = true
         self:_setSelected(true)
-        self.Page.GroupTransparency = 1
-        I.Tween(self.Page, "Fast", { GroupTransparency = 0 })
+        if self.Page:IsA("CanvasGroup") then
+            self.Page.GroupTransparency = 1
+            I.Tween(self.Page, "Fast", { GroupTransparency = 0 })
+        end
         self.Content.CanvasPosition = Vector2.new(0, 0)
-        win:ApplyFilter(win._filterQuery)
+        task.defer(function()
+            if not self._destroyed and not win._destroyed and win.CurrentTab == self then
+                win:ApplyFilter(win._filterQuery)
+            end
+        end)
     end
 
     function TabClass:_nextOrder()
@@ -6742,36 +7797,32 @@ Bundle["Window/Tab"] = function(ctx)
         return self._order
     end
 
-    function TabClass:_syncGridFrames()
-        local frames = self._gridFrames
-        if not frames then return end
-        for i = #frames, 1, -1 do
-            local frame = frames[i]
-            if not frame.Parent then
-                table.remove(frames, i)
-            else
-                local anyVisible = false
-                local anyAlive = false
-                for _, ch in ipairs(frame:GetChildren()) do
-                    if ch:IsA("GuiObject") and ch:GetAttribute("__el") then
-                        anyAlive = true
-                        if ch.Visible then
-                            anyVisible = true
-                            break
-                        end
-                    end
-                end
-                if not anyAlive then
-                    frame:Destroy()
-                    table.remove(frames, i)
-                else
-                    frame.Visible = anyVisible
-                end
-            end
-        end
+    function TabClass:_consumeKeyRelease(el)
+        local pending = self._pendingKeyRelease
+        if not pending or not el or not el.Maid then return end
+        self._pendingKeyRelease = nil
+        local used = self._liveKeys[pending.base]
+        el.Maid:Give(function()
+            if used then used[pending.idx] = nil end
+        end)
+    end
+
+    function TabClass:GetSaveKey(opts)
+        opts = opts or {}
+        local el = tostring(opts.SaveKey or opts.Name or opts.Title or "Element")
+        local base = self.Window.SavePrefix .. "/" .. self.Title .. "/" .. el
+        local used = self._liveKeys[base]
+        if not used then used = {} self._liveKeys[base] = used end
+        local idx = 1
+        while used[idx] do idx += 1 end
+        used[idx] = true
+        self._pendingKeyRelease = { base = base, idx = idx }
+        if idx > 1 then return base .. " #" .. idx end
+        return base
     end
 
     function TabClass:_track(el)
+        self:_consumeKeyRelease(el)
         local opts = el._opts or {}
         local row = opts._gridRow
         local span = tonumber(opts.Span) or 1
@@ -6822,6 +7873,13 @@ Bundle["Window/Tab"] = function(ctx)
                 end)
             end
         end)
+        if win.EmptyLabel and win.EmptyLabel.Visible then
+            task.defer(function()
+                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                    win:ApplyFilter(win._filterQuery)
+                end
+            end)
+        end
         return el
     end
 
@@ -6837,37 +7895,99 @@ Bundle["Window/Tab"] = function(ctx)
         table.insert(self.Sections, section)
         self.CurrentSection = section
         local tab = self
+        local win = self.Window
+        if win.EmptyLabel and win.EmptyLabel.Visible then
+            task.defer(function()
+                if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                    win:ApplyFilter(win._filterQuery)
+                end
+            end)
+        end
         section.Maid:Give(function()
             for i, s in ipairs(tab.Sections) do
                 if s == section then table.remove(tab.Sections, i) break end
             end
             if tab.CurrentSection == section then tab.CurrentSection = nil end
+            for _, el in ipairs(section.Elements) do
+                if not el._destroyed then el.Section = nil end
+            end
             if tab._gridFrames then tab:_syncGridFrames() end
+            if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                task.defer(function()
+                    if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
+                        win:ApplyFilter(win._filterQuery)
+                    end
+                end)
+            end
         end)
         return section
     end
 
-    function TabClass:AddButton(opts) opts = opts or {}; return self:_track(Elements.Button.new(self, opts)) end
-    function TabClass:AddToggle(opts) opts = opts or {}; return self:_track(Elements.Toggle.new(self, opts)) end
-    function TabClass:AddSlider(opts) opts = opts or {}; return self:_track(Elements.Slider.new(self, opts)) end
-    function TabClass:AddDropdown(opts) opts = opts or {}; return self:_track(Elements.Dropdown.new(self, opts)) end
-    function TabClass:AddKeybind(opts) opts = opts or {}; return self:_track(Elements.Keybind.new(self, opts)) end
-    function TabClass:AddColorPicker(opts) opts = opts or {}; return self:_track(Elements.ColorPicker.new(self, opts)) end
-    function TabClass:AddTextInput(opts) opts = opts or {}; return self:_track(Elements.TextInput.new(self, opts)) end
-    function TabClass:AddLabel(opts) opts = opts or {}; return self:_track(Elements.Label.new(self, opts)) end
-    function TabClass:AddParagraph(opts) opts = opts or {}; return self:_track(Elements.Paragraph.new(self, opts)) end
-    function TabClass:AddDivider(opts) opts = opts or {}; return self:_track(Elements.Divider.new(self, opts)) end
-    function TabClass:AddProgressBar(opts) opts = opts or {}; return self:_track(Elements.ProgressBar.new(self, opts)) end
-    function TabClass:AddStepper(opts) opts = opts or {}; return self:_track(Elements.Stepper.new(self, opts)) end
-    function TabClass:AddSegmented(opts) opts = opts or {}; return self:_track(Elements.Segmented.new(self, opts)) end
-    function TabClass:AddVector3Input(opts) opts = opts or {}; return self:_track(Elements.Vector3Input.new(self, opts)) end
+    local ADD = {
+        Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
+        Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
+        TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
+        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
+        Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
+        DataTable = Elements.DataTable, Label = Elements.Label,
+        Paragraph = Elements.Paragraph, Divider = Elements.Divider,
+    }
+    for name, class in pairs(ADD) do
+        TabClass["Add" .. name] = function(self, opts)
+            opts = opts or {}
+            self._pendingKeyRelease = nil
+            return self:_track(class.new(self, opts))
+        end
+    end
 
     function TabClass:AddRow(cols)
         self._autoRow = nil
         cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
-        local row = setmetatable({ Tab = self, Cols = cols, Manual = true }, I.GridRow)
+        local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)
         row:_newFrame()
         return row
+    end
+
+    function TabClass:Destroy()
+        if self._destroyed then return end
+        self._destroyed = true
+        self.Window:RemoveTab(self)
+    end
+end
+
+
+-- [[Window/TabFilter]]
+Bundle["Window/TabFilter"] = function(ctx)
+    local I = ctx.Internal
+    local TabClass = I.TabClass
+
+    function TabClass:_syncGridFrames()
+        local frames = self._gridFrames
+        if not frames then return end
+        for i = #frames, 1, -1 do
+            local frame = frames[i]
+            if not frame.Parent then
+                table.remove(frames, i)
+            else
+                local anyVisible = false
+                local anyAlive = false
+                for _, ch in ipairs(frame:GetChildren()) do
+                    if ch:IsA("GuiObject") and ch:GetAttribute("__el") then
+                        anyAlive = true
+                        if ch.Visible then
+                            anyVisible = true
+                            break
+                        end
+                    end
+                end
+                if not anyAlive then
+                    frame:Destroy()
+                    table.remove(frames, i)
+                else
+                    frame.Visible = anyVisible
+                end
+            end
+        end
     end
 
     function TabClass:ApplyFilter(query)
@@ -6886,20 +8006,36 @@ Bundle["Window/Tab"] = function(ctx)
                 if vis and q ~= "" then matches += 1 end
             end
         end
+
         for _, sec in ipairs(self.Sections) do
             if not sec._destroyed then
                 local secMatch = q ~= "" and sec.Title:lower():find(q, 1, true) ~= nil
                 local childMatch = 0
+                for _, el in ipairs(sec.Elements) do
+                    if not el._destroyed and q ~= ""
+                        and el.SearchText and el.SearchText:find(q, 1, true) then
+                        childMatch += 1
+                    end
+                end
+                local shouldExpand = (q ~= "") and (secMatch or childMatch > 0)
+                if shouldExpand ~= (sec._filterExpanded == true) then
+                    sec._filterExpanded = shouldExpand or nil
+                    if sec.Chevron then
+                        I.Tween(sec.Chevron, "PopSoft", {
+                            Rotation = (shouldExpand or not sec.Collapsed) and 0 or -90,
+                        })
+                    end
+                end
+                local open = (not sec.Collapsed) or shouldExpand
                 for _, el in ipairs(sec.Elements) do
                     if not el._destroyed then
                         local vis
                         if q == "" then
                             vis = (el._manualVisible ~= false) and not sec.Collapsed
                         else
-                            vis = (secMatch or (el.SearchText and el.SearchText:find(q, 1, true) ~= nil)) and not sec.Collapsed
+                            vis = (secMatch or (el.SearchText and el.SearchText:find(q, 1, true) ~= nil)) and open
                         end
                         el.Row.Visible = vis
-                        if vis and q ~= "" then childMatch += 1 end
                     end
                 end
                 local secVis
@@ -6941,46 +8077,86 @@ Bundle["Window/Tab"] = function(ctx)
             self.Badge.Visible = false
         end
     end
-
-    function TabClass:GetSaveKey(opts)
-        opts = opts or {}
-        local el = tostring(opts.SaveKey or opts.Name or opts.Title or "Element")
-        local base = self.Window.SavePrefix .. "/" .. self.Title .. "/" .. el
-        local seen = self._saveKeys
-        local n = (seen[base] or 0) + 1
-        seen[base] = n
-        if n > 1 then return base .. " #" .. n end
-        return base
-    end
-
-    function TabClass:AddDataTable(opts) opts = opts or {}; return self:_track(Elements.DataTable.new(self, opts)) end
 end
 
 
--- [[Window/Window]]
-Bundle["Window/Window"] = function(ctx)
+-- [[Window/Init]]
+Bundle["Window/Init"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
-    local UserInputService = I.UserInputService
-    local TextService = I.TextService
-    local Setting = I.Setting
+    local Window = I.WindowClass
+    local Chrome = I.WindowChrome
+    local Search = I.WindowSearch
+    local Layout = I.WindowLayout
+    local State = I.WindowState
 
-    local Window = {}
-    Window.__index = Window
+    function Window:Tab(tabOpts)
+        local tab = I.TabClass.new(self, tabOpts)
+        table.insert(self.Tabs, tab)
+        if #self.Tabs == 1 then
+            tab:Select()
+        end
+        self:UpdateLayout()
+        return tab
+    end
+
+    function Window:ApplyFilter(q)
+        self._filterQuery = q or ""
+        local tab = self.CurrentTab
+        if not tab then return end
+        local n = tab:ApplyFilter(self._filterQuery)
+        for _, t in ipairs(self.Tabs) do
+            if t ~= tab and not t._destroyed then
+                local c = t:CountMatches(self._filterQuery)
+                t:SetFilterBadge(c > 0 and tostring(c) or "")
+            else
+                t:SetFilterBadge("")
+            end
+        end
+        local shouldShow, txt = false, ""
+        if self._filterQuery ~= "" then
+            txt = "No results for \"" .. self._filterQuery .. "\""
+            shouldShow = (n == 0)
+        elseif #tab.Elements == 0 and #tab.Sections == 0 then
+            txt = "This tab is empty"
+            shouldShow = true
+        end
+        local el = self.EmptyLabel
+        if shouldShow then
+            el.Text = txt
+            if not el.Visible then
+                el.Visible = true
+                el.TextTransparency = 1
+                I.Tween(el, "Fast", { TextTransparency = 0 })
+            end
+        else
+            el.Visible = false
+        end
+    end
+
+    function Window:_closeDropdowns()
+        for _, tab in ipairs(self.Tabs) do
+            if tab._openDropdown then
+                local fn = tab._openDropdown
+                tab._openDropdown = nil
+                fn()
+            end
+        end
+    end
 
     function Kailex:CreateWindow(cfg)
         cfg = cfg or {}
         local self = setmetatable({}, Window)
+        self._cfg = cfg
         self.Title = tostring(cfg.Title or cfg.Name or "Kailex")
         self.SubTitle = cfg.SubTitle
-        self.SavePrefix = tostring(cfg.SaveKey or cfg.SavePrefix or self.Title)
+        self.SavePrefix = tostring(self.Title)
         self.MinSize = cfg.MinSize or Vector2.new(380, 280)
         self._destroyed = false
         self._filterQuery = ""
         self.Tabs = {}
         self.CurrentTab = nil
         self.Minimized = false
-        self.Maximized = false
         self.MinimizedChanged = I.Signal.new()
         self.Closed = I.Signal.new()
         self._hidden = false
@@ -6989,14 +8165,6 @@ Bundle["Window/Window"] = function(ctx)
         self._remember = cfg.RememberPosition ~= false
 
         local defW, defH = 580, 420
-        if typeof(cfg.Size) == "Vector2" then
-            defW, defH = cfg.Size.X, cfg.Size.Y
-        elseif typeof(cfg.Size) == "UDim2" then
-            defW, defH = cfg.Size.X.Offset, cfg.Size.Y.Offset
-        elseif type(cfg.Size) == "table" then
-            defW = tonumber(cfg.Size[1] or cfg.Size.X) or defW
-            defH = tonumber(cfg.Size[2] or cfg.Size.Y) or defH
-        end
         local s = I.GetScale()
         local vw, vh = I.Viewport.X / s, I.Viewport.Y / s
         if I.Device.IsTouch then
@@ -7029,8 +8197,12 @@ Bundle["Window/Window"] = function(ctx)
             end
         end
 
+        self._rootFinal = UDim2.fromOffset(px, py)
+        self._titleFinal = UDim2.new(0, 0, 0, 0)
+        self._bodyFinal = UDim2.new(0, 0, 0, 56)
+
         self.Root = I.Create("CanvasGroup", {
-            Position = UDim2.fromOffset(px, py),
+            Position = self._rootFinal,
             Size = UDim2.fromOffset(defW, defH),
             BackgroundColor3 = I.CurrentTheme.Background,
             BorderSizePixel = 0,
@@ -7047,856 +8219,72 @@ Bundle["Window/Window"] = function(ctx)
             Parent = self.Root,
         }), "Color", "Stroke")
         self._winScale = I.Create("UIScale", { Scale = 0.94, Parent = self.Root })
-
-        local shadow = I.DropShadow(self.Root, { Radius = 14 })
-        self._shadow = shadow
+        self._shadow = I.DropShadow(self.Root, { Radius = 14 })
 
         self.Maid = I.Maid.new()
         self.Maid:Link(self.Root)
 
-        local introMaid = I.Maid.new()
-        self.Maid:Give(introMaid)
+        Chrome.build(self)
+        Search.build(self)
+        Layout.build(self)
 
-        local setMaxIcon
+        self._focus = function() State.bringToFront(self) end
 
-        local TITLE_FINAL = UDim2.new(0, 0, 0, 0)
-        local BODY_FINAL = UDim2.new(0, 0, 0, 56)
-        local ROOT_FINAL = UDim2.fromOffset(px, py)
-
-        local titleBar = I.Create("Frame", {
-            Position = TITLE_FINAL,
-            Size = UDim2.new(1, 0, 0, 46),
-            BackgroundTransparency = 1,
-            Parent = self.Root,
-        })
-        self.TitleBar = titleBar
-
-        local body = I.Create("Frame", {
-            Position = BODY_FINAL,
-            Size = UDim2.new(1, 0, 1, -46),
-            BackgroundTransparency = 1,
-            Parent = self.Root,
-        })
-        self.Body = body
-
-        local function KillIntroMotion()
-            I.Tween(self.Root, "Instant", { Position = ROOT_FINAL, GroupTransparency = 0 })
-            I.Tween(self._winScale, "Instant", { Scale = 1 })
-            I.Tween(titleBar, "Instant", { Position = TITLE_FINAL })
-            I.Tween(body, "Instant", { Position = BODY_FINAL })
-            if shadow then shadow.SetFade(0) end
-            introMaid:Destroy()
-        end
-
-        I.MakeDraggable(titleBar, self.Root, {
-            Clamp = true,
-            ModalOwner = self,
-            OnStart = function(root)
-                if self.Maximized then
-                    self.Maximized = false
-                    self.ResizeGrip.Visible = not self.Minimized
-                    setMaxIcon("Maximize")
-                    if self._restore then
-                        local sc = I.GetScale()
-                        local m = UserInputService:GetMouseLocation()
-                        local ap = root.AbsolutePosition
-                        local oldW = root.AbsoluteSize.X
-                        local newW = self._restore.Size.X.Offset
-                        local newH = self._restore.Size.Y.Offset
-                        local frac = oldW > 1 and math.clamp((m.X - ap.X) / oldW, 0.12, 0.88) or 0.5
-                        local nx = math.clamp(m.X / sc - frac * newW, 8, math.max(8, I.Viewport.X / sc - newW - 8))
-                        local ny = math.clamp(ap.Y / sc, 8, math.max(8, I.Viewport.Y / sc - newH - 8))
-                        root.Size = self._restore.Size
-                        root.Position = UDim2.fromOffset(nx, ny)
-                    end
-                end
-            end,
-            OnEnd = function() self:SavePlacement() end,
-        })
-
-        local titleX = 14
-        local winIcon
-        if cfg.Icon ~= nil then
-            titleX = 40
-            local raw = tostring(cfg.Icon)
-            local isAsset = tonumber(cfg.Icon) ~= nil
-                or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
-            if isAsset then
-                winIcon = I.Create("ImageLabel", {
-                    Position = UDim2.fromOffset(14, 5),
-                    Size = UDim2.fromOffset(20, 20),
-                    BackgroundTransparency = 1,
-                    Image = tonumber(cfg.Icon) and ("rbxassetid://" .. cfg.Icon) or cfg.Icon,
-                    ImageColor3 = I.CurrentTheme.SubText,
-                    Parent = titleBar,
-                })
-                I.Bind(winIcon, "ImageColor3", "SubText")
-            else
-                winIcon = I.Icon(titleBar, raw, "SubText")
-                winIcon.Position = UDim2.fromOffset(14, 5)
-                winIcon.Size = UDim2.fromOffset(20, 20)
-            end
-            self.IconImg = winIcon
-        end
-
-        local titleReserve = 130 + (titleX - 14)
-        local titleLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(titleX, 7),
-            Size = UDim2.new(1, -titleReserve, 0, 20),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamBold,
-            TextSize = 15,
-            TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            Text = self.Title,
-            Parent = titleBar,
-        })
-        I.Bind(titleLabel, "TextColor3", "Text")
-        local subLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(titleX, 26),
-            Size = UDim2.new(1, -titleReserve, 0, 14),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            Text = tostring(cfg.SubTitle or ""),
-            Parent = titleBar,
-        })
-        I.Bind(subLabel, "TextColor3", "SubText")
-
-        local titleDivider = I.Create("Frame", {
-            Position = UDim2.new(0, 0, 1, -1),
-            Size = UDim2.new(1, 0, 0, 1),
-            BackgroundColor3 = I.CurrentTheme.Stroke,
-            BackgroundTransparency = 0.45,
-            BorderSizePixel = 0,
-            Parent = titleBar,
-        })
-        I.Bind(titleDivider, "BackgroundColor3", "Stroke")
-
-        local searchBox = I.Create("TextBox", {
-            Position = UDim2.fromOffset(14, 11),
-            Size = UDim2.new(0, 220, 0, 24),
-            BackgroundTransparency = 1,
-            Visible = false,
-            Font = Enum.Font.Gotham,
-            TextSize = 12,
-            TextColor3 = I.CurrentTheme.Text,
-            PlaceholderText = "Search ...",
-            PlaceholderColor3 = I.CurrentTheme.SubText,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ClearTextOnFocus = false,
-            Parent = titleBar,
-        })
-        I.Bind(searchBox, "TextColor3", "Text")
-        I.Bind(searchBox, "PlaceholderColor3", "SubText")
-
-        local searchLine = I.Create("Frame", {
-            Position = UDim2.fromOffset(14, 35),
-            Size = UDim2.new(0, 0, 0, 1),
-            BackgroundColor3 = I.CurrentTheme.Accent,
-            BackgroundTransparency = 0.1,
-            BorderSizePixel = 0,
-            Visible = false,
-            Parent = titleBar,
-        })
-        I.Bind(searchLine, "BackgroundColor3", "Accent")
-
-        searchBox.ClipsDescendants = true
-        local searchActive = false
-        local searchDebounce = nil
-        local setSearch
-
-        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-            local text = searchBox.Text
-            if searchDebounce then pcall(task.cancel, searchDebounce) end
-            if text == "" then
-                self._filterQuery = ""
-                self:ApplyFilter("")
-                return
-            end
-            searchDebounce = task.delay(0.15, function()
-                self._filterQuery = text
-                self:ApplyFilter(text)
-            end)
-        end)
-        searchBox.FocusLost:Connect(function(enter)
-            if not enter and searchBox.Text == "" then setSearch(false) end
-        end)
-
-        function setSearch(on)
-            if searchActive == on then return end
-            searchActive = on
-            if on then
-                searchBox.Visible = true
-                searchLine.Visible = true
-                titleLabel.Visible = false
-                subLabel.Visible = false
-                searchBox.Text = ""
-                self._filterQuery = ""
-                self:ApplyFilter("")
-                searchBox.Size = UDim2.new(0, 0, 0, 24)
-                searchLine.Size = UDim2.new(0, 0, 0, 1)
-                I.Tween(searchBox, "Snappy", { Size = UDim2.new(0, 220, 0, 24) }, function()
-                    if searchActive then pcall(function() searchBox:CaptureFocus() end) end
-                end)
-                I.Tween(searchLine, "Snappy", { Size = UDim2.new(0, 220, 0, 1) })
-            else
-                pcall(function() searchBox:ReleaseFocus() end)
-                I.Tween(searchBox, "Fast", { Size = UDim2.new(0, 0, 0, 24) }, function()
-                    if not searchActive then
-                        searchBox.Visible = false
-                        searchLine.Visible = false
-                        titleLabel.Visible = true
-                        subLabel.Visible = true
-                    end
-                end)
-                I.Tween(searchLine, "Fast", { Size = UDim2.new(0, 0, 0, 1) })
-                self._filterQuery = ""
-                self:ApplyFilter("")
-            end
-        end
-        self._setSearch = function(_, on) setSearch(on) end
-
-        self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
-            if not searchActive then return end
-            if input.KeyCode ~= Enum.KeyCode.Escape then return end
-            if #I.ModalManager.Stack > 0 then return end
-            if gp and UserInputService:GetFocusedTextBox() ~= searchBox then return end
-            setSearch(false)
-        end))
-
-        local function titleButton(kind, xPos, colorKey)
-            local b = I.Create("TextButton", {
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, xPos, 0.5, 0),
-                Size = UDim2.fromOffset(28, 28),
-                BackgroundTransparency = 1,
-                BackgroundColor3 = I.CurrentTheme.Element,
-                BorderSizePixel = 0,
-                Text = "",
-                AutoButtonColor = false,
-                Parent = titleBar,
-            })
-            local ic = I.Icon(b, kind, colorKey or "SubText")
-            ic.AnchorPoint = Vector2.new(0.5, 0.5)
-            ic.Position = UDim2.fromScale(0.5, 0.5)
-            ic.Size = UDim2.fromOffset(12, 12)
-            I.AddPress(b)
-            return b
-        end
-
-        local closeB = titleButton("Close", -10, "Text")
-        closeB.MouseEnter:Connect(function()
-            I.Tween(closeB, "Fast", { BackgroundColor3 = I.CurrentTheme.Error, BackgroundTransparency = 0.15 })
-        end)
-        closeB.MouseLeave:Connect(function()
-            I.Tween(closeB, "Fast", { BackgroundTransparency = 1 })
-        end)
-        self.Maid:Give(closeB.MouseButton1Click:Connect(function()
-            I.PlaySound("Click", 0.5)
-            self:Close()
-        end))
-
-        local minB = titleButton("Minimize", -44)
-        I.AddHover(minB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
-        self.Maid:Give(minB.MouseButton1Click:Connect(function()
-            I.PlaySound("Click", 0.5)
-            self:SetMinimized(true)
-        end))
-
-        local maxB = titleButton("Maximize", -78)
-        I.AddHover(maxB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
-        local maxIcon
-        setMaxIcon = function(kind)
-            if maxIcon then maxIcon:Destroy() end
-            maxIcon = I.Icon(maxB, kind, "SubText")
-            maxIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-            maxIcon.Position = UDim2.fromScale(0.5, 0.5)
-            maxIcon.Size = UDim2.fromOffset(12, 12)
-        end
-        setMaxIcon("Maximize")
-        self.Maid:Give(maxB.MouseButton1Click:Connect(function()
-            I.PlaySound("Click", 0.5)
-            self:SetMaximized(not self.Maximized)
-        end))
-
-        local searchB = titleButton("Search", -112)
-        I.AddHover(searchB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
-        self.Maid:Give(searchB.MouseButton1Click:Connect(function()
-            I.PlaySound("Click", 0.5)
-            setSearch(not searchActive)
-        end))
-
-        local _titleButtons = { searchB, minB, maxB, closeB }
-        self._titleButtons = _titleButtons
-
-        self._sidebarWidth = math.clamp(tonumber(I.SaveManager:Get("__sidebarWidth", 152)) or 152, 110, 320)
-
-        local sidebar = I.Create("Frame", {
-            Size = UDim2.new(0, self._sidebarWidth, 1, 0),
-            BackgroundColor3 = I.CurrentTheme.TabBar,
-            BorderSizePixel = 0,
-            Parent = body,
-        })
-        I.Bind(sidebar, "BackgroundColor3", "TabBar")
-        I.StrokeBind(1, "Stroke", 0.55).Parent = sidebar
-        self.Sidebar = sidebar
-
-        self.TabList = I.Create("ScrollingFrame", {
-            Position = UDim2.fromOffset(6, 6),
-            Size = UDim2.new(1, -12, 1, -12),
-            BackgroundTransparency = 1,
-            CanvasSize = UDim2.new(),
-            AutomaticCanvasSize = Enum.AutomaticSize.Y,
-            ScrollingDirection = Enum.ScrollingDirection.Y,
-            ScrollBarThickness = 3,
-            BorderSizePixel = 0,
-            Parent = sidebar,
-        })
-        I.Bind(self.TabList, "ScrollBarImageColor3", "Stroke")
-        I.Create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.TabList })
-        I.Create("Frame", {
-            Name = "__BottomSpacer",
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            Size = UDim2.new(0, 0, 0, 8),
-            LayoutOrder = 1000000000,
-            Parent = self.TabList,
-        })
-
-        self.Pages = I.Create("Frame", {
-            Position = UDim2.fromOffset(self._sidebarWidth, 0),
-            Size = UDim2.new(1, -self._sidebarWidth, 1, 0),
-            BackgroundTransparency = 1,
-            Parent = body,
-        })
-
-        self.EmptyLabel = I.Create("TextLabel", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.fromOffset(240, 40),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.Gotham,
-            TextSize = 12,
-            TextColor3 = I.CurrentTheme.SubText,
-            TextWrapped = true,
-            Text = "",
-            Visible = false,
-            ZIndex = 5,
-            Parent = self.Pages,
-        })
-        I.Bind(self.EmptyLabel, "TextColor3", "SubText")
-
-        local splitter = I.Create("TextButton", {
-            BackgroundTransparency = 1,
-            Text = "",
-            Position = UDim2.new(0, self._sidebarWidth - 4, 0, 0),
-            Size = UDim2.new(0, 9, 1, 0),
-            ZIndex = 4,
-            AutoButtonColor = false,
-            Parent = body,
-        })
-        self.Splitter = splitter
-        local splitLine = I.Create("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0),
-            Position = UDim2.new(0.5, 0, 0, 10),
-            Size = UDim2.new(0, 1, 1, -20),
-            BackgroundColor3 = I.CurrentTheme.Stroke,
-            BackgroundTransparency = 0.5,
-            BorderSizePixel = 0,
-            Parent = splitter,
-        })
-        I.Bind(splitLine, "BackgroundColor3", "Stroke")
-
-        splitter.InputBegan:Connect(function(input)
-            if self.Minimized or I.DragManager.Active then return end
+        self.Maid:Give(self.Root.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            I.BeginDrag(input, splitter, {
-                ManagerKey = splitter,
-                ModalOwner = self,
-                NoAttr = true,
-                OnFrame = function(mouse)
-                    local sc = I.GetScale()
-                    local rel = (mouse.X - body.AbsolutePosition.X) / sc + 4
-                    self:SetSidebarWidth(rel)
-                end,
-                OnEnd = function()
-                    I.SaveManager:Set("__sidebarWidth", self._sidebarWidth)
-                end,
-            })
-        end)
-
-        local grip = I.Create("TextButton", {
-            AnchorPoint = Vector2.new(1, 1),
-            Position = UDim2.new(1, -3, 1, -3),
-            Size = UDim2.fromOffset(18, 18),
-            BackgroundTransparency = 1,
-            Text = "",
-            AutoButtonColor = false,
-            Parent = self.Root,
-        })
-        local gIcon = I.Icon(grip, "Grip", "SubText")
-        gIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        gIcon.Position = UDim2.fromScale(0.5, 0.5)
-        gIcon.Size = UDim2.fromOffset(12, 12)
-        self.ResizeGrip = grip
-
-        grip.InputBegan:Connect(function(input)
-            if self.Maximized or self.Minimized or I.DragManager.Active then return end
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            local startMouse = UserInputService:GetMouseLocation()
-            local startSize = self.Root.AbsoluteSize / I.GetScale()
-            I.BeginDrag(input, grip, {
-                ManagerKey = grip,
-                ModalOwner = self,
-                NoAttr = true,
-                OnFrame = function(mouse)
-                    local sc = I.GetScale()
-                    local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
-                    local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
-                    local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
-                    local w = math.clamp(startSize.X + (mouse.X - startMouse.X) / sc, minW, math.max(minW, vw2 - 8))
-                    local h = math.clamp(startSize.Y + (mouse.Y - startMouse.Y) / sc, minH, math.max(minH, vh2 - 8))
-                    self.Root.Size = UDim2.fromOffset(w, h)
-                end,
-                OnEnd = function()
-                    I.ClampWindowToScreen(self.Root)
-                    self:SavePlacement()
-                end,
-            })
-        end)
-
-        local function BringToFront()
-            local z = 20
-            local isTop = true
-            for _, w in ipairs(Kailex.Windows) do
-                if w ~= self and not w._destroyed and w.Root and w.Root.Visible and not w._alwaysTop then
-                    if w.Root.ZIndex >= self.Root.ZIndex then
-                        isTop = false
-                    end
-                    if w.Root.ZIndex > z then
-                        z = w.Root.ZIndex
-                    end
-                end
-            end
-            if self._alwaysTop then
-                self.Root.ZIndex = 100
-            elseif not isTop or self.Root.ZIndex >= 100 then
-                self.Root.ZIndex = math.min(99, z + 1)
-            end
-            Kailex._lastActive = self
-        end
-        self._focus = BringToFront
-
-        local lastClick = 0
-        titleBar.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.Touch then
-                BringToFront()
-                if I.Device.IsTouch then return end
-                local now = os.clock()
-                if now - lastClick < 0.3 then
-                    lastClick = 0
-                    self:SetMaximized(not self.Maximized)
-                else
-                    lastClick = now
-                end
-            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                local m = UserInputService:GetMouseLocation()
-                I.ContextMenu.Show({
-                    {
-                        Text = self.Maximized and "Restore" or "Maximize",
-                        Callback = function()
-                            if not self._destroyed then self:SetMaximized(not self.Maximized) end
-                        end,
-                    },
-                    {
-                        Text = self.Minimized and "Expand" or "Minimize",
-                        Callback = function()
-                            if not self._destroyed then self:SetMinimized(not self.Minimized) end
-                        end,
-                    },
-                    { Separator = true },
-                    {
-                        Text = self._alwaysTop and "Disable always on top" or "Always on top",
-                        Callback = function()
-                            if self._destroyed then return end
-                            self._alwaysTop = not self._alwaysTop
-                            if self._alwaysTop then
-                                self.Root.ZIndex = 100
-                            else
-                                BringToFront()
-                            end
-                        end,
-                    },
-                    { Separator = true },
-                    {
-                        Text = "Close",
-                        Danger = true,
-                        Callback = function()
-                            if not self._destroyed then self:Close() end
-                        end,
-                    },
-                }, m.X, m.Y)
-            end
-        end)
-
-        local expandIcon = I.Icon(self.Root, "Chevron", "SubText")
-        expandIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        expandIcon.Position = UDim2.new(1, -18, 0.5, 0)
-        expandIcon.Size = UDim2.fromOffset(12, 12)
-        expandIcon.Rotation = 180
-        expandIcon.Visible = false
-        self._expandIcon = expandIcon
-
-        local pillHit = I.Create("TextButton", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            Text = "",
-            Visible = false,
-            ZIndex = 60,
-            Parent = self.Root,
-        })
-        I.MakeDraggable(pillHit, self.Root, { Clamp = true, ModalOwner = self })
-        self.Maid:Give(pillHit.MouseButton1Click:Connect(function()
-            if pillHit:GetAttribute("Dragging") then return end
-            BringToFront()
-            I.PlaySound("Click", 0.6)
-            self:SetMinimized(false)
+            local top = I.ModalManager.Stack[#I.ModalManager.Stack]
+            if top and top.Owner ~= self then return end
+            State.bringToFront(self)
         end))
-
-        function self:SetTitle(t)
-            self.Title = tostring(t or "")
-            titleLabel.Text = self.Title
-        end
-
-        local function applySidebarGeom(horizontal, multi)
-            local w = self.Root.Size.X.Offset
-            local maxSw = math.max(110, math.min(320, w - 240))
-            local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
-            if not multi then
-                self.Sidebar.Visible = false
-                self.Splitter.Visible = false
-                self.Pages.Position = UDim2.fromOffset(0, 0)
-                self.Pages.Size = UDim2.fromScale(1, 1)
-            elseif horizontal then
-                self.Sidebar.Visible = true
-                self.Splitter.Visible = false
-                self.Sidebar.Size = UDim2.new(1, 0, 0, 44)
-                self.TabList.Size = UDim2.new(1, -12, 0, 32)
-                self.TabList.ScrollingDirection = Enum.ScrollingDirection.X
-                self.TabList.AutomaticCanvasSize = Enum.AutomaticSize.X
-                self.Pages.Position = UDim2.fromOffset(0, 44)
-                self.Pages.Size = UDim2.new(1, 0, 1, -44)
-            else
-                self.Sidebar.Visible = true
-                self.Splitter.Visible = true
-                self.Sidebar.Size = UDim2.new(0, sw, 1, 0)
-                self.TabList.Size = UDim2.new(1, -12, 1, -12)
-                self.TabList.ScrollingDirection = Enum.ScrollingDirection.Y
-                self.TabList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-                self.Pages.Position = UDim2.fromOffset(sw, 0)
-                self.Pages.Size = UDim2.new(1, -sw, 1, 0)
-                self.Splitter.Position = UDim2.new(0, sw - 4, 0, 0)
-            end
-        end
-
-        function self:SetSidebarWidth(w)
-            w = tonumber(w)
-            if not w then return end
-            local maxSw = math.max(110, math.min(320, self.Root.Size.X.Offset - 240))
-            w = math.floor(math.clamp(w, 110, maxSw) + 0.5)
-            if w == self._sidebarWidth then return end
-            self._sidebarWidth = w
-            applySidebarGeom(self._lastHorizontal == true, #self.Tabs > 1)
-        end
-
-        function self:UpdateLayout()
-            if self._destroyed or self._layoutQueued then return end
-            self._layoutQueued = true
-            task.defer(function()
-                self._layoutQueued = false
-                if self._destroyed then return end
-                local w = self.Root.Size.X.Offset
-                local multi = #self.Tabs > 1
-                local horizontal = multi and w < 500
-                local maxSw = math.max(110, math.min(320, w - 240))
-                local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
-                local changed = (horizontal ~= self._lastHorizontal)
-                    or (multi ~= self._lastMulti)
-                    or (sw ~= self._lastSw)
-                self._lastHorizontal = horizontal
-                self._lastMulti = multi
-                self._lastSw = sw
-                if changed then
-                    applySidebarGeom(horizontal, multi)
-                    for _, tab in ipairs(self.Tabs) do
-                        tab:_setHorizontal(horizontal)
-                    end
-                end
-            end)
-        end
-
-        self.Maid:Give(self.Root:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-            self:UpdateLayout()
-        end))
-
-        function self:ApplyFilter(q)
-            self._filterQuery = q or ""
-            local tab = self.CurrentTab
-            if not tab then return end
-            local n = tab:ApplyFilter(self._filterQuery)
-            for _, t in ipairs(self.Tabs) do
-                if t ~= tab and not t._destroyed then
-                    local c = t:CountMatches(self._filterQuery)
-                    t:SetFilterBadge(c > 0 and tostring(c) or "")
-                else
-                    t:SetFilterBadge("")
-                end
-            end
-            local shouldShow, txt = false, ""
-            if self._filterQuery ~= "" then
-                txt = "No results for \"" .. self._filterQuery .. "\""
-                shouldShow = (n == 0)
-            elseif #tab.Elements == 0 and #tab.Sections == 0 then
-                txt = "This tab is empty"
-                shouldShow = true
-            end
-            local el = self.EmptyLabel
-            if shouldShow then
-                el.Text = txt
-                if not el.Visible then
-                    el.Visible = true
-                    el.TextTransparency = 1
-                    I.Tween(el, "Fast", { TextTransparency = 0 })
-                end
-            else
-                el.Visible = false
-            end
-        end
-
-        function self:Tab(tabOpts)
-            local tab = I.TabClass.new(self, tabOpts)
-            table.insert(self.Tabs, tab)
-            if #self.Tabs == 1 then
-                tab:Select()
-            end
-            self:UpdateLayout()
-            return tab
-        end
-
-        function self:_closeDropdowns()
-            for _, tab in ipairs(self.Tabs) do
-                if tab._openDropdown then
-                    local fn = tab._openDropdown
-                    tab._openDropdown = nil
-                    fn()
-                end
-            end
-        end
-
-        function self:SetMinimized(state)
-            if self._destroyed or self.Minimized == state then return end
-            self.Minimized = state
-            self.MinimizedChanged:Fire(state)
-            I.Tween(self._winScale, "Snappy", { Scale = 0.97 }, function()
-                if not self._destroyed then I.Tween(self._winScale, "PopSoft", { Scale = 1 }) end
-            end)
-            if state then
-                KillIntroMotion()
-                I.ModalManager.CloseAll(self)
-                if self.Root.AnchorPoint.X ~= 0 or self.Root.AnchorPoint.Y ~= 0 then
-                    local sc = I.GetScale()
-                    self.Root.AnchorPoint = Vector2.new(0, 0)
-                    self.Root.Position = UDim2.fromOffset(self.Root.AbsolutePosition.X / sc, self.Root.AbsolutePosition.Y / sc)
-                end
-                self._preMin = { Size = self.Root.Size, Position = self.Root.Position }
-                self.Body.Visible = false
-                self.ResizeGrip.Visible = false
-                subLabel.Visible = false
-                titleLabel.Size = UDim2.new(1, -44, 0, 20)
-                for _, b in ipairs(_titleButtons) do b.Visible = false end
-                expandIcon.Visible = true
-                expandIcon.Size = UDim2.fromOffset(8, 8)
-                I.Tween(expandIcon, "Pop", { Size = UDim2.fromOffset(12, 12) })
-                pillHit.Visible = true
-                if searchActive then setSearch(false) end
-                local tw = TextService:GetTextSize(self.Title, I.TS(15), Enum.Font.GothamBold, Vector2.new(10000, 100)).X
-                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(tw + 74 + (winIcon and 24 or 0), 38) })
-            else
-                pillHit.Visible = false
-                expandIcon.Visible = false
-                for _, b in ipairs(_titleButtons) do b.Visible = true end
-                subLabel.Visible = true
-                titleLabel.Size = UDim2.new(1, -titleReserve, 0, 20)
-                I.Tween(self.Root, "Smooth", { Size = self._preMin and self._preMin.Size or UDim2.fromOffset(580, 420) }, function()
-                    if not self._destroyed and not self.Minimized then
-                        self.Body.Visible = true
-                        self.ResizeGrip.Visible = not self.Maximized
-                    end
-                end)
-                I.ClampWindowToScreen(self.Root)
-            end
-        end
-
-        function self:SetMaximized(on)
-            if self._destroyed or self.Minimized then return end
-            KillIntroMotion()
-            local sc = I.GetScale()
-            if on then
-                local sp = self.Root.AbsolutePosition / sc
-                self._restore = { Size = self.Root.Size, X = sp.X, Y = sp.Y }
-                self.Maximized = true
-                self.ResizeGrip.Visible = false
-                setMaxIcon("Restore")
-                self.Root.AnchorPoint = Vector2.new(0.5, 0.5)
-                self.Root.Position = UDim2.fromOffset(I.Viewport.X / (2 * sc), I.Viewport.Y / (2 * sc))
-                I.Tween(self.Root, "Smooth", { Size = UDim2.fromOffset(I.Viewport.X / sc - 16, I.Viewport.Y / sc - 16) })
-            else
-                self.Maximized = false
-                self.ResizeGrip.Visible = true
-                setMaxIcon("Maximize")
-                self.Root.AnchorPoint = Vector2.new(0, 0)
-                if self._restore then
-                    self.Root.Position = UDim2.fromOffset(self._restore.X, self._restore.Y)
-                    I.Tween(self.Root, "Smooth", { Size = self._restore.Size })
-                end
-            end
-        end
-
-        function self:SavePlacement()
-            if self._destroyed or self.Minimized or self.Maximized or self._hidden then return end
-            if not self._remember then return end
-            I.SaveManager:Set("__win:" .. self.SavePrefix, {
-                X = math.floor(self.Root.Position.X.Offset + 0.5),
-                Y = math.floor(self.Root.Position.Y.Offset + 0.5),
-                W = math.floor(self.Root.Size.X.Offset + 0.5),
-                H = math.floor(self.Root.Size.Y.Offset + 0.5),
-            })
-        end
-
-        function self:ToggleHidden()
-            if self._destroyed then return end
-            self._hidden = not self._hidden
-            if self._hidden then
-                I.ModalManager.CloseAll(self)
-                self.Root.Visible = false
-            else
-                self.Root.Visible = true
-                BringToFront()
-            end
-        end
-
-        function self:OnViewport()
-            if self._destroyed then return end
-            local sc = I.GetScale()
-            I.ClampWindowToScreen(self.Root)
-            if self.Minimized then return end
-            I.ModalManager.CloseAll(self)
-            local vw2, vh2 = I.Viewport.X / sc, I.Viewport.Y / sc
-            local minW = math.min(self.MinSize.X, math.max(200, vw2 - 12))
-            local minH = math.min(self.MinSize.Y, math.max(160, vh2 - 12))
-            local w, h
-            if self.Maximized then
-                w, h = vw2 - 16, vh2 - 16
-            else
-                w = math.clamp(self.Root.Size.X.Offset, minW, math.max(minW, vw2 - 12))
-                h = math.clamp(self.Root.Size.Y.Offset, minH, math.max(minH, vh2 - 12))
-            end
-            self.Root.Size = UDim2.fromOffset(w, h)
-            self:UpdateLayout()
-        end
-
-        function self:Close(skipConfirm)
-            if self._destroyed then return end
-            if not skipConfirm and cfg.ConfirmClose then
-                Kailex:Confirm({
-                    Title = "Close " .. self.Title .. "?",
-                    Text = tostring(cfg.ConfirmClose),
-                }, function()
-                    self:Destroy()
-                end)
-                return
-            end
-            self:Destroy()
-        end
-
-        function self:Destroy()
-            if self._destroyed then return end
-            self._destroyed = true
-            self:SavePlacement()
-            self.Closed:Fire()
-            for i, w in ipairs(Kailex.Windows) do
-                if w == self then table.remove(Kailex.Windows, i) break end
-            end
-            I.ModalManager.CloseAll(self)
-            KillIntroMotion()
-            if shadow then shadow.FadeOut() end
-            local root = self.Root
-            local done = false
-            local function finish()
-                if done then return end
-                done = true
-                self.Maid:Destroy()
-                if root.Parent then root:Destroy() end
-            end
-            I.Once(root.Destroying, finish)
-            task.delay(0.3, finish)
-            I.Tween(self._winScale, "Vanish", { Scale = 0.96 })
-            I.Tween(root, "Vanish", { Position = root.Position + UDim2.fromOffset(0, -10) })
-            I.Tween(root, "Vanish", { GroupTransparency = 1 }, finish)
-        end
 
         table.insert(Kailex.Windows, self)
-        applySidebarGeom(#self.Tabs > 1, false)
+        self._focus()
+        Layout.geom(self, false, #self.Tabs > 1)
 
-        do
-            local first = (#Kailex.Windows == 1)
-            local dim
-            if first then
-                dim = I.Create("Frame", {
-                    Size = UDim2.fromScale(1, 1),
-                    BackgroundColor3 = Color3.new(0, 0, 0),
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0,
-                    ZIndex = 0,
-                    Parent = I.LayerWindows,
-                })
-                introMaid:Give(dim)
-                I.Tween(dim, "Smooth", { BackgroundTransparency = 0.5 })
-            end
-
-            titleBar.Position = UDim2.new(0, 0, 0, -18)
-            body.Position = UDim2.new(0, 0, 0, 74)
-            I.Tween(self.Root, TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { GroupTransparency = 0, Position = ROOT_FINAL })
-            I.Tween(self._winScale, TweenInfo.new(0.44, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
-            I.Tween(titleBar, TweenInfo.new(0.46, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = TITLE_FINAL })
-            I.Tween(body, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = BODY_FINAL })
-
-            task.delay(0.1, function()
-                if not self._destroyed and shadow then shadow.SetFade(0.55) end
-            end)
-            task.delay(0.24, function()
-                if not self._destroyed and shadow then shadow.SetFade(0) end
-            end)
-            task.delay(0.55, function()
-                if not self._destroyed and dim then
-                    I.Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()
-                        dim:Destroy()
-                    end)
-                end
-            end)
+        local dim
+        if #Kailex.Windows == 1 then
+            dim = I.Create("Frame", {
+                Size = UDim2.fromScale(1, 1),
+                BackgroundColor3 = Color3.new(0, 0, 0),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                ZIndex = 0,
+                Parent = I.LayerWindows,
+            })
+            self._introMaid:Give(dim)
+            I.Tween(dim, "Smooth", { BackgroundTransparency = 0.5 })
         end
+
+        self.TitleBar.Position = UDim2.new(0, 0, 0, -18)
+        self.Body.Position = UDim2.new(0, 0, 0, 74)
+        I.Tween(self.Root, TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            { GroupTransparency = 0, Position = self._rootFinal })
+        I.Tween(self._winScale, TweenInfo.new(0.44, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+        I.Tween(self.TitleBar, TweenInfo.new(0.46, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            { Position = self._titleFinal })
+        I.Tween(self.Body, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            { Position = self._bodyFinal })
+
+        task.delay(0.1, function()
+            if not self._destroyed and self._shadow then self._shadow.SetFade(0.55) end
+        end)
+        task.delay(0.24, function()
+            if not self._destroyed and self._shadow then self._shadow.SetFade(0) end
+        end)
+        task.delay(0.55, function()
+            if not self._destroyed and dim then
+                I.Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()
+                    dim:Destroy()
+                end)
+            end
+        end)
+
         return self
     end
 
     local uiVisible = true
+
     function Kailex:SetVisible(state)
         state = state == true
         uiVisible = state
@@ -7910,6 +8298,7 @@ Bundle["Window/Window"] = function(ctx)
             I.ModalManager.CloseAll()
         end
     end
+
     function Kailex:IsVisible()
         return uiVisible
     end
@@ -7924,33 +8313,15 @@ Bundle["App/MobileButton"] = function(ctx)
     function Kailex:CreateMobileButton()
         if self._mobileButton then return self._mobileButton end
         local s = I.GetScale()
-        local btn = I.Create("TextButton", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Size = UDim2.fromOffset(46, 46),
-            Position = UDim2.fromOffset((I.Viewport.X - 42) / s, (I.Viewport.Y - 42) / s),
-            BackgroundColor3 = I.CurrentTheme.Surface,
-            BorderSizePixel = 0,
-            AutoButtonColor = false,
-            ZIndex = 5,
-            Parent = I.LayerNotify,
-        })
-        I.Bind(btn, "BackgroundColor3", "Surface")
-        I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = btn })
-        I.StrokeBind(1, "Stroke", 0.35).Parent = btn
-        local glyph = I.Create("TextLabel", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
+        local btn, _, mmaid = I.FloatingChip({
+            Circle = true,
+            StrokeT = 0.35,
             Font = Enum.Font.GothamBlack,
             TextSize = 18,
-            TextColor3 = I.CurrentTheme.Text,
             Text = "K",
-            Parent = btn,
+            Pop = "Pop",
+            Position = UDim2.fromOffset((I.Viewport.X - 42) / s, (I.Viewport.Y - 42) / s),
         })
-        I.Bind(glyph, "TextColor3", "Text")
-        local mmaid = I.Maid.new():Link(btn)
-        I.MakeDraggable(btn, btn, { Clamp = true })
-        btn.Size = UDim2.fromOffset(0, 0)
-        I.Tween(btn, "Pop", { Size = UDim2.fromOffset(46, 46) })
         mmaid:Give(btn.MouseButton1Click:Connect(function()
             if btn:GetAttribute("Dragging") then return end
             I.ApplyRipple(btn)
@@ -7962,144 +8333,114 @@ Bundle["App/MobileButton"] = function(ctx)
 end
 
 
--- [[App/KeySystem]]
-Bundle["App/KeySystem"] = function(ctx)
+-- [[App/KeySystem/Logic]]
+Bundle["App/KeySystem/Logic"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
-    local Setting = I.Setting
     local Players = I.Players
 
-    function Kailex:KeySystem(options)
-        options = options or {}
+    local Logic = {}
 
+    function Logic.parse(options)
+        options = options or {}
         local lp = Players.LocalPlayer
         local lpName = lp and lp.Name or ""
-        local lpLower = lpName:lower()
+        local K = { options = options, lpName = lpName, lpLower = lpName:lower() }
 
         local customVerify
         if type(options.Verify) == "function" then customVerify = options.Verify
         elseif type(options.CustomVerify) == "function" then customVerify = options.CustomVerify
         elseif type(options.CheckKey) == "function" then customVerify = options.CheckKey end
+        K.customVerify = customVerify
 
         local keySet = {}
         if options.Key ~= nil then keySet[tostring(options.Key)] = true end
         if type(options.Keys) == "table" then
             for _, k in ipairs(options.Keys) do keySet[tostring(k)] = true end
         end
+        K.keySet = keySet
 
         local onComplete = options.OnComplete or options.Callback
         if type(onComplete) ~= "function" then onComplete = function() end end
-        local onDecline = (type(options.OnDecline) == "function" and options.OnDecline)
+        K.onComplete = onComplete
+        K.onDecline = (type(options.OnDecline) == "function" and options.OnDecline)
             or (type(options.OnCancel) == "function" and options.OnCancel) or nil
-        local onWrong = (type(options.OnWrong) == "function") and options.OnWrong or nil
-        local onBlacklisted = (type(options.OnBlacklisted) == "function") and options.OnBlacklisted or nil
+        K.onWrong = (type(options.OnWrong) == "function") and options.OnWrong or nil
+        K.onBlacklisted = (type(options.OnBlacklisted) == "function") and options.OnBlacklisted or nil
 
-        local remember = options.Remember ~= false
-        local declineMode = options.DeclineAction or options.DeclineMode
-            or (onDecline and "none") or "hide"
+        K.remember = options.Remember ~= false
+        K.declineMode = options.DeclineAction or options.DeclineMode
+            or (K.onDecline and "none") or "hide"
+        return K
+    end
 
-        local function handleDecline()
-            if onDecline then I.SafeCall(onDecline) end
-            if declineMode == "unload" then
-                task.defer(function() Kailex:Unload() end)
-            elseif declineMode == "hide" then
-                Kailex:SetVisible(false)
+    function Logic.validateKey(K, key)
+        key = tostring(key or "")
+        if K.customVerify then
+            local ok, res = pcall(K.customVerify, key)
+            return ok and res == true
+        end
+        return K.keySet[key] == true
+    end
+
+    function Logic.inList(K, list, fn)
+        if type(list) == "table" then
+            for _, n in ipairs(list) do
+                if tostring(n):lower() == K.lpLower then return true end
             end
         end
-
-        local function validateKey(key)
-            key = tostring(key or "")
-            if customVerify then
-                local ok, res = pcall(customVerify, key)
-                return ok and res == true
-            end
-            return keySet[key] == true
+        if type(fn) == "function" then
+            local ok, res = pcall(fn, K.lpName)
+            if ok and res == true then return true end
         end
+        return false
+    end
 
-        local function inList(list, fn)
-            if type(list) == "table" then
-                for _, n in ipairs(list) do
-                    if tostring(n):lower() == lpLower then return true end
-                end
-            end
-            if type(fn) == "function" then
-                local ok, res = pcall(fn, lpName)
-                if ok and res == true then return true end
-            end
-            return false
+    function Logic.handleDecline(K)
+        if K.onDecline then I.SafeCall(K.onDecline) end
+        if K.declineMode == "unload" then
+            task.defer(function() Kailex:Unload() end)
+        elseif K.declineMode == "hide" then
+            Kailex:SetVisible(false)
         end
+    end
 
-        if inList(options.Blacklist, options.CheckBlacklist) then
-            Kailex:Notify({
-                Title = "Access Denied",
-                Text = tostring(options.BlacklistMessage or "You are not allowed to use this script."),
-                Type = "Error", Duration = 7,
-            })
-            if onBlacklisted then I.SafeCall(onBlacklisted, lpName) end
-            handleDecline()
-            return nil
-        end
+    I.KeySystemLogic = Logic
+end
 
-        if inList(options.Whitelist, options.CheckWhitelist) then
-            if options.Silent ~= true then
-                Kailex:Notify({ Title = "Key System", Text = "Welcome, " .. lpName .. " - you are whitelisted.", Type = "Success" })
-            end
-            I.SafeCall(onComplete, "WHITELISTED")
-            return nil
-        end
 
-        if remember then
-            local savedKey = I.SaveManager:Get("__keySystemKey", nil)
-            if type(savedKey) == "string" and savedKey ~= "" and validateKey(savedKey) then
-                if options.Silent ~= true then
-                    Kailex:Notify({ Title = "Key System", Text = "Saved key accepted - welcome back.", Type = "Success" })
-                end
-                I.SafeCall(onComplete, savedKey)
-                return nil
-            end
-        end
+-- [[App/KeySystem/View]]
+Bundle["App/KeySystem/View"] = function(ctx)
+    local I = ctx.Internal
 
-        if next(keySet) == nil and not customVerify then
-            I.SafeCall(onComplete)
-            return nil
-        end
+    local View = {}
 
-        local title = tostring(options.Title or "Key System")
-        local desc = tostring(options.Description or options.SubTitle or "Enter your key to continue.")
-        local link = options.Link or options.GetKeyLink
-        local maxAttempts = math.max(0, math.floor(tonumber(options.MaxAttempts or options.Attempts) or 0))
-        local attempts = 0
-        local alive = true
+    function View.setStatus(K, text, colorKey)
+        K.statusLabel.Text = tostring(text or "")
+        K.statusLabel.TextColor3 = I.CurrentTheme[colorKey] or I.CurrentTheme.SubText
+    end
 
-        local maid = I.Maid.new()
-        local dimmer = I.Create("TextButton", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundColor3 = Color3.new(0, 0, 0),
-            BackgroundTransparency = 1,
-            AutoButtonColor = false,
-            Text = "",
-            ZIndex = 40,
-            Parent = I.LayerOverlay,
-        })
-        local card = I.Create("CanvasGroup", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.fromScale(0.5, 0.5),
+    function View.fadeOut(K)
+        K.h.Close()
+    end
+
+    function View.enter(K)
+        task.defer(function()
+            if K.alive and K.inputBox then K.inputBox:CaptureFocus() end
+        end)
+    end
+
+    function View.build(K)
+        local opts = K.options
+        K.h = I.ModalCard.OpenCenter({
             Size = UDim2.fromOffset(360, 246),
-            BackgroundColor3 = I.CurrentTheme.Surface,
-            BorderSizePixel = 0,
-            ZIndex = 41,
-            Parent = I.LayerOverlay,
+            Closer = K.declineNow,
         })
-        I.Bind(card, "BackgroundColor3", "Surface")
-        I.Create("UICorner", { CornerRadius = UDim.new(0, 14), Parent = card })
-        local cardStroke = I.Create("UIStroke", {
-            Thickness = 1, Transparency = 0.35,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card,
-        })
-        I.Bind(cardStroke, "Color", "Stroke")
-        local ksScale = I.Create("UIScale", { Scale = 0.94, Parent = card })
+        K.maid = K.h.Maid
+        K.card = K.h.Card
+        K.ksScale = K.h.Scale
 
-        I.Create("TextLabel", {
+        local titleLabel = I.Create("TextLabel", {
             Position = UDim2.fromOffset(18, 16),
             Size = UDim2.new(1, -36, 0, 20),
             BackgroundTransparency = 1,
@@ -8107,19 +8448,21 @@ Bundle["App/KeySystem"] = function(ctx)
             TextColor3 = I.CurrentTheme.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
-            Text = title, ZIndex = 42, Parent = card,
+            Text = K.title, ZIndex = 42, Parent = K.card,
         })
-        I.Create("TextLabel", {
+        I.Bind(titleLabel, "TextColor3", "Text")
+        local descLabel = I.Create("TextLabel", {
             Position = UDim2.fromOffset(18, 38),
             Size = UDim2.new(1, -36, 0, 30),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham, TextSize = 12,
             TextColor3 = I.CurrentTheme.SubText,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextWrapped = true, Text = desc, ZIndex = 42, Parent = card,
+            TextWrapped = true, Text = K.desc, ZIndex = 42, Parent = K.card,
         })
+        I.Bind(descLabel, "TextColor3", "SubText")
 
-        local statusLabel = I.Create("TextLabel", {
+        K.statusLabel = I.Create("TextLabel", {
             Position = UDim2.fromOffset(18, 122),
             Size = UDim2.new(1, -36, 0, 15),
             BackgroundTransparency = 1,
@@ -8127,20 +8470,13 @@ Bundle["App/KeySystem"] = function(ctx)
             TextColor3 = I.CurrentTheme.SubText,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
-            Text = maxAttempts > 0 and ("Attempts: 0 / " .. maxAttempts) or "",
-            ZIndex = 42, Parent = card,
+            Text = "",
+            ZIndex = 42, Parent = K.card,
         })
-        I.Bind(statusLabel, "TextColor3", "SubText")
-        local function setStatus(text, colorKey)
-            statusLabel.Text = tostring(text or "")
-            statusLabel.TextColor3 = I.CurrentTheme[colorKey] or I.CurrentTheme.SubText
-        end
 
-        local hasPaste = false
-        local okPaste, gc = pcall(function() return getclipboard end)
-        if okPaste and type(gc) == "function" then hasPaste = true end
+        local hasPaste = I.ReadClipboard ~= nil
 
-        local inputBox = I.Create("TextBox", {
+        K.inputBox = I.Create("TextBox", {
             Position = UDim2.fromOffset(18, 76),
             Size = UDim2.new(1, -36, 0, 38),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
@@ -8151,204 +8487,215 @@ Bundle["App/KeySystem"] = function(ctx)
             PlaceholderColor3 = I.CurrentTheme.SubText,
             ClearTextOnFocus = false, Text = "",
             TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 42, Parent = card,
+            ZIndex = 42, Parent = K.card,
             Children = { I.Corner(8) },
         })
         I.Create("UIPadding", {
             PaddingLeft = UDim.new(0, 10),
             PaddingRight = UDim.new(0, hasPaste and 66 or 10),
-            Parent = inputBox,
+            Parent = K.inputBox,
         })
-        I.Bind(inputBox, "BackgroundColor3", "SurfaceLight")
-        I.Bind(inputBox, "TextColor3", "Text")
-        I.Bind(inputBox, "PlaceholderColor3", "SubText")
-        local inputStroke = I.Create("UIStroke", {
+        I.Bind(K.inputBox, "BackgroundColor3", "SurfaceLight")
+        I.Bind(K.inputBox, "TextColor3", "Text")
+        I.Bind(K.inputBox, "PlaceholderColor3", "SubText")
+        K.inputStroke = I.Create("UIStroke", {
             Thickness = 1, Transparency = 0.5,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = inputBox,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = K.inputBox,
         })
-        I.Bind(inputStroke, "Color", "Stroke")
+        I.Bind(K.inputStroke, "Color", "Stroke")
 
         if hasPaste then
-            local pasteBtn = I.Create("TextButton", {
+            local pasteBtn = I.MkButton(K.inputBox, {
                 AnchorPoint = Vector2.new(1, 0.5),
                 Position = UDim2.new(1, -6, 0.5, 0),
                 Size = UDim2.fromOffset(56, 26),
-                BackgroundColor3 = I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = "Paste",
                 Font = Enum.Font.GothamBold, TextSize = 11,
-                TextColor3 = I.CurrentTheme.SubText,
-                AutoButtonColor = false, ZIndex = 43, Parent = inputBox,
-                Children = { I.Corner(6) },
-            })
-            I.Bind(pasteBtn, "BackgroundColor3", "Element")
-            I.Bind(pasteBtn, "TextColor3", "SubText")
-            I.AddHover(pasteBtn)
-            maid:Give(pasteBtn.MouseButton1Click:Connect(function()
-                if not alive then return end
-                local ok, txt = pcall(gc)
-                if ok and type(txt) == "string" and txt:match("%S") then
-                    inputBox.Text = txt:match("^%s*(.-)%s*$")
+                ZIndex = 43,
+            }, { Text = "SubText", Corner = 6 })
+            K.maid:Give(pasteBtn.MouseButton1Click:Connect(function()
+                if not K.alive then return end
+                local txt = I.ReadClipboard()
+                if type(txt) == "string" and txt:match("%S") then
+                    K.inputBox.Text = txt:match("^%s*(.-)%s*$")
                     I.PlaySound("Click", 0.5)
-                    setStatus("Key pasted from clipboard - press Verify.")
+                    View.setStatus(K, "Key pasted from clipboard - press Verify.")
                 end
             end))
         end
 
         local function mkBtn(text, accent, xPos, w)
-            local b = I.Create("TextButton", {
+            return I.MkButton(K.card, {
                 Position = UDim2.fromOffset(xPos, 176),
                 Size = UDim2.fromOffset(w, 40),
-                BackgroundColor3 = accent and I.CurrentTheme.Accent or I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = text,
-                Font = Enum.Font.GothamBold, TextSize = 12,
-                TextColor3 = accent and I.CurrentTheme.OnAccent or I.CurrentTheme.Text,
-                AutoButtonColor = false,
-                ZIndex = 42, Parent = card,
-                Children = { I.Corner(8) },
-            })
-            if accent then
-                I.Bind(b, "BackgroundColor3", "Accent")
-                I.Bind(b, "TextColor3", "OnAccent")
-                I.AddHover(b, { HoverKey = "AccentHover", BaseKey = "Accent" })
-            else
-                I.Bind(b, "BackgroundColor3", "Element")
-                I.Bind(b, "TextColor3", "Text")
-                I.AddHover(b)
-            end
-            return b
+                Font = Enum.Font.GothamBold,
+                TextSize = 12,
+                ZIndex = 42,
+            }, accent and {
+                Bg = "Accent", Text = "OnAccent",
+                Hover = { HoverKey = "AccentHover", BaseKey = "Accent" },
+            } or nil)
         end
 
-        local verifyBtn, linkBtn, declineBtn
-        if link then
-            verifyBtn  = mkBtn("Verify", true, 226, 116)
-            declineBtn = mkBtn(options.DeclineText or "Decline", false, 122, 96)
-            linkBtn    = mkBtn(options.LinkText or "Get Key", false, 18, 96)
+        if K.link then
+            K.verifyBtn = mkBtn("Verify", true, 226, 116)
+            K.declineBtn = mkBtn(opts.DeclineText or "Decline", false, 122, 96)
+            K.linkBtn = mkBtn(opts.LinkText or "Get Key", false, 18, 96)
         else
-            verifyBtn  = mkBtn("Verify", true, 126, 216)
-            declineBtn = mkBtn(options.DeclineText or "Decline", false, 18, 100)
+            K.verifyBtn = mkBtn("Verify", true, 126, 216)
+            K.declineBtn = mkBtn(opts.DeclineText or "Decline", false, 18, 100)
+        end
+    end
+
+    I.KeySystemView = View
+end
+
+
+-- [[App/KeySystem/Init]]
+Bundle["App/KeySystem/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Kailex = ctx.Kailex
+    local Logic = I.KeySystemLogic
+    local View = I.KeySystemView
+
+    function Kailex:KeySystem(options)
+        local K = Logic.parse(options)
+        local opts = K.options
+
+        if Logic.inList(K, opts.Blacklist, opts.CheckBlacklist) then
+            Kailex:Notify({
+                Title = "Access Denied",
+                Text = tostring(opts.BlacklistMessage or "You are not allowed to use this script."),
+                Type = "Error", Duration = 7,
+            })
+            if K.onBlacklisted then I.SafeCall(K.onBlacklisted, K.lpName) end
+            Logic.handleDecline(K)
+            return nil
         end
 
-        local function fadeOutCard()
-            I.Tween(ksScale, "Vanish", { Scale = 0.95 })
-            I.Tween(card, "Vanish", { GroupTransparency = 1 }, function()
-                maid:Destroy()
-                card:Destroy()
-            end)
-            I.Tween(dimmer, "Smooth", { BackgroundTransparency = 1 }, function()
-                if dimmer.Parent then dimmer:Destroy() end
-            end)
+        if Logic.inList(K, opts.Whitelist, opts.CheckWhitelist) then
+            if opts.Silent ~= true then
+                Kailex:Notify({
+                    Title = "Key System",
+                    Text = "Welcome, " .. K.lpName .. " - you are whitelisted.",
+                    Type = "Success",
+                })
+            end
+            I.SafeCall(K.onComplete, "WHITELISTED")
+            return nil
         end
+
+        if K.remember then
+            local savedKey = I.SaveManager:Get("__keySystemKey", nil)
+            if type(savedKey) == "string" and savedKey ~= ""
+                and Logic.validateKey(K, savedKey) then
+                if opts.Silent ~= true then
+                    Kailex:Notify({
+                        Title = "Key System",
+                        Text = "Saved key accepted - welcome back.",
+                        Type = "Success",
+                    })
+                end
+                I.SafeCall(K.onComplete, savedKey)
+                return nil
+            end
+        end
+
+        if next(K.keySet) == nil and not K.customVerify then
+            I.SafeCall(K.onComplete)
+            return nil
+        end
+
+        K.title = tostring(opts.Title or "Key System")
+        K.desc = tostring(opts.Description or opts.SubTitle or "Enter your key to continue.")
+        K.link = opts.Link or opts.GetKeyLink
+        K.alive = true
+
+        local function declineNow()
+            if not K.alive then return end
+            K.alive = false
+            I.PlaySound("Click", 0.5)
+            View.fadeOut(K)
+            Logic.handleDecline(K)
+        end
+        K.declineNow = declineNow
+
+        View.build(K)
 
         local function grantAccess(key)
-            if not alive then return end
-            alive = false
+            if not K.alive then return end
+            K.alive = false
             I.PlaySound("ToggleOn")
-            if remember and type(key) == "string" and key ~= "" then
+            if K.remember and type(key) == "string" and key ~= "" then
                 I.SaveManager:Set("__keySystemKey", key)
             end
-            I.Tween(inputStroke, "Fast", { Color = I.CurrentTheme.Success, Transparency = 0 })
-            setStatus("Access granted - welcome!", "Success")
-            I.Tween(ksScale, "PopSoft", { Scale = 1.02 })
+            I.Tween(K.inputStroke, "Fast", { Color = I.CurrentTheme.Success, Transparency = 0 })
+            View.setStatus(K, "Access granted - welcome!", "Success")
+            I.Tween(K.ksScale, "PopSoft", { Scale = 1.02 })
             task.delay(0.42, function()
-                fadeOutCard()
+                View.fadeOut(K)
                 task.delay(0.12, function()
-                    I.SafeCall(onComplete, key)
+                    I.SafeCall(K.onComplete, key)
                 end)
             end)
         end
 
         local function wrongKey()
-            attempts += 1
             I.PlaySound("Error")
-            I.FX.Shake(card, 9)
-            I.Tween(inputStroke, "Fast", { Color = I.CurrentTheme.Error, Transparency = 0 })
-            if maxAttempts > 0 then
-                local left = maxAttempts - attempts
-                if left <= 0 then
-                    setStatus("Wrong key - no attempts left.", "Error")
-                    if onWrong then I.SafeCall(onWrong, inputBox.Text, 0) end
-                    task.delay(0.7, function()
-                        if alive then
-                            alive = false
-                            fadeOutCard()
-                            handleDecline()
-                        end
-                    end)
-                    return
-                end
-                setStatus("Wrong key - attempts: " .. attempts .. " / " .. maxAttempts .. " (" .. left .. " left)", "Error")
-            else
-                setStatus("Wrong key - try again.", "Error")
-            end
+            I.FX.Shake(K.card, 9)
+            I.Tween(K.inputStroke, "Fast", { Color = I.CurrentTheme.Error, Transparency = 0 })
+            View.setStatus(K, "Wrong key - try again.", "Error")
             task.delay(1.2, function()
-                if alive then
-                    I.Tween(inputStroke, "Smooth", { Color = I.CurrentTheme.Stroke, Transparency = 0.5 })
+                if K.alive then
+                    I.Tween(K.inputStroke, "Smooth", { Color = I.CurrentTheme.Stroke, Transparency = 0.5 })
                 end
             end)
-            if onWrong then I.SafeCall(onWrong, inputBox.Text, math.max(0, maxAttempts - attempts)) end
+            if K.onWrong then
+                I.SafeCall(K.onWrong, K.inputBox.Text)
+            end
         end
 
         local function verify()
-            if not alive then return end
-            local val = inputBox.Text:match("^%s*(.-)%s*$")
-            if val ~= "" and validateKey(val) then
+            if not K.alive then return end
+            local val = K.inputBox.Text:match("^%s*(.-)%s*$")
+            if val ~= "" and Logic.validateKey(K, val) then
                 grantAccess(val)
             else
                 wrongKey()
             end
         end
 
-        local function declineNow()
-            if not alive then return end
-            alive = false
-            I.PlaySound("Click", 0.5)
-            fadeOutCard()
-            handleDecline()
-        end
-
-        maid:Give(verifyBtn.MouseButton1Click:Connect(function()
-            I.ApplyRipple(verifyBtn)
+        K.maid:Give(K.verifyBtn.MouseButton1Click:Connect(function()
+            I.ApplyRipple(K.verifyBtn)
             verify()
         end))
-        maid:Give(declineBtn.MouseButton1Click:Connect(function()
-            I.ApplyRipple(declineBtn)
+        K.maid:Give(K.declineBtn.MouseButton1Click:Connect(function()
+            I.ApplyRipple(K.declineBtn)
             declineNow()
         end))
-        maid:Give(inputBox.FocusLost:Connect(function(enter)
-            if enter and alive then verify() end
+        K.maid:Give(K.inputBox.FocusLost:Connect(function(enter)
+            if enter and K.alive then verify() end
         end))
-        local escHook = I.AddInputHook(function() return alive end, function(input)
-            if input.KeyCode == Enum.KeyCode.Escape then
-                declineNow()
-            end
-        end)
-        maid:Give(function() I.RemoveInputHook(escHook) end)
-        if linkBtn then
-            maid:Give(linkBtn.MouseButton1Click:Connect(function()
-                if not alive then return end
-                I.ApplyRipple(linkBtn)
+
+        if K.linkBtn then
+            K.maid:Give(K.linkBtn.MouseButton1Click:Connect(function()
+                if not K.alive then return end
+                I.ApplyRipple(K.linkBtn)
                 I.PlaySound("Click", 0.5)
-                local setc
-                local ok, sc = pcall(function() return setclipboard or toclipboard or setrbxclipboard end)
-                if ok then setc = sc end
-                if type(setc) == "function" then
-                    pcall(setc, tostring(link))
-                    setStatus("Link copied to clipboard - get your key, then paste it.", "Success")
+                local setc = I.GetClipboardSetter()
+                if setc then
+                    pcall(setc, tostring(K.link))
+                    View.setStatus(K, "Link copied to clipboard - get your key, then paste it.", "Success")
                 else
-                    Kailex:Notify({ Title = title, Text = tostring(link), Duration = 10 })
-                    setStatus("Link is shown in the notifications.")
+                    Kailex:Notify({ Title = K.title, Text = tostring(K.link), Duration = 10 })
+                    View.setStatus(K, "Link is shown in the notifications.")
                 end
             end))
         end
 
-        I.Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
-        card.GroupTransparency = 1
-        I.Tween(card, "Snappy", { GroupTransparency = 0 })
-        I.Tween(ksScale, "Pop", { Scale = 1 })
-        task.defer(function() inputBox:CaptureFocus() end)
-        return card
+        View.enter(K)
+        return K.card
     end
 end
 
@@ -8389,17 +8736,14 @@ Bundle["App/ThemeStore"] = function(ctx)
                 I.Setting.Theme = "Nocturne"
                 I.ApplyTheme(I.Themes.Nocturne)
             end
+            Kailex:SaveCustomThemes()
         end
     end
 
     function Kailex:SaveCustomThemes()
         local store = {}
-        local Builtin = {
-            Nocturne = true, Aurora = true, Sakura = true,
-            Daylight = true, Obsidian = true, Ember = true,
-        }
         for name, t in pairs(I.Themes) do
-            if not Builtin[name] then store[name] = SerializeTheme(t) end
+            if not I.BuiltinThemes[name] then store[name] = SerializeTheme(t) end
         end
         I.SaveManager:Set("__customThemes", store)
     end
@@ -8414,91 +8758,15 @@ Bundle["App/ThemeStore"] = function(ctx)
 end
 
 
--- [[App/SettingsTab]]
-Bundle["App/SettingsTab"] = function(ctx)
+-- [[App/SettingsTab/Sections]]
+Bundle["App/SettingsTab/Sections"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local Setting = I.Setting
 
-    function Kailex:CreateSettingsTab(win)
-        local tab = win:Tab({ Title = "Settings", Icon = "Gear" })
+    local Sections = {}
 
-        tab:AddSection("Appearance")
-        local themeDrop
-        themeDrop = tab:AddDropdown({
-            Name = "Theme",
-            Options = Kailex:GetThemes(),
-            Default = Setting.Theme,
-            Callback = function(name)
-                Setting.Theme = tostring(name)
-                Kailex:SetTheme(Setting.Theme)
-                I.SaveManager:Set("__theme", Setting.Theme)
-            end,
-        })
-        tab:AddSlider({
-            Name = "UI Scale",
-            Min = 0.8, Max = 1.3, Default = tonumber(Setting.UIScale) or 1, Increment = 0.05,
-            Callback = function(v)
-                Setting.UIScale = v
-                I.SaveManager:Set("__scale", v)
-                I.UpdateViewport()
-            end,
-        })
-        tab:AddSlider({
-            Name = "Text Size",
-            Min = 0.85, Max = 1.4, Default = tonumber(Setting.TextScale) or 1.1, Increment = 0.05,
-            Callback = function(v)
-                Setting.TextScale = v
-                I.ApplyTextScale()
-                I.SaveManager:Set("__textScale", v)
-            end,
-        })
-        tab:AddSlider({
-            Name = "Animation Speed",
-            Min = 0.2, Max = 1, Default = tonumber(Setting.MotionScale) or 1, Increment = 0.05,
-            Callback = function(v)
-                Setting.MotionScale = v
-                I.SaveManager:Set("__motion", v)
-            end,
-        })
-
-        tab:AddSection("Behavior")
-        tab:AddToggle({
-            Name = "Interface Sounds",
-            Description = "Click and hover sound effects",
-            Default = Setting.Sounds == true,
-            Callback = function(v)
-                Setting.Sounds = v
-                I.SaveManager:Set("__sounds", v)
-            end,
-        })
-        tab:AddToggle({
-            Name = "Visual Effects",
-            Description = "Ripple effects on click",
-            Default = Setting.Effects ~= false,
-            Callback = function(v)
-                Setting.Effects = v
-                I.SaveManager:Set("__effects", v)
-            end,
-        })
-        tab:AddToggle({
-            Name = "Async Callbacks",
-            Description = "Run callbacks in background threads",
-            Default = Setting.AsyncCallbacks == true,
-            Callback = function(v)
-                Setting.AsyncCallbacks = v
-                I.SaveManager:Set("__async", v)
-            end,
-        })
-        local keybindEl = tab:AddKeybind({
-            Name = "Show / Hide UI",
-            Default = Setting.ToggleUIKey,
-            Callback = function(code)
-                Setting.ToggleUIKey = code
-                I.SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
-            end,
-        })
-
+    function Sections.themeEditor(tab, themeDrop)
         tab:AddSection({ Name = "Theme Editor", Columns = 2 })
         local editing = { colors = table.clone(I.Themes[Setting.Theme] or I.Themes.Nocturne) }
         local pickers = {}
@@ -8540,6 +8808,7 @@ Bundle["App/SettingsTab"] = function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Theme \"" .. n .. "\" saved & applied.", Type = "Success" })
             end,
         })
+
         tab:AddButton({
             Name = "Discard Edits",
             Callback = function()
@@ -8551,6 +8820,7 @@ Bundle["App/SettingsTab"] = function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Edits reverted to \"" .. Setting.Theme .. "\"." })
             end,
         })
+
         tab:AddButton({
             Name = "Export Theme",
             Description = "Copy the current edits as JSON",
@@ -8562,20 +8832,18 @@ Bundle["App/SettingsTab"] = function(ctx)
                 I.CopyToClipboard(I.HttpService:JSONEncode(out))
             end,
         })
+
         tab:AddButton({
             Name = "Import Theme",
             Description = "Load a theme JSON from the clipboard",
             Callback = function()
-                local gc = nil
-                local ok, fn = pcall(function() return getclipboard end)
-                if ok and type(fn) == "function" then gc = fn end
-                if type(gc) ~= "function" then
+                local raw = I.ReadClipboard()
+                if not raw then
                     Kailex:Notify({ Title = "Theme Editor", Text = "Clipboard is not available on this executor.", Type = "Error" })
                     return
                 end
-                local okRead, raw = pcall(gc)
                 local data = nil
-                if okRead and type(raw) == "string" and raw ~= "" then
+                if raw ~= "" then
                     local okDecode, decoded = pcall(I.HttpService.JSONDecode, I.HttpService, raw)
                     if okDecode and type(decoded) == "table" then data = decoded end
                 end
@@ -8597,13 +8865,16 @@ Bundle["App/SettingsTab"] = function(ctx)
                 Kailex:Notify({ Title = "Theme Editor", Text = "Theme imported from clipboard.", Type = "Success" })
             end,
         })
+    end
 
+    function Sections.profiles(tab)
         tab:AddSection("Profiles")
         local nameInput = tab:AddTextInput({ Name = "Profile name", Placeholder = "My config" })
         local profDrop = tab:AddDropdown({ Name = "Profile", Options = I.Configs:List() })
         local function refreshProfiles()
             profDrop:SetOptions(I.Configs:List())
         end
+
         tab:AddButton({
             Name = "Save profile",
             Callback = function()
@@ -8622,6 +8893,7 @@ Bundle["App/SettingsTab"] = function(ctx)
                 end
             end,
         })
+
         tab:AddButton({
             Name = "Load profile",
             Callback = function()
@@ -8634,6 +8906,7 @@ Bundle["App/SettingsTab"] = function(ctx)
                 end
             end,
         })
+
         tab:AddButton({
             Name = "Delete profile",
             Callback = function()
@@ -8649,6 +8922,103 @@ Bundle["App/SettingsTab"] = function(ctx)
                 end)
             end,
         })
+    end
+
+    I.SettingsSections = Sections
+end
+
+
+-- [[App/SettingsTab/Init]]
+Bundle["App/SettingsTab/Init"] = function(ctx)
+    local I = ctx.Internal
+    local Kailex = ctx.Kailex
+    local Setting = I.Setting
+    local Sections = I.SettingsSections
+
+    local SLIDERS = {
+        { Name = "UI Scale", Min = 0.8, Max = 1.3, Inc = 0.05, Fallback = 1,
+            Key = "UIScale", Save = "__scale", After = function() I.UpdateViewport() end },
+        { Name = "Text Size", Min = 0.85, Max = 1.4, Inc = 0.05, Fallback = 1.1,
+            Key = "TextScale", Save = "__textScale", After = function() I.ApplyTextScale() end },
+        { Name = "Animation Speed", Min = 0.2, Max = 1, Inc = 0.05, Fallback = 1,
+            Key = "MotionScale", Save = "__motion" },
+    }
+
+    local TOGGLES = {
+        { Name = "Interface Sounds", Desc = "Click and hover sound effects",
+            Key = "Sounds", Save = "__sounds" },
+        { Name = "Visual Effects", Desc = "Ripple effects on click",
+            Key = "Effects", Save = "__effects" },
+        { Name = "Async Callbacks", Desc = "Run callbacks in background threads",
+            Key = "AsyncCallbacks", Save = "__async" },
+    }
+
+    function Kailex:CreateSettingsTab(win)
+        local tab = win:Tab({ Title = "Settings", Icon = "Gear" })
+
+        tab:AddSection("Appearance")
+        local themeDrop = tab:AddDropdown({
+            Name = "Theme",
+            Options = Kailex:GetThemes(),
+            Default = Setting.Theme,
+            Callback = function(name)
+                Setting.Theme = tostring(name)
+                Kailex:SetTheme(Setting.Theme)
+                I.SaveManager:Set("__theme", Setting.Theme)
+            end,
+        })
+        for _, s in ipairs(SLIDERS) do
+            tab:AddSlider({
+                Name = s.Name, Min = s.Min, Max = s.Max, Increment = s.Inc,
+                Default = tonumber(Setting[s.Key]) or s.Fallback,
+                Callback = function(v)
+                    Setting[s.Key] = v
+                    I.SaveManager:Set(s.Save, v)
+                    if s.After then s.After() end
+                end,
+            })
+        end
+
+        tab:AddSection("Behavior")
+        for _, t in ipairs(TOGGLES) do
+            tab:AddToggle({
+                Name = t.Name, Description = t.Desc,
+                Default = Setting[t.Key] == true,
+                Callback = function(v)
+                    Setting[t.Key] = v
+                    I.SaveManager:Set(t.Save, v)
+                end,
+            })
+        end
+        tab:AddToggle({
+            Name = "Auto-Save",
+            Description = "Write settings to disk automatically",
+            Default = Setting.AutoSave ~= false,
+            Callback = function(v)
+                Setting.AutoSave = v
+                I.SaveManager:Flush()
+            end,
+        })
+        tab:AddSlider({
+            Name = "Sound Volume",
+            Min = 0, Max = 1, Increment = 0.05,
+            Default = tonumber(Kailex.Audio.Master) or 1,
+            Callback = function(v)
+                Kailex.Audio.Master = v
+                I.SaveManager:Set("__volume", v)
+            end,
+        })
+        tab:AddKeybind({
+            Name = "Show / Hide UI",
+            Default = Setting.ToggleUIKey,
+            Callback = function(code)
+                Setting.ToggleUIKey = code
+                I.SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
+            end,
+        })
+
+        Sections.themeEditor(tab, themeDrop)
+        Sections.profiles(tab)
 
         tab:AddSection("About")
         tab:AddParagraph({
@@ -8678,6 +9048,16 @@ Bundle["App/Persist"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
 
+    local function num(key, lo, hi, apply)
+        local v = I.SaveManager:Get(key, nil)
+        if type(v) == "number" then apply(math.clamp(v, lo, hi)) end
+    end
+
+    local function bool(key, apply)
+        local v = I.SaveManager:Get(key, nil)
+        if v ~= nil then apply(v == true) end
+    end
+
     I.ApplyPersisted = function()
         I.LoadCustomThemes()
         local t = I.SaveManager:Get("__theme", nil)
@@ -8685,31 +9065,24 @@ Bundle["App/Persist"] = function(ctx)
             I.Setting.Theme = t
             I.ApplyTheme(I.Themes[t])
         end
-        local snd = I.SaveManager:Get("__sounds", nil)
-        if snd ~= nil then I.Setting.Sounds = (snd == true) end
-        local sc = I.SaveManager:Get("__scale", nil)
-        if type(sc) == "number" then
-            local ns = math.clamp(sc, 0.75, 1.5)
-            if ns ~= I.Setting.UIScale then
-                I.Setting.UIScale = ns
+        bool("__sounds", function(v) I.Setting.Sounds = v end)
+        num("__volume", 0, 1, function(v)
+            if Kailex.Audio then Kailex.Audio.Master = v end
+        end)
+        num("__scale", 0.8, 1.3, function(v)
+            if v ~= I.Setting.UIScale then
+                I.Setting.UIScale = v
                 I.UpdateViewport()
             end
-        end
-        local txs = I.SaveManager:Get("__textScale", nil)
-        if type(txs) == "number" then
-            I.Setting.TextScale = math.clamp(txs, 0.75, 1.6)
+        end)
+        num("__textScale", 0.85, 1.4, function(v)
+            I.Setting.TextScale = v
             I.ApplyTextScale()
-        end
-        local mot = I.SaveManager:Get("__motion", nil)
-        if type(mot) == "number" then
-            I.Setting.MotionScale = math.clamp(mot, 0.1, 1)
-        end
-        local eff = I.SaveManager:Get("__effects", nil)
-        if eff ~= nil then I.Setting.Effects = (eff == true) end
-        local rtl = I.SaveManager:Get("__rtl", nil)
-        if rtl ~= nil then I.Setting.RTL = (rtl == true) end
-        local asc = I.SaveManager:Get("__async", nil)
-        if asc ~= nil then I.Setting.AsyncCallbacks = (asc == true) end
+        end)
+        num("__motion", 0.2, 1, function(v) I.Setting.MotionScale = v end)
+        bool("__effects", function(v) I.Setting.Effects = v end)
+        bool("__rtl", function(v) I.Setting.RTL = v end)
+        bool("__async", function(v) I.Setting.AsyncCallbacks = v end)
         local tk = I.SaveManager:Get("__toggleKey", nil)
         if tk ~= nil then
             I.Setting.ToggleUIKey = I.ParseKey(tk)
@@ -8723,8 +9096,12 @@ Bundle["App/Boot"] = function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
     local UserInputService = I.UserInputService
+    local unloaded = false
 
     function Kailex:Unload()
+        if unloaded then return end
+        unloaded = true
+        pcall(function() I.SaveManager:Flush() end)
         I.ModalManager.CloseAll()
         pcall(function() I.ContextMenu.Hide() end)
         for el in pairs(I.QuickWidgets.Active) do I.QuickWidgets.Destroy(el) end
@@ -8736,15 +9113,6 @@ Bundle["App/Boot"] = function(ctx)
         I.HotElement = nil
         I.ActiveKeybindListener = nil
         I.LibMaid:Destroy()
-        for _, s in ipairs(I.SoundInstances) do
-            pcall(function() s:Destroy() end)
-        end
-        table.clear(I.SoundInstances)
-        for k in pairs(I.SoundPool) do I.SoundPool[k] = nil end
-        for _, r in ipairs(I.RipplePool) do
-            pcall(function() r:Destroy() end)
-        end
-        for i = #I.RipplePool, 1, -1 do table.remove(I.RipplePool, i) end
         pcall(function() I.ScreenGui:Destroy() end)
         local genv = I.Getgenv()
         if genv and genv.kailex == Kailex then genv.kailex = nil end
@@ -8757,36 +9125,12 @@ Bundle["App/Boot"] = function(ctx)
     I.UpdateViewport()
 
     local bootHook = I.AddInputHook(function() return true end, function(input, gp)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            local top = I.ModalManager.Stack[#I.ModalManager.Stack]
-            if not (top and top.Owner == nil) then
-                local m = input.Position
-                if m then
-                    local best, bestZ = nil, -1
-                    for _, w in ipairs(Kailex.Windows) do
-                        if not w._destroyed and w.Root and w.Root.Visible and not w._hidden then
-                            local ap, as = w.Root.AbsolutePosition, w.Root.AbsoluteSize
-                            if m.X >= ap.X and m.X <= ap.X + as.X
-                                and m.Y >= ap.Y and m.Y <= ap.Y + as.Y then
-                                if w.Root.ZIndex > bestZ then
-                                    best, bestZ = w, w.Root.ZIndex
-                                end
-                            end
-                        end
-                    end
-                    if best and best._focus then I.SafeCall(best._focus) end
-                end
-            end
-        end
-
         if input.KeyCode == Enum.KeyCode.Escape then
             if I.ActiveKeybindListener == nil and I.ModalManager.CloseTop() then
                 return
             end
         end
 
-        if gp then return end
         local code = input.KeyCode
         if code == Enum.KeyCode.Unknown then return end
         if I.ActiveKeybindListener ~= nil then return end
@@ -8796,12 +9140,23 @@ Bundle["App/Boot"] = function(ctx)
             and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
                 or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
             local w = Kailex._lastActive
-            if w and not w._destroyed and not w._hidden
-                and not w.Minimized and w._setSearch then
-                w:_setSearch(true)
+            if not (w and not w._destroyed and not w._hidden
+                and not w.Minimized and w._setSearch) then
+                w = nil
+                local best = -1
+                for _, cw in ipairs(Kailex.Windows) do
+                    if not cw._destroyed and not cw._hidden and not cw.Minimized
+                        and cw._setSearch and cw.Root and cw.Root.ZIndex > best then
+                        best = cw.Root.ZIndex
+                        w = cw
+                    end
+                end
             end
+            if w then w:_setSearch(true) end
             return
         end
+
+        if gp then return end
 
         local key = I.Setting.ToggleUIKey
         if key ~= nil and code == key then
@@ -8824,10 +9179,6 @@ Bundle["App/Boot"] = function(ctx)
         end
     end)
     I.LibMaid:Give(function() I.RemoveInputHook(bootHook) end)
-
-    I.LibMaid:Give(I.SaveManager.DataChanged:Connect(function()
-        I.ApplyPersisted()
-    end))
 
     if I.Device.IsTouch then
         Kailex:CreateMobileButton()
@@ -8883,6 +9234,35 @@ local function Run(loader)
     end
     if #missing > 0 then
         warn("[Kailex] missing modules (" .. #missing .. "): " .. table.concat(missing, ", "))
+    end
+    local requiredInternal = {
+        "Maid", "Signal", "Setting", "LibMaid",
+        "Bind", "ApplyTheme", "Themes", "CurrentTheme",
+        "Create", "TS", "Icon", "AddHover", "DropShadow",
+        "Tween", "FX",
+        "SaveManager", "Configs", "SaveReloadRegistry",
+        "PlaySound",
+        "ScreenGui", "LayerWindows", "LayerOverlay", "LayerNotify", "LayerTooltip",
+        "GetScale", "UpdateViewport", "ViewportHooks",
+        "AddInputHook", "RemoveInputHook", "ModalManager", "ParseKey", "KeybindRegistry",
+        "BeginDrag", "MakeDraggable", "DragManager",
+        "ApplyRipple", "IsInputDown", "Once", "SafeCall",
+        "RunCallback", "CopyToClipboard",
+        "Tooltip", "AddTooltip", "QuickWidgets", "ContextMenu", "ModalCard",
+        "Element", "Elements", "CreateRow", "MakeElementClass",
+        "WindowClass", "TabClass", "GridRow",
+        "ApplyPersisted",
+    }
+    local requiredKailex = { "CreateWindow", "Notify", "Confirm", "Unload" }
+    local absent = {}
+    for _, key in ipairs(requiredInternal) do
+        if Internal[key] == nil then absent[#absent + 1] = "I." .. key end
+    end
+    for _, key in ipairs(requiredKailex) do
+        if type(Kailex[key]) ~= "function" then absent[#absent + 1] = "Kailex." .. key end
+    end
+    if #absent > 0 then
+        error("[Kailex] load order broken - missing: " .. table.concat(absent, ", "), 0)
     end
     return Kailex
 end

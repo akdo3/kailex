@@ -2,6 +2,16 @@ return function(ctx)
     local I = ctx.Internal
     local Kailex = ctx.Kailex
 
+    local function num(key, lo, hi, apply)
+        local v = I.SaveManager:Get(key, nil)
+        if type(v) == "number" then apply(math.clamp(v, lo, hi)) end
+    end
+
+    local function bool(key, apply)
+        local v = I.SaveManager:Get(key, nil)
+        if v ~= nil then apply(v == true) end
+    end
+
     I.ApplyPersisted = function()
         I.LoadCustomThemes()
         local t = I.SaveManager:Get("__theme", nil)
@@ -9,31 +19,24 @@ return function(ctx)
             I.Setting.Theme = t
             I.ApplyTheme(I.Themes[t])
         end
-        local snd = I.SaveManager:Get("__sounds", nil)
-        if snd ~= nil then I.Setting.Sounds = (snd == true) end
-        local sc = I.SaveManager:Get("__scale", nil)
-        if type(sc) == "number" then
-            local ns = math.clamp(sc, 0.75, 1.5)
-            if ns ~= I.Setting.UIScale then
-                I.Setting.UIScale = ns
+        bool("__sounds", function(v) I.Setting.Sounds = v end)
+        num("__volume", 0, 1, function(v)
+            if Kailex.Audio then Kailex.Audio.Master = v end
+        end)
+        num("__scale", 0.8, 1.3, function(v)
+            if v ~= I.Setting.UIScale then
+                I.Setting.UIScale = v
                 I.UpdateViewport()
             end
-        end
-        local txs = I.SaveManager:Get("__textScale", nil)
-        if type(txs) == "number" then
-            I.Setting.TextScale = math.clamp(txs, 0.75, 1.6)
+        end)
+        num("__textScale", 0.85, 1.4, function(v)
+            I.Setting.TextScale = v
             I.ApplyTextScale()
-        end
-        local mot = I.SaveManager:Get("__motion", nil)
-        if type(mot) == "number" then
-            I.Setting.MotionScale = math.clamp(mot, 0.1, 1)
-        end
-        local eff = I.SaveManager:Get("__effects", nil)
-        if eff ~= nil then I.Setting.Effects = (eff == true) end
-        local rtl = I.SaveManager:Get("__rtl", nil)
-        if rtl ~= nil then I.Setting.RTL = (rtl == true) end
-        local asc = I.SaveManager:Get("__async", nil)
-        if asc ~= nil then I.Setting.AsyncCallbacks = (asc == true) end
+        end)
+        num("__motion", 0.2, 1, function(v) I.Setting.MotionScale = v end)
+        bool("__effects", function(v) I.Setting.Effects = v end)
+        bool("__rtl", function(v) I.Setting.RTL = v end)
+        bool("__async", function(v) I.Setting.AsyncCallbacks = v end)
         local tk = I.SaveManager:Get("__toggleKey", nil)
         if tk ~= nil then
             I.Setting.ToggleUIKey = I.ParseKey(tk)

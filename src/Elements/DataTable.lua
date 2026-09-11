@@ -1,7 +1,6 @@
 return function(ctx)
     local I = ctx.Internal
     local Elements = I.Elements
-    local Setting = I.Setting
 
     Elements.DataTable = I.MakeElementClass()
 
@@ -23,11 +22,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = 0
-        self._width = 0
+        self:_initRow(title, right, left, 0, 0)
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
@@ -67,13 +62,18 @@ return function(ctx)
                 local col = sortCol
                 local asc = sortAsc
                 list = table.clone(rows)
+                local allNum = true
+                for _, r in ipairs(list) do
+                    if tonumber(r.Cells[col]) == nil then allNum = false break end
+                end
                 table.sort(list, function(a, b)
                     local av, bv = a.Cells[col], b.Cells[col]
-                    local an, bn = tonumber(av), tonumber(bv)
-                    if an and bn then
-                        return asc and an < bn or an > bn
+                    if allNum then
+                        local an, bn = tonumber(av), tonumber(bv)
+                        if asc then return an < bn else return an > bn end
                     end
-                    return asc and tostring(av) < tostring(bv) or tostring(av) > tostring(bv)
+                    av, bv = tostring(av), tostring(bv)
+                    if asc then return av < bv else return av > bv end
                 end)
             end
             for ri, r in ipairs(list) do
@@ -99,7 +99,7 @@ return function(ctx)
                         Font = Enum.Font.Gotham,
                         TextSize = 11,
                         TextColor3 = I.CurrentTheme.SubText,
-                        TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                        TextXAlignment = I.XAlign(),
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         Text = tostring(r.Cells[ci] or ""),
                         Parent = rBtn,
@@ -114,6 +114,7 @@ return function(ctx)
             end
         end
 
+        local headerButtons = {}
         for i, col in ipairs(columns) do
             local w = col.Width or math.floor(300 / math.max(1, #columns))
             local hb = I.Create("TextButton", {
@@ -124,7 +125,7 @@ return function(ctx)
                 Font = Enum.Font.GothamBold,
                 TextSize = 11,
                 TextColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+                TextXAlignment = I.XAlign(),
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 AutoButtonColor = false,
                 Parent = header,
@@ -132,12 +133,16 @@ return function(ctx)
             })
             I.Bind(hb, "TextColor3", "SubText")
             I.AddHover(hb, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
+            headerButtons[i] = hb
             hb.MouseButton1Click:Connect(function()
                 if sortCol == i then
                     sortAsc = not sortAsc
                 else
                     sortCol = i
                     sortAsc = true
+                end
+                for j, b2 in ipairs(headerButtons) do
+                    b2.Text = columns[j].Name .. (sortCol == j and (sortAsc and " ▲" or " ▼") or "")
                 end
                 buildRows()
             end)

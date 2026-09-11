@@ -39,6 +39,35 @@ local function Run(loader)
     if #missing > 0 then
         warn("[Kailex] missing modules (" .. #missing .. "): " .. table.concat(missing, ", "))
     end
+    local requiredInternal = {
+        "Maid", "Signal", "Setting", "LibMaid",
+        "Bind", "ApplyTheme", "Themes", "CurrentTheme",
+        "Create", "TS", "Icon", "AddHover", "DropShadow",
+        "Tween", "FX",
+        "SaveManager", "Configs", "SaveReloadRegistry",
+        "PlaySound",
+        "ScreenGui", "LayerWindows", "LayerOverlay", "LayerNotify", "LayerTooltip",
+        "GetScale", "UpdateViewport", "ViewportHooks",
+        "AddInputHook", "RemoveInputHook", "ModalManager", "ParseKey", "KeybindRegistry",
+        "BeginDrag", "MakeDraggable", "DragManager",
+        "ApplyRipple", "IsInputDown", "Once", "SafeCall",
+        "RunCallback", "CopyToClipboard",
+        "Tooltip", "AddTooltip", "QuickWidgets", "ContextMenu", "ModalCard",
+        "Element", "Elements", "CreateRow", "MakeElementClass",
+        "WindowClass", "TabClass", "GridRow",
+        "ApplyPersisted",
+    }
+    local requiredKailex = { "CreateWindow", "Notify", "Confirm", "Unload" }
+    local absent = {}
+    for _, key in ipairs(requiredInternal) do
+        if Internal[key] == nil then absent[#absent + 1] = "I." .. key end
+    end
+    for _, key in ipairs(requiredKailex) do
+        if type(Kailex[key]) ~= "function" then absent[#absent + 1] = "Kailex." .. key end
+    end
+    if #absent > 0 then
+        error("[Kailex] load order broken - missing: " .. table.concat(absent, ", "), 0)
+    end
     return Kailex
 end
 

@@ -80,5 +80,12 @@ return function(ctx)
         end)
     end
 
+    I.LibMaid:Give(function()
+        for i = #RipplePool, 1, -1 do
+            pcall(function() RipplePool[i]:Destroy() end)
+        end
+        table.clear(RipplePool)
+    end)
+
     I.ApplyRipple = ApplyRipple
 end

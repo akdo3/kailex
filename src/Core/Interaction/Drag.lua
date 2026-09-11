@@ -55,7 +55,11 @@ return function(ctx)
             if finished then return end
             finished = true
             if DragManager.Active == key then DragManager.Active = nil end
-            if useAttr then handle:SetAttribute("Dragging", nil) end
+            if useAttr then
+                task.defer(function()
+                    if handle and handle.Parent then handle:SetAttribute("Dragging", nil) end
+                end)
+            end
             maid:Destroy()
             if opts.OnEnd then I.SafeCall(opts.OnEnd, moved) end
         end
@@ -159,12 +163,10 @@ return function(ctx)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
             task.defer(function()
-                local anyDown = false
                 local ok, btns = pcall(UserInputService.GetMouseButtonsPressed, UserInputService)
-                if ok and type(btns) == "table" then
-                    anyDown = #btns > 0
+                if ok and type(btns) == "table" and #btns == 0 then
+                    DragManager.Active = nil
                 end
-                if not anyDown then DragManager.Active = nil end
             end)
         end
     end))

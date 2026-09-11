@@ -8,7 +8,7 @@ return function(ctx)
     function Elements.ProgressBar.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.ProgressBar)
-        local barW = opts.BarWidth or 150
+        local barW = 150
         local showText = opts.ShowText ~= false
         local rightW = barW + (showText and 36 or 0)
         local maxValue = tonumber(opts.Max) or 1
@@ -18,11 +18,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or nil
 
         local track = I.Create("Frame", {
@@ -58,32 +54,13 @@ return function(ctx)
             I.Bind(textLabel, "TextColor3", "SubText")
         end
 
-        local indeterminate = false
-        local indTween
-
-        local function setIndeterminate(on)
-            indeterminate = on
-            if indTween then pcall(function() indTween:Cancel() end) indTween = nil end
-            if on then
-                fill.Size = UDim2.fromScale(0.35, 1)
-                indTween = I.Tween(fill, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Size = UDim2.fromScale(0.05, 1) })
-                if textLabel then textLabel.Text = "..." end
-            else
-                fill.Position = UDim2.fromScale(0, 0)
-            end
-        end
+        local _value = 0
 
         function self:Set(val)
             if self._destroyed then return end
-            if val == true or val == "indeterminate" then
-                setIndeterminate(true)
-                return
-            elseif val == false then
-                setIndeterminate(false)
-                return
-            end
-            setIndeterminate(false)
-            local n = tonumber(val) or 0
+            local n = tonumber(val)
+            if n == nil then return end
+            _value = math.clamp(n, 0, maxValue)
             local frac = math.clamp(n / maxValue, 0, 1)
             I.Tween(fill, "Normal", { Size = UDim2.fromScale(frac, 1) })
             if textLabel then
@@ -95,12 +72,10 @@ return function(ctx)
             end
             if self.Callback then I.RunCallback(self.Callback, self.Title, n) end
         end
-        function self:Get() return fill.Size.X.Scale * maxValue end
+        function self:Get() return _value end
         function self:CopyValue() return tostring(math.floor(self:Get() + 0.5)) end
 
-        if opts.Indeterminate then
-            setIndeterminate(true)
-        elseif opts.Value ~= nil then
+        if opts.Value ~= nil then
             self:Set(opts.Value)
         end
 

@@ -31,7 +31,7 @@ return function(ctx)
             Font = Enum.Font.GothamBold,
             TextSize = 13,
             TextColor3 = I.CurrentTheme.Text,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = opts.Title or opts.Name or "",
             Parent = row,
@@ -45,7 +45,7 @@ return function(ctx)
             TextSize = 12,
             TextColor3 = I.CurrentTheme.SubText,
             TextWrapped = true,
-            TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+            TextXAlignment = I.XAlign(),
             Text = tostring(opts.Text or ""),
             Parent = row,
         })

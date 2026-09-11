@@ -19,6 +19,8 @@ return function(ctx)
     local LayerOverlay = I.Create("Frame", { Name = "Overlay",  BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
     local LayerNotify  = I.Create("Frame", { Name = "Notify",   BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
     local LayerTooltip = I.Create("Frame", { Name = "Tooltip",  BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
+    local LayerPersistent = I.Create("Frame", { Name = "Persistent", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = ScreenGui })
+    I.LayerPersistent = LayerPersistent
 
     local RootScale = I.Create("UIScale", { Parent = ScreenGui })
     local Camera = Workspace.CurrentCamera

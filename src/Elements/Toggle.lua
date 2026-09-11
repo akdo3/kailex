@@ -7,6 +7,7 @@ return function(ctx)
 
     function Elements.Toggle.new(tab, opts)
         opts = opts or {}
+        if opts.Default == nil then opts.Default = opts.defaultVal end
         local self = setmetatable({}, Elements.Toggle)
         local saveKey = tab:GetSaveKey(opts)
         local hadSaved = I.SaveManager:Get(saveKey, nil) ~= nil
@@ -22,11 +23,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self._extraH = switchH
 
         self.Callback = opts.Callback or function() end
@@ -39,7 +36,7 @@ return function(ctx)
             BorderSizePixel = 0,
             LayoutOrder = 20,
             Parent = right,
-            Children = { I.Create("UICorner", { CornerRadius = opts.Style and UDim.new(0, 6) or UDim.new(1, 0) }) },
+            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
         })
         I.Bind(switch, "BackgroundColor3", "SurfaceLight")
         local stroke = I.Create("UIStroke", { Thickness = 1, Transparency = 0.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = switch })
@@ -94,7 +91,6 @@ return function(ctx)
             ZIndex = 0,
             Parent = row,
         })
-        I.AddPress(overlay, row)
         self.Maid:Give(overlay.MouseButton1Click:Connect(function()
             if self._disabled then return end
             if overlay:GetAttribute("Dragging") then return end
@@ -139,20 +135,14 @@ return function(ctx)
 
         function self:Reset()
             if self._destroyed then return end
-            local d = opts.Default
-            if d == nil then d = opts.defaultVal end
-            self:Set(d == true)
+            self:Set(opts.Default == true)
         end
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "boolean" then self:Set(v) end
         end)
 
-        if opts.Default ~= nil or opts.defaultVal ~= nil or hadSaved then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, self.State) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or hadSaved, self.State)
 
         self:RecalcWidth()
         return self

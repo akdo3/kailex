@@ -9,17 +9,12 @@ return function(ctx)
         opts = opts or {}
         local self = setmetatable({}, Elements.Stepper)
         local saveKey = tab:GetSaveKey(opts)
-        local min = tonumber(opts.Min) or 0
-        local max = tonumber(opts.Max) or 10
-        if max <= min then max = min + 1 end
-        local step = tonumber(opts.Step) or 1
-        if step <= 0 then step = 1 end
+        local min, max, step, decimals = I.NumSpec(opts, 0, 10, 1)
         local default = tonumber(opts.Default or min) or min
         local value = I.SaveManager:Get(saveKey, default)
         if type(value) ~= "number" then value = default end
         value = math.clamp(value, min, max)
 
-        local decimals = step >= 1 and 0 or math.clamp(math.ceil(-math.log10(step)), 1, 3)
         local fmt = opts.Format
         if type(fmt) ~= "function" then
             local prefix = opts.Prefix or ""
@@ -29,43 +24,37 @@ return function(ctx)
             end
         end
 
-        local rightW = 118
+        local labelW = 48
+        do
+            local w = 0
+            for _, v in ipairs({ min, max, default, (min + max) / 2 }) do
+                local b = I.TextService:GetTextSize(fmt(v), I.TS(12), Enum.Font.GothamBold, Vector2.new(400, 20))
+                if b.X > w then w = b.X end
+            end
+            labelW = math.clamp(math.floor(w + 0.5) + 10, 48, 170)
+        end
+        local rightW = 68 + labelW
         local row, title, right, left = I.CreateRow(tab.Content, {
             Name = opts.Name or "Stepper", RightWidth = rightW, Width = opts.Width,
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
         self.Callback = opts.Callback or function() end
 
         local function mkStepBtn(text, order)
-            local b = I.Create("TextButton", {
+            return I.MkButton(right, {
                 Size = UDim2.fromOffset(26, 26),
-                BackgroundColor3 = I.CurrentTheme.Element,
-                BorderSizePixel = 0,
                 Text = text,
                 Font = Enum.Font.GothamBold,
                 TextSize = 14,
-                TextColor3 = I.CurrentTheme.Text,
-                AutoButtonColor = false,
                 LayoutOrder = order,
-                Parent = right,
-                Children = { I.Corner(8) },
             })
-            I.Bind(b, "BackgroundColor3", "Element")
-            I.Bind(b, "TextColor3", "Text")
-            I.AddHover(b)
-            I.AddPress(b)
-            return b
         end
 
         local minus = mkStepBtn("-", 1)
         local valLabel = I.Create("TextLabel", {
-            Size = UDim2.fromOffset(56, 26),
+            Size = UDim2.fromOffset(labelW, 26),
             BackgroundTransparency = 1,
             Font = Enum.Font.GothamBold,
             TextSize = 12,
@@ -140,25 +129,13 @@ return function(ctx)
             self:Set(value + dir * step)
         end
 
-        if not I.Device.IsTouch then
-            row.MouseEnter:Connect(function() I.HotElement = self end)
-            row.MouseLeave:Connect(function()
-                if I.HotElement == self then I.HotElement = nil end
-            end)
-            self.Maid:Give(function()
-                if I.HotElement == self then I.HotElement = nil end
-            end)
-        end
+        I.TrackHot(self, row)
 
         self:_bindSaveReload(saveKey, function(v)
             if type(v) == "number" then self:Set(v, true) end
         end)
 
-        if opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil then
-            task.defer(function()
-                if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
-            end)
-        end
+        self:_initialCallback(opts.Default ~= nil or I.SaveManager:Get(saveKey, nil) ~= nil, value)
 
         self:RecalcWidth()
         return self

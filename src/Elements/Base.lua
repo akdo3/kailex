@@ -1,6 +1,7 @@
 return function(ctx)
     local I = ctx.Internal
     local Setting = I.Setting
+    local UserInputService = I.UserInputService
 
     local Elements = {}
     I.Elements = Elements
@@ -8,6 +9,11 @@ return function(ctx)
     local Element = {}
     Element.__index = Element
     I.Element = Element
+
+    local function removeFrom(list, item)
+        local idx = table.find(list, item)
+        if idx then table.remove(list, idx) end
+    end
 
     function Element:_init(row, opts, tab)
         opts = opts or {}
@@ -25,6 +31,8 @@ return function(ctx)
         self._disabled = false
         self._tooltip = { Text = opts.Tooltip }
         if opts.Tooltip then I.AddTooltip(row, self._tooltip) end
+        local desc = row:FindFirstChild("__desc", true)
+        if desc then self._descLabel = desc end
         if tab then
             table.insert(tab.Elements, self)
             if tab.CurrentSection then
@@ -46,9 +54,14 @@ return function(ctx)
         if not list then list = {} reg[saveKey] = list end
         table.insert(list, fn)
         self.Maid:Give(function()
-            for i, f in ipairs(list) do
-                if f == fn then table.remove(list, i) break end
-            end
+            removeFrom(list, fn)
+        end)
+    end
+
+    function Element:_initialCallback(cond, value)
+        if not cond then return end
+        task.defer(function()
+            if not self._destroyed then I.RunCallback(self.Callback, self.Title, value) end
         end)
     end
 
@@ -65,7 +78,7 @@ return function(ctx)
             Children = {
                 I.Create("UIListLayout", {
                     FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
+                    HorizontalAlignment = I.HAlign(),
                     VerticalAlignment = Enum.VerticalAlignment.Center,
                     Padding = UDim.new(0, 8),
                     SortOrder = Enum.SortOrder.LayoutOrder,
@@ -87,6 +100,11 @@ return function(ctx)
     function Element:SetTooltip(text)
         if self._destroyed then return end
         self._tooltip.Text = tostring(text or "")
+    end
+
+    function Element:SetDescription(text)
+        if self._destroyed then return end
+        if self._descLabel then self._descLabel.Text = tostring(text or "") end
     end
 
     function Element:Visible(state)
@@ -128,12 +146,19 @@ return function(ctx)
 
     function Element:AddExtra(className, opts)
         if self._destroyed then return nil end
+        if not self.Tab then return nil end
         local elClass = Elements[className]
         if not elClass then return nil end
         local rc = self:EnsureRight()
         if not rc then return nil end
         opts = opts or {}
+        if self.Tab and self.Tab._pendingKeyRelease then
+            self.Tab._pendingKeyRelease = nil
+        end
         local el = elClass.new(self.Tab, opts)
+        if self.Tab and self.Tab._consumeKeyRelease then
+            self.Tab:_consumeKeyRelease(el)
+        end
 
         local row = el.Row
         local pad = row:FindFirstChildOfClass("UIPadding")
@@ -158,13 +183,9 @@ return function(ctx)
         row.LayoutOrder = (#self._extras + 1) + 10
         row.Size = UDim2.new(0, el._width or 0, 0, el._extraH or I.ROW_H)
 
-        for i, v in ipairs(self.Tab.Elements) do
-            if v == el then table.remove(self.Tab.Elements, i) break end
-        end
+        removeFrom(self.Tab.Elements, el)
         if el.Section then
-            for i, v in ipairs(el.Section.Elements) do
-                if v == el then table.remove(el.Section.Elements, i) break end
-            end
+            removeFrom(el.Section.Elements, el)
             el.Section = nil
         end
 
@@ -174,9 +195,7 @@ return function(ctx)
 
         el.Maid:Give(function()
             if self._destroyed then return end
-            for i, v in ipairs(self._extras) do
-                if v == el then table.remove(self._extras, i) break end
-            end
+            removeFrom(self._extras, el)
             self._extraW = math.max(0, (self._extraW or 0) - (el._width or 0))
             self:RecalcWidth()
         end)
@@ -216,39 +235,13 @@ return function(ctx)
     end
 
     local function HookContextMenu(el, overlay)
-        if I.Device.IsTouch then
-            local token = nil
-            overlay.InputBegan:Connect(function(input)
-                if input.UserInputType ~= Enum.UserInputType.Touch then return end
-                local myToken = {}
-                token = myToken
-                task.delay(0.55, function()
-                    if token ~= myToken or el._destroyed then return end
-                    token = nil
-                    local items = el:_contextItems()
-                    if #items == 0 then return end
-                    overlay:SetAttribute("Dragging", true)
-                    local m = I.UserInputService:GetMouseLocation()
-                    I.ContextMenu.Show(items, m.X, m.Y)
-                end)
-            end)
-            overlay.InputEnded:Connect(function()
-                token = nil
-                if overlay:GetAttribute("Dragging") then
-                    task.defer(function()
-                        overlay:SetAttribute("Dragging", nil)
-                    end)
-                end
-            end)
-        else
-            overlay.MouseButton2Click:Connect(function()
-                if el._destroyed then return end
-                local items = el:_contextItems()
-                if #items == 0 then return end
-                local m = I.UserInputService:GetMouseLocation()
-                I.ContextMenu.Show(items, m.X, m.Y)
-            end)
+        local function open()
+            local items = el:_contextItems()
+            if #items == 0 then return false end
+            local m = UserInputService:GetMouseLocation()
+            I.ContextMenu.Show(items, m.X, m.Y)
         end
+        I.OnLongPress(overlay, function() return not el._destroyed end, open)
     end
     I.HookContextMenu = HookContextMenu
 
@@ -256,26 +249,13 @@ return function(ctx)
         if self._destroyed then return end
         self._destroyed = true
         if I.HotElement == self then I.HotElement = nil end
-        local tab = self.Tab
-        if tab then
-            for i, el in ipairs(tab.Elements) do
-                if el == self then table.remove(tab.Elements, i) break end
-            end
-            if self.IsSection then
-                for i, s in ipairs(tab.Sections) do
-                    if s == self then table.remove(tab.Sections, i) break end
-                end
-                if tab.CurrentSection == self then tab.CurrentSection = nil end
-                for _, el in ipairs(self.Elements) do
-                    if not el._destroyed then el.Section = nil end
+            local tab = self.Tab
+            if tab then
+                removeFrom(tab.Elements, self)
+                if self.Section then
+                    removeFrom(self.Section.Elements, self)
                 end
             end
-            if self.Section then
-                for i, el in ipairs(self.Section.Elements) do
-                    if el == self then table.remove(self.Section.Elements, i) break end
-                end
-            end
-        end
         for _, ex in ipairs(self._extras) do
             if not ex._destroyed then ex:Destroy() end
         end
@@ -285,105 +265,13 @@ return function(ctx)
         self.Row, self.Maid, self.Tab, self.Section = nil, nil, nil, nil
     end
 
-    local function CreateRow(parent, opts)
-        opts = opts or {}
-        local desc = opts.Description and tostring(opts.Description) or nil
-        local height = opts.Height or (desc and (I.ROW_H + 16) or I.ROW_H)
-        local rowProps = {
-            Size = UDim2.new((opts.Width or 1), -3, 0, height),
-            BackgroundColor3 = I.CurrentTheme.Element,
-            BackgroundTransparency = 0.25,
-            BorderSizePixel = 0,
-            Parent = parent,
-            Children = { I.Corner(8), I.StrokeBind(1, "Stroke", 0.65) },
-        }
-        if type(opts.Order) == "number" then
-            rowProps.LayoutOrder = opts.Order
-        end
-        local row = I.Create("Frame", rowProps)
-        I.Bind(row, "BackgroundColor3", "Element")
-        I.Create("UIPadding", {
-            PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-            PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2),
-            Parent = row,
-        })
-
-        local rightW = opts.RightWidth or 0
-        local leftFrame = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, -rightW, 1, 0),
-            Parent = row,
-        })
-        local title, descLabel
-        if desc then
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 0, 15),
-                Position = UDim2.new(0, 0, 0, 2),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
-            descLabel = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 0, 13),
-                Position = UDim2.new(0, 0, 0, 17),
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = I.CurrentTheme.SubText,
-                TextTransparency = 0.35,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = desc,
-                Parent = leftFrame,
-            })
-            I.Bind(descLabel, "TextColor3", "SubText")
-        else
-            title = I.Create("TextLabel", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -4, 1, 0),
-                Position = UDim2.fromOffset(0, 0),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = I.CurrentTheme.Text,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Text = opts.Name or "",
-                Parent = leftFrame,
-            })
-        end
-        I.Bind(title, "TextColor3", "Text")
-
-        local right
-        if rightW > 0 or opts.ForceRight then
-            right = I.Create("Frame", {
-                BackgroundTransparency = 1,
-                AnchorPoint = Vector2.new(Setting.RTL and 0 or 1, 0.5),
-                Position = Setting.RTL and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
-                Size = UDim2.new(0, rightW, 1, -4),
-                Parent = row,
-                Children = {
-                    I.Create("UIListLayout", {
-                        FillDirection = Enum.FillDirection.Horizontal,
-                        HorizontalAlignment = Setting.RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
-                        VerticalAlignment = Enum.VerticalAlignment.Center,
-                        Padding = UDim.new(0, 8),
-                        SortOrder = Enum.SortOrder.LayoutOrder,
-                    }),
-                },
-            })
-        end
-
-        if not opts.NoHover then
-            I.AddHover(row, { StrokeTransparency = 0.65 })
-        end
-        return row, title, right, leftFrame, descLabel
+    function Element:_initRow(title, right, left, baseW, width)
+        self.TitleLabel = title
+        self.LeftFrame = left
+        self.RightContainer = right
+        self._baseRightW = baseW
+        self._width = width or baseW
     end
-    I.CreateRow = CreateRow
 
     local function MakeElementClass()
         local class = {}

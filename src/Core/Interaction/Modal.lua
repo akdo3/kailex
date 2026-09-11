@@ -33,6 +33,7 @@ return function(ctx)
     function ModalManager.CloseTop()
         local top = ModalManager.Stack[#ModalManager.Stack]
         if not top then return false end
+        table.remove(ModalManager.Stack, #ModalManager.Stack)
         pcall(top.Close)
         return true
     end

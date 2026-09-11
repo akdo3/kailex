@@ -6,6 +6,22 @@ return function(ctx)
 
     Elements.Keybind = I.MakeElementClass()
 
+    local dispatcher = nil
+    local function ensureDispatcher()
+        if dispatcher then return end
+        dispatcher = I.AddInputHook(function() return #I.KeybindRegistry > 0 end, function(input, gp)
+            local regs = table.clone(I.KeybindRegistry)
+            for i = 1, #regs do
+                local el = regs[i] and regs[i].el
+                if el and not el._destroyed and el._handleInput then
+                    local ok, err = pcall(el._handleInput, input, gp)
+                    if not ok then warn("[Kailex] " .. tostring(err)) end
+                end
+            end
+        end)
+        I.LibMaid:Give(function() I.RemoveInputHook(dispatcher) end)
+    end
+
     function Elements.Keybind.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Keybind)
@@ -16,11 +32,7 @@ return function(ctx)
             Description = opts.Description,
         })
         self:_init(row, opts, tab)
-        self.TitleLabel = title
-        self.LeftFrame = left
-        self.RightContainer = right
-        self._baseRightW = rightW
-        self._width = rightW
+        self:_initRow(title, right, left, rightW)
 
         self.Callback = opts.Callback or function() end
 
@@ -51,7 +63,7 @@ return function(ctx)
         end)
 
         local bindBtn = I.Create("TextButton", {
-            Size = UDim2.new(1, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, I.Device.IsTouch and 30 or 26),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
             Text = "None",
@@ -105,6 +117,7 @@ return function(ctx)
             if self._destroyed then return end
             if listening then
                 if input.KeyCode ~= Enum.KeyCode.Unknown then
+                    if gp then return end
                     listenToken += 1
                     setListening(false)
                     if input.KeyCode == Enum.KeyCode.Escape then
@@ -155,9 +168,9 @@ return function(ctx)
             end
         end
 
-        local hook = I.AddInputHook(function() return not self._destroyed end, self._handleInput)
+        ensureDispatcher()
+
         self.Maid:Give(function()
-            I.RemoveInputHook(hook)
             if listening then
                 listening = false
                 if I.ActiveKeybindListener == self then I.ActiveKeybindListener = nil end
@@ -225,30 +238,9 @@ return function(ctx)
             I.ContextMenu.Show(items, m.X, m.Y)
         end
 
-        if I.Device.IsTouch then
-            local token = nil
-            bindBtn.InputBegan:Connect(function(input)
-                if input.UserInputType ~= Enum.UserInputType.Touch then return end
-                local myToken = {}
-                token = myToken
-                task.delay(0.55, function()
-                    if token ~= myToken or listening or self._destroyed then return end
-                    token = nil
-                    bindBtn:SetAttribute("Dragging", true)
-                    showMenu()
-                end)
-            end)
-            bindBtn.InputEnded:Connect(function()
-                token = nil
-                if bindBtn:GetAttribute("Dragging") then
-                    task.defer(function()
-                        bindBtn:SetAttribute("Dragging", nil)
-                    end)
-                end
-            end)
-        else
-            bindBtn.MouseButton2Click:Connect(showMenu)
-        end
+        I.OnLongPress(bindBtn, function()
+            return not listening and not self._destroyed
+        end, showMenu)
 
         function self:Set(v, silent)
             local b = I.ToBinding(v)
@@ -279,10 +271,12 @@ return function(ctx)
         end
 
         self:_bindSaveReload(saveKey, function(v)
-            if v ~= "__none" then
-                local b = I.ToBinding(v)
-                if b then setBinding(b) end
+            if v == "__none" then
+                setBinding(nil)
+                return
             end
+            local b = I.ToBinding(v)
+            if b then setBinding(b) end
         end)
         self.Maid:Give(Kailex.ThemeChanged:Connect(refresh))
         refresh()

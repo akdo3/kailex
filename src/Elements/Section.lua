@@ -7,11 +7,7 @@ return function(ctx)
     function Elements.Section.new(tab, opts)
         opts = opts or {}
         local self = setmetatable({}, Elements.Section)
-        local row = I.Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new((opts.Width or 1), -3, 0, 26),
-            Parent = tab.Content,
-        })
+        local row = I.BareRow(tab.Content, opts.Width, 26)
 
         local hit = I.Create("TextButton", {
             BackgroundTransparency = 1,
@@ -73,12 +69,7 @@ return function(ctx)
         return self
     end
 
-    function Elements.Section:SetCollapsed(collapsed)
-        if self.Collapsed == collapsed then return end
-        self.Collapsed = collapsed
-        if self.Chevron then
-            I.Tween(self.Chevron, "PopSoft", { Rotation = collapsed and -90 or 0 })
-        end
+    function Elements.Section:_applyVisibility(collapsed)
         for _, el in ipairs(self.Elements) do
             if not el._destroyed then
                 if collapsed then
@@ -88,5 +79,15 @@ return function(ctx)
                 end
             end
         end
+    end
+
+    function Elements.Section:SetCollapsed(collapsed)
+        if self.Collapsed == collapsed then return end
+        self.Collapsed = collapsed
+        if self.Chevron then
+            I.Tween(self.Chevron, "PopSoft", { Rotation = collapsed and -90 or 0 })
+        end
+        if self._filterExpanded then return end
+        self:_applyVisibility(collapsed)
     end
 end

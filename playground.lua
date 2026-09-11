@@ -1,569 +1,1262 @@
-local Kailex = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/USER/kailex/main/dist/Kailex.lua"
-))()
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-Kailex:Notify({
-    Title = "Welcome!",
-    Text = "Click, drag, and interact with everything. Right-click any element for options.",
-    Type = "Success",
-    Duration = 6,
-})
+local Kailex
+do
+    local node = ReplicatedStorage:FindFirstChild("Kailex")
+    if not node then
+        local parent = script.Parent
+        if parent and parent:IsA("ModuleScript") and parent.Name == "Kailex" then
+            node = parent
+        end
+    end
+    assert(node, "KailexUI: Kailex module not found in ReplicatedStorage")
+    Kailex = require(node)
+end
+
+local log = {}
+local logTable, valuesTable, notifyTable
+local trackers = {}
+
+local function fmt(v)
+    if v == nil then return "nil" end
+    if type(v) == "table" then
+        local parts = {}
+        for _, x in ipairs(v) do parts[#parts + 1] = tostring(x) end
+        return "{ " .. table.concat(parts, ", ") .. " }"
+    end
+    return tostring(v)
+end
+
+local function packArgs(...)
+    local n = select("#", ...)
+    if n == 0 then return "" end
+    local parts = {}
+    for i = 1, n do parts[i] = fmt(select(i, ...)) end
+    return table.concat(parts, " | ")
+end
+
+local function logEvent(source, event, payload)
+    table.insert(log, 1, { Cells = { os.date("%X"), source, event, payload or "" } })
+    if #log > 60 then table.remove(log) end
+    if logTable then logTable:SetRows(log, true) end
+end
+
+local function track(name, getter, note)
+    trackers[#trackers + 1] = { Name = name, Get = getter, Note = note or "" }
+end
+
+local function refreshValues()
+    if not valuesTable then return end
+    local rows = {}
+    for _, t in ipairs(trackers) do
+        local ok, v = pcall(t.Get)
+        rows[#rows + 1] = { Cells = { t.Name, ok and fmt(v) or "error", t.Note } }
+    end
+    valuesTable:SetRows(rows, true)
+end
+
+local function CB(name)
+    return function(...)
+        logEvent(name, "Callback", packArgs(...))
+        refreshValues()
+    end
+end
+
+local function CBN(name, fn)
+    return function(...)
+        logEvent(name, "Callback", packArgs(...))
+        refreshValues()
+        if fn then fn(...) end
+    end
+end
 
 local win = Kailex:CreateWindow({
     Title = "Kailex Playground",
-    SubTitle = "Interactive documentation",
-    Size = Vector2.new(680, 480),
+    SubTitle = "Live demo of every feature - " .. Kailex.Version,
+    MinSize = Vector2.new(440, 320),
+    Icon = "Gear",
 })
 
-local output = ""
+win.MinimizedChanged:Connect(function(min)
+    logEvent("Window", "MinimizedChanged", tostring(min))
+end)
 
-local function show(text)
-    output = text
-    Kailex:Notify({ Title = "Result", Text = text, Type = "Info", Duration = 3 })
-end
+local tEl = win:Tab({ Title = "Elements", Icon = "Check" })
 
-local T1 = win:Tab({ Title = "Basics" })
-local T2 = win:Tab({ Title = "Buttons" })
-local T3 = win:Tab({ Title = "Sliders" })
-local T4 = win:Tab({ Title = "Selectors" })
-local T5 = win:Tab({ Title = "Inputs" })
-local T6 = win:Tab({ Title = "Display" })
-local T7 = win:Tab({ Title = "Dialogs" })
-local T8 = win:Tab({ Title = "Layout" })
-local T9 = win:Tab({ Title = "System" })
+local btnPlain
+local togPlain, togPin
+local labDemo, paraDemo
+local sliderFull, sliderDecimal, stepFmt, segMain, pcolMain
+local dropSingle, dropMulti, dropSearch, dropVirtual
+local kbPress, kbToggle, kbHold
+local textValid, textPlain, vecInput
+local pbarMain, dtabDemo
 
-T1:AddParagraph({
-    Title = "How this works",
-    Text = "Every element here is real and interactive. Try them! " ..
-        "Hover elements for tooltips. Right-click for context menu. " ..
-        "Drag the title bar to move. Double-click it to maximize. " ..
-        "Drag the corner to resize. Press RightShift to hide/show.",
+tEl:AddSection("Button")
+
+btnPlain = tEl:AddButton({
+    Name = "Plain button",
+    Description = "Callback + Ripple + click sound",
+    Tooltip = "The simplest element in the library",
+    Search = "basic click simple",
+    Callback = CB("Button/plain"),
 })
 
-T1:AddSection({ Name = "Sections" })
-
-T1:AddParagraph({
-    Title = "This is a Section",
-    Text = "Sections group elements. Click the header to collapse/expand. " ..
-        "Set Columns = 2 to place elements side by side.",
+tEl:AddButton({
+    Name = "Vector icon",
+    Description = "Icon = built-in icon name",
+    Icon = "Search",
+    Callback = CBN("Button/vector", function()
+        Kailex:Notify({ Title = "Button", Text = "Icon button clicked", Type = "info", Duration = 2 })
+    end),
 })
 
-T1:AddDivider({ Text = "Try it" })
+tEl:AddButton({
+    Name = "Asset icon (string)",
+    Description = "Icon = rbxasset://...",
+    Icon = "rbxasset://textures/face.png",
+    Callback = CB("Button/asset-string"),
+})
 
-T1:AddButton({
-    Name = "Show Notification",
-    Description = "Demonstrates Kailex:Notify()",
+tEl:AddButton({
+    Name = "Asset icon (number)",
+    Description = "Icon = numeric asset id",
+    Icon = 4466585890,
+    Callback = CB("Button/asset-id"),
+})
+
+tEl:AddButton({
+    Name = "Button with Confirm",
+    Description = "Call Kailex:Confirm inside the Callback",
+    Callback = CBN("Button/Confirm", function()
+        Kailex:Confirm({ Title = "Run this action?", Text = "Are you sure?" }, function()
+            Kailex:Notify({ Text = "Executed after confirmation", Type = "success", Duration = 2 })
+        end)
+    end),
+})
+
+tEl:AddButton({
+    Name = "SetCallback on the plain button",
     Callback = function()
-        Kailex:Notify({
-            Title = "Hello!",
-            Text = "This notification was triggered by a button click.",
-            Type = "Success",
-            Duration = 4,
-            Actions = {
-                { Text = "Again", Callback = function()
-                    Kailex:Notify({ Title = "Again!", Text = "You clicked an action button.", Type = "Info" })
-                end },
-            },
-        })
+        btnPlain:SetCallback(CBN("Button/plain (modified)", function()
+            Kailex:Notify({ Text = "Replaced callback", Duration = 2 })
+        end))
     end,
 })
 
-T1:AddToggle({
-    Name = "Enable Sounds",
-    Description = "Turn on UI sounds, then click things",
-    Default = false,
+tEl:AddSection("Toggle")
+
+togPlain = tEl:AddToggle({
+    Name = "Plain toggle",
+    Description = "Default=true + Changed signal",
+    Default = true,
+    Tooltip = "Click to toggle",
+    Callback = CB("Toggle/plain"),
+})
+togPlain.Changed:Connect(function(v)
+    logEvent("Toggle/plain", "Changed", tostring(v))
+    refreshValues()
+end)
+
+togPin = tEl:AddToggle({
+    Name = "Pinned toggle (Pin)",
+    Description = "Pin=true draggable floating widget - Style=true square corners",
     Pin = true,
-    Callback = function(v)
-        Kailex.Setting.Sounds = v
-        show("Sounds: " .. tostring(v))
-    end,
+    Callback = CB("Toggle/Pin"),
 })
 
-T2:AddSection({ Name = "Buttons" })
+tEl:AddSection("Text and display")
 
-T2:AddButton({
-    Name = "Simple Button",
-    Description = "Callback fires on click",
-    Callback = function() show("Button clicked!") end,
+labDemo = tEl:AddLabel("Label - a light text row")
+
+paraDemo = tEl:AddParagraph({
+    Title = "Paragraph",
+    Text = "A text card with a title and a wrapping body. Update the text with Set.",
+    Tooltip = "An explanatory paragraph",
 })
 
-T2:AddButton({
-    Name = "Confirm Button",
-    Description = "Shows dialog before callback",
-    Confirm = "This action requires confirmation. Continue?",
-    Callback = function() show("Confirmed and executed!") end,
-})
-
-T2:AddButton({
-    Name = "Button with Icon",
-    Description = "Icon asset id option",
-    Icon = "rbxassetid://6031082533",
-    Callback = function() show("Icon button clicked!") end,
-})
-
-T2:AddSection({ Name = "Toggle + Button Combo" })
-
-local comboBtn = T2:AddButton({
-    Name = "Feature Button",
-    Description = "Has an attached toggle on the right",
+tEl:AddButton({
+    Name = "Label:Set + Paragraph:Set",
     Callback = function()
-        show("Feature is " .. (comboBtn:IsEnabled() and "ON" or "OFF"))
-    end,
-})
-comboBtn:AddToggle({ Default = true })
-
-T2:AddDivider()
-
-T2:AddParagraph({
-    Title = "Busy State",
-    Text = "Click this button to see the loading spinner, then click again to stop.",
-})
-
-local busyBtn
-busyBtn = T2:AddButton({
-    Name = "Toggle Busy State",
-    Callback = function()
-        busyBtn:SetBusy(not busyBtn._busy)
+        labDemo:Set("Updated text " .. os.date("%X"))
+        paraDemo:Set("Updated at " .. os.date("%X"))
     end,
 })
 
-T3:AddSection({ Name = "Sliders" })
+tEl:AddDivider({ Text = "Divider with text" })
 
-local sliderLabel = T3:AddLabel({ Text = "Value: 50" })
+tEl:AddSection({ Name = "Section grid (Columns=2)", Columns = 2 })
 
-T3:AddSlider({
-    Name = "Integer Slider",
-    Description = "Min=0, Max=100, Default=50",
-    Min = 0,
-    Max = 100,
-    Default = 50,
-    Callback = function(v)
-        sliderLabel:Set("Value: " .. math.floor(v))
-    end,
+tEl:AddSlider({
+    Name = "Slider",
+    Min = 0, Max = 100, Default = 50,
+    Suffix = "%",
+    Callback = CB("Slider/grid"),
 })
 
-T3:AddSlider({
-    Name = "Decimal Slider",
-    Description = "Increment=0.05, drag it slowly",
-    Min = 0,
-    Max = 1,
-    Default = 0.5,
-    Increment = 0.05,
-    Callback = function(v) show("Opacity: " .. string.format("%.2f", v)) end,
+stepFmt = tEl:AddStepper({
+    Name = "Stepper",
+    Min = -5, Max = 5, Step = 0.5, Default = 0,
+    Prefix = "X=",
+    Suffix = " pts",
+    Callback = CB("Stepper/grid"),
 })
 
-T3:AddSlider({
-    Name = "Slider with Prefix/Suffix",
-    Description = "Suffix = ' studs', Prefix = 'Speed'",
-    Min = 16,
-    Max = 200,
-    Default = 16,
-    Prefix = "Speed ",
-    Suffix = " studs",
-    Callback = function(v) end,
+segMain = tEl:AddSegmented({
+    Name = "Segmented",
+    Options = { "Easy", "Medium", "Hard" },
+    Default = "Medium",
+    ItemWidth = 64,
+    Callback = CB("Segmented"),
 })
 
-T3:AddSlider({
-    Name = "FireOnRelease Slider",
-    Description = "Callback only fires when you release, not while dragging",
-    Min = 0,
-    Max = 100,
-    Default = 0,
+pcolMain = tEl:AddColorPicker({
+    Name = "ColorPicker",
+    Default = "#f2a63b",
+    Callback = CB("ColorPicker"),
+})
+
+tEl:AddButton({
+    Name = "Wide button (Span=2)",
+    Span = 2,
+    Callback = CB("Button/Span"),
+})
+
+tEl:AddSection("Sliders")
+
+sliderFull = tEl:AddSlider({
+    Name = "Slider, full options",
+    Description = "Right-click the track = Reset - arrow keys while hovering it",
+    Min = 0, Max = 1000, Step = 10, Default = 250,
+    Prefix = "$ ",
+    Suffix = " USD",
     FireOnRelease = true,
-    Callback = function(v) show("Released at: " .. math.floor(v)) end,
+    SaveKey = "DemoSliderKey",
+    Callback = CB("Slider/full"),
 })
 
-T3:AddParagraph({
-    Title = "Keyboard Control",
-    Text = "Hover any slider row, then use Left/Right arrow keys. " ..
-        "Hold Shift for fine adjustment (20% of step).",
+sliderDecimal = tEl:AddSlider({
+    Name = "Decimal slider (Value=0.5)",
+    Min = 0, Max = 1,
+    Value = 0.5,
+    Suffix = "x",
+    Callback = CB("Slider/decimal"),
 })
 
-T3:AddSection({ Name = "Stepper" })
-
-local stepper = T3:AddStepper({
-    Name = "Stepper (+/- buttons)",
-    Description = "Hold buttons to auto-repeat",
-    Min = 0,
-    Max = 50,
-    Step = 1,
-    Default = 10,
-    Callback = function(v) show("Stepper: " .. v) end,
+tEl:AddStepper({
+    Name = "Stepper with Format",
+    Min = -10, Max = 10, Step = 0.5, Default = 0,
+    Format = function(v)
+        return string.format("Value %.1f", v)
+    end,
+    Callback = CB("Stepper/Format"),
 })
 
-T4:AddSection({ Name = "Dropdowns" })
-
-T4:AddDropdown({
-    Name = "Single Selection",
-    Description = "Returns the Value, not the text",
-    Options = {
-        { Text = "Speed 16",  Value = 16 },
-        { Text = "Speed 32",  Value = 32 },
-        { Text = "Speed 50",  Value = 50 },
-        { Text = "Speed 100", Value = 100 },
-    },
-    Default = 16,
-    Callback = function(v) show("Selected value: " .. v) end,
+tEl:AddColorPicker({
+    Name = "ColorPicker (Color=Color3)",
+    Color = Color3.fromRGB(120, 80, 200),
+    Callback = CB("ColorPicker/Alias"),
 })
 
-T4:AddDropdown({
-    Name = "Multi Selection",
-    Description = "Click multiple options, returns array",
-    Options = { "Apple", "Banana", "Cherry", "Date", "Elderberry" },
+tEl:AddSection({ Name = "Collapsed section by default", Collapsed = true })
+
+tEl:AddToggle({
+    Name = "Element inside the collapsed section",
+    defaultVal = false,
+    Callback = CB("Toggle/collapsed"),
+})
+
+tEl:AddButton({
+    Name = "Button inside the collapsed section",
+    Callback = CB("Button/collapsed"),
+})
+
+tEl:AddSection("Dropdowns")
+
+dropSingle = tEl:AddDropdown({
+    Name = "Single",
+    Description = "Plain strings and composite {Text, Value} options",
+    Options = { "First", { Text = "Second (Value=2)", Value = 2 }, "Third", { Text = "Fourth (Value=four)", Value = "four" } },
+    Default = "First",
+    Callback = CB("Dropdown/single"),
+})
+
+dropMulti = tEl:AddDropdown({
+    Name = "Multi select",
     Multi = true,
-    Callback = function(v) show("Selected: " .. table.concat(v, ", ")) end,
+    Items = { "Apple", "Banana", "Orange", "Grape", "Mango" },
+    Defaults = { "Apple", "Banana" },
+    Callback = CB("Dropdown/Multi"),
 })
 
-T4:AddDropdown({
-    Name = "Searchable Dropdown",
-    Description = "12+ options auto-show search box",
-    Options = { "Alpha","Bravo","Charlie","Delta","Echo","Foxtrot",
-        "Golf","Hotel","India","Juliet","Kilo","Lima","Mike","November",
-        "Oscar","Papa","Quebec","Romeo","Sierra","Tango" },
-    Callback = function(v) show("Selected: " .. tostring(v)) end,
+dropSearch = tEl:AddDropdown({
+    Name = "Searchable",
+    Searchable = true,
+    Options = (function()
+        local o = {}
+        for i = 1, 30 do o[i] = "Option number " .. i end
+        return o
+    end)(),
+    Default = "Option number 7",
+    Callback = CB("Dropdown/search"),
 })
 
-T4:AddSection({ Name = "Segmented Control" })
-
-T4:AddSegmented({
-    Name = "Mode Selector",
-    Description = "Exclusive choice, compact buttons",
-    Options = { "Off", "Low", "Medium", "High" },
-    Default = "Off",
-    Callback = function(v) show("Mode: " .. v) end,
+dropVirtual = tEl:AddDropdown({
+    Name = "Virtualized (>60 options)",
+    Description = "Only visible options get built",
+    Multi = true,
+    Options = (function()
+        local o = {}
+        for i = 1, 80 do o[i] = "Item " .. i end
+        return o
+    end)(),
+    Callback = CB("Dropdown/virtual"),
 })
 
-T4:AddSection({ Name = "Color Picker" })
-
-local colorPreview = T4:AddLabel({ Text = "Click the swatch to open" })
-
-T4:AddColorPicker({
-    Name = "Pick a Color",
-    Description = "Opens HSV square + hue bar + hex input",
-    Default = Color3.fromRGB(122, 162, 247),
-    Callback = function(c)
-        colorPreview:Set(string.format("RGB: %d, %d, %d",
-            c.R * 255, c.G * 255, c.B * 255))
-    end,
-})
-
-T4:AddSection({ Name = "Keybind" })
-
-T4:AddKeybind({
-    Name = "Press this key",
-    Description = "Click button, then press any key",
-    Default = Enum.KeyCode.F,
-    Callback = function(key) show("Key pressed: " .. tostring(key)) end,
-})
-
-T4:AddKeybind({
-    Name = "Mouse Button Bind",
-    Description = "MouseButtons=true allows right/middle click",
-    MouseButtons = true,
-    Callback = function(key) show("Mouse: " .. tostring(key)) end,
-})
-
-T5:AddSection({ Name = "Text Input" })
-
-T5:AddTextInput({
-    Name = "Basic Input",
-    Placeholder = "Type something...",
-    Callback = function(text) show("You typed: " .. text) end,
-})
-
-T5:AddTextInput({
-    Name = "Validated Input",
-    Description = "Rejects input longer than 10 characters",
-    Placeholder = "Max 10 chars",
-    Validator = function(text)
-        return #text <= 10
-    end,
-    Callback = function(text) show("Valid: " .. text) end,
-})
-
-T5:AddSection({ Name = "Vector3 Input" })
-
-T5:AddVector3Input({
-    Name = "Position",
-    Description = "Three numeric fields: X, Y, Z",
-    Default = Vector3.new(0, 50, 0),
-    Callback = function(v) show("Position: " .. tostring(v)) end,
-})
-
-T6:AddSection({ Name = "Display Elements" })
-
-T6:AddLabel({ Text = "This is a Label - simple text display" })
-
-T6:AddParagraph({
-    Title = "This is a Paragraph",
-    Text = "Paragraphs display long text that wraps automatically. " ..
-        "Use Set() to change the text after creation.",
-})
-
-T6:AddDivider({ Text = "Divider with text" })
-
-T6:AddDivider()
-
-T6:AddSection({ Name = "Progress Bars" })
-
-local progress = T6:AddProgressBar({
-    Name = "Download Progress",
-    BarWidth = 200,
-    Max = 100,
-    Value = 0,
-})
-
-local progressValue = 0
-T6:AddButton({
-    Name = "Add 20% Progress",
+tEl:AddButton({
+    Name = "SetOptions + silent Set",
     Callback = function()
-        progressValue = math.min(100, progressValue + 20)
-        progress:Set(progressValue)
+        dropSingle:SetOptions({ "New A", "New B", "New C" })
+        dropSingle:Set("New B", true)
     end,
 })
 
-T6:AddButton({
-    Name = "Start Indeterminate",
-    Description = "Animated loading bar",
-    Callback = function() progress:Set(true) end,
+tEl:AddSection("Keybinds and text input")
+
+kbPress = tEl:AddKeybind({
+    Name = "Keybind (press)",
+    Default = Enum.KeyCode.B,
+    Callback = CB("Keybind/press"),
 })
 
-T6:AddButton({
-    Name = "Stop Indeterminate",
-    Callback = function() progress:Set(false) end,
+kbToggle = tEl:AddKeybind({
+    Name = "Keybind (toggle)",
+    Mode = "toggle",
+    Default = "Key:T",
+    Callback = CB("Keybind/toggle"),
 })
 
-T6:AddSection({ Name = "Data Table" })
+kbHold = tEl:AddKeybind({
+    Name = "Keybind (hold + mouse)",
+    Mode = "hold",
+    MouseButtons = true,
+    Callback = CB("Keybind/hold"),
+})
 
-T6:AddDataTable({
-    Name = "Player List",
-    Description = "Click headers to sort, click rows to select",
+textValid = tEl:AddTextInput({
+    Name = "TextInput with Validator",
+    Description = "Digits only - try an invalid value",
+    Default = "42",
+    Placeholder = "Digits only...",
+    Validator = function(text)
+        return text:match("^%d*$") ~= nil
+    end,
+    Callback = CB("TextInput/Validator"),
+})
+
+local togAttach = textValid:AddToggle({ Default = true })
+togAttach.Changed:Connect(function(v)
+    textValid:SetDisabled(not v)
+    logEvent("TextInput", "AddToggle", "enabled=" .. tostring(v))
+end)
+
+textPlain = tEl:AddTextInput({
+    Name = "Plain TextInput",
+    Placeholder = "Type something then press Enter...",
+    Callback = CB("TextInput/plain"),
+})
+
+vecInput = tEl:AddVector3Input({
+    Name = "Vector3Input",
+    Default = Vector3.new(10, 5, 0),
+    Callback = CB("Vector3"),
+})
+
+tEl:AddSection("Progress and tables")
+
+pbarMain = tEl:AddProgressBar({
+    Name = "ProgressBar",
+    Max = 100,
+    Value = 30,
+    Format = function(v)
+        return string.format("%.0f / 100", v)
+    end,
+    Callback = CB("ProgressBar"),
+})
+
+tEl:AddButton({ Name = "Set(75)", Width = 0.33, Callback = function() pbarMain:Set(75) end })
+tEl:AddButton({ Name = "Set(0)", Width = 0.33, Callback = function() pbarMain:Set(0) end })
+tEl:AddButton({ Name = "Animate", Width = 0.33, Callback = function()
+    task.spawn(function()
+        for i = 0, 20 do
+            pbarMain:Set(i * 5)
+            task.wait(0.05)
+        end
+    end)
+end })
+
+dtabDemo = tEl:AddDataTable({
+    Name = "DataTable",
+    Description = "Click a column header to sort - click a row to fire the Callback",
     Columns = {
-        { Name = "Player", Width = 120 },
-        { Name = "Kills",  Width = 70 },
-        { Name = "Deaths", Width = 70 },
+        { Name = "ID", Width = 50 },
+        { Name = "Name", Width = 130 },
+        { Name = "Value", Width = 90 },
     },
     Rows = {
-        { "Alice", 25, 3 },
-        { "Bob", 18, 7 },
-        { "Charlie", 32, 1 },
-        { "Dave", 5, 12 },
+        { Cells = { "1", "First", "100" }, Data = { id = 1, name = "First" } },
+        { Cells = { "2", "Second", "250" }, Data = { id = 2, name = "Second" } },
+        { Cells = { "3", "Third", "75" }, Data = { id = 3, name = "Third" } },
     },
-    Height = 140,
-    Callback = function(data, index)
-        show("Clicked row " .. index .. ": " .. tostring(data[1]))
+    Height = 150,
+    Callback = CBN("DataTable", function(data, index)
+        Kailex:Notify({
+            Title = "DataTable",
+            Text = "Row #" .. tostring(index) .. " - Data.id=" .. tostring(data and data.id),
+            Duration = 3,
+        })
+    end),
+})
+
+tEl:AddButton({
+    Name = "Sort(column 3, descending)",
+    Callback = function()
+        dtabDemo:Sort(3, false)
     end,
 })
 
-T7:AddSection({ Name = "Notifications" })
+tEl:AddSection("Live element programming")
 
-T7:AddParagraph({
-    Title = "4 Types",
-    Text = "Each type has a different colored dot. Hover to pause the timer.",
+tEl:AddButton({
+    Name = "SetTitle / SetTooltip / SetDescription",
+    Callback = function()
+        btnPlain:SetTitle("Updated title " .. os.date("%X"))
+        btnPlain:SetTooltip("Updated tooltip")
+        btnPlain:SetDescription("Updated description")
+    end,
 })
 
-for _, type in ipairs({ "Info", "Success", "Warning", "Error" }) do
-    T7:AddButton({
-        Name = type .. " Notification",
-        Callback = function()
-            Kailex:Notify({
-                Title = type,
-                Text = "This is a " .. string.lower(type) .. " notification.",
-                Type = type,
-            })
-        end,
-    })
-end
+tEl:AddButton({
+    Name = "Visible() toggle on the plain toggle",
+    Callback = function()
+        togPlain:Visible()
+    end,
+})
 
-T7:AddButton({
-    Name = "With Action Buttons",
-    Description = "Up to 3 buttons per notification",
+tEl:AddToggle({
+    Name = "SetDisabled on other elements",
+    Description = "Disables the Slider, Dropdown and TextInput",
+    Default = false,
+    Callback = CBN("Toggle/disable", function(v)
+        sliderFull:SetDisabled(v)
+        dropSingle:SetDisabled(v)
+        textValid:SetDisabled(v)
+    end),
+})
+
+local tempEl = tEl:AddButton({
+    Name = "Temporary element - will be destroyed",
+    Callback = CB("Button/temp"),
+})
+
+tEl:AddButton({
+    Name = "Element:Destroy()",
+    Callback = function()
+        tempEl:Destroy()
+        Kailex:Notify({ Text = "Temporary element destroyed", Type = "info", Duration = 2 })
+    end,
+})
+
+track("Toggle/plain", function() return togPlain:Get() end, "Changed + Callback")
+track("Toggle/Pin", function() return togPin:Get() end, "floating widget")
+track("Slider/full", function() return sliderFull:Get() end, "FireOnRelease")
+track("Slider/decimal", function() return sliderDecimal:Get() end, "")
+track("Stepper/grid", function() return stepFmt:Get() end, "")
+track("Segmented", function() return segMain:Get() end, "")
+track("ColorPicker", function() return pcolMain:Get() end, "Color3")
+track("ColorPicker/Hex", function() return pcolMain:CopyValue() end, "#RRGGBB")
+track("Dropdown/single", function() return dropSingle:Get() end, "")
+track("Dropdown/Multi", function() return dropMulti:Get() end, "value list")
+track("Dropdown/search", function() return dropSearch:Get() end, "")
+track("Dropdown/virtual", function() return dropVirtual:Get() end, "80 options")
+track("Keybind/press", function() return kbPress:GetName() end, "GetName")
+track("Keybind/toggle", function() return kbToggle:GetState() end, "GetState")
+track("Keybind/hold", function() return kbHold:GetState() end, "GetState")
+track("TextInput/Validator", function() return textValid:Get() end, "")
+track("TextInput/plain", function() return textPlain:Get() end, "")
+track("Vector3", function() return vecInput:Get() end, "")
+track("ProgressBar", function() return pbarMain:Get() end, "")
+track("#Kailex.Windows", function() return #Kailex.Windows end, "open windows")
+track("Kailex:IsVisible()", function() return Kailex:IsVisible() end, "global visibility")
+
+local tGrid = win:Tab({ Title = "Grid", Icon = "Grip" })
+
+tGrid:AddParagraph({
+    Title = "AddRow + Span",
+    Text = "AddRow(cols) creates a manual grid row. Add elements through row:Add* with Span. Or use the automatic grid via Width below 0.95.",
+})
+
+local row3 = tGrid:AddRow(3)
+row3:AddButton({ Name = "A", Callback = CB("Grid/A") })
+row3:AddButton({ Name = "B", Callback = CB("Grid/B") })
+row3:AddButton({ Name = "C", Callback = CB("Grid/C") })
+row3:AddButton({ Name = "D (Span=2)", Span = 2, Callback = CB("Grid/D") })
+row3:AddButton({ Name = "E", Callback = CB("Grid/E") })
+row3:AddSlider({ Name = "Slider (Span=3)", Span = 3, Min = 0, Max = 10, Default = 5, Callback = CB("Grid/Slider") })
+
+local row2 = tGrid:AddRow(2)
+row2:AddDropdown({ Name = "Pick", Options = { "X", "Y" }, Default = "X", Callback = CB("Grid/Dropdown") })
+row2:AddToggle({ Name = "Switch", Default = true, Callback = CB("Grid/Toggle") })
+
+tGrid:AddDivider({ Text = "Automatic grid via Width" })
+tGrid:AddButton({ Name = "Half width", Width = 0.5, Callback = CB("AutoGrid/1") })
+tGrid:AddButton({ Name = "Half width", Width = 0.5, Callback = CB("AutoGrid/2") })
+tGrid:AddButton({ Name = "Third", Width = 0.33, Callback = CB("AutoGrid/3") })
+tGrid:AddButton({ Name = "Third", Width = 0.33, Callback = CB("AutoGrid/4") })
+tGrid:AddButton({ Name = "Third", Width = 0.33, Callback = CB("AutoGrid/5") })
+
+local tOv = win:Tab({ Title = "Overlays", Icon = "Alert" })
+
+tOv:AddSection("Notify")
+
+tOv:AddButton({ Name = "Info", Width = 0.25, Callback = function()
+    Kailex:Notify({ Title = "Title", Text = "Type info - the default", Type = "info" })
+end })
+tOv:AddButton({ Name = "Success", Width = 0.25, Callback = function()
+    Kailex:Notify({ Title = "Done", Text = "Type success", Type = "success" })
+end })
+tOv:AddButton({ Name = "Warning", Width = 0.25, Callback = function()
+    Kailex:Notify({ Title = "Warning", Text = "Type warning", Type = "warning" })
+end })
+tOv:AddButton({ Name = "Error", Width = 0.25, Callback = function()
+    Kailex:Notify({ Title = "Error", Text = "Type error", Type = "error" })
+end })
+
+tOv:AddButton({
+    Name = "Custom duration (10s) + long text",
     Callback = function()
         Kailex:Notify({
-            Title = "File Deleted",
-            Text = "config.json has been removed.",
-            Type = "Warning",
-            Duration = 8,
+            Title = "Long notification",
+            Text = "Duration=10 - hover the card to pause the timer",
+            Duration = 10,
+        })
+    end,
+})
+
+tOv:AddButton({
+    Name = "With Actions (up to 3)",
+    Callback = function()
+        Kailex:Notify({
+            Title = "Notification with buttons",
+            Text = "Hovering the buttons pauses the timer",
+            Type = "warning",
+            Duration = 9,
             Actions = {
-                { Text = "Undo", Callback = function()
-                    Kailex:Notify({ Title = "Restored", Text = "File recovered.", Type = "Success" })
-                end },
-                { Text = "Dismiss", Callback = function() end },
+                { Text = "OK", Callback = function() logEvent("Notify", "Action", "OK") end },
+                { Text = "Details", Callback = function() logEvent("Notify", "Action", "Details") end },
+                { Text = "Close", Callback = function() logEvent("Notify", "Action", "Close") end },
             },
         })
     end,
 })
 
-T7:AddSection({ Name = "Confirm Dialog" })
+notifyTable = tOv:AddDataTable({
+    Name = "Notification log (GetNotificationLog)",
+    Columns = { { Name = "Time", Width = 70 }, { Name = "Type", Width = 70 }, { Name = "Title", Width = 130 } },
+    Height = 130,
+})
 
-T7:AddButton({
-    Name = "Show Confirm Dialog",
-    Description = "Enter = accept, Escape = decline",
+local function refreshNotifyLog()
+    local src = Kailex:GetNotificationLog()
+    local rows = {}
+    for i = #src, 1, -1 do
+        local e = src[i]
+        rows[#rows + 1] = { Cells = { os.date("%X", e.Time), e.Type, e.Title } }
+    end
+    notifyTable:SetRows(rows, true)
+end
+
+tOv:AddButton({ Name = "Refresh log", Callback = refreshNotifyLog })
+refreshNotifyLog()
+
+tOv:AddSection("Confirm")
+
+tOv:AddButton({
+    Name = "Plain Confirm",
     Callback = function()
-        Kailex:Confirm({
-            Title = "Reset everything?",
-            Text = "All settings will be cleared.",
-            AcceptText = "Reset",
-            DeclineText = "Cancel",
-        }, function()
-            show("Confirmed!")
+        Kailex:Confirm({ Title = "Confirm", Text = "Do you agree?" }, function()
+            Kailex:Notify({ Text = "Accepted", Type = "success", Duration = 2 })
         end)
     end,
 })
 
-T7:AddSection({ Name = "Key System Demo" })
+tOv:AddButton({
+    Name = "Danger Confirm + OnDecline",
+    Callback = function()
+        Kailex:Confirm({
+            Danger = true,
+            Title = "Delete?",
+            Text = "This cannot be undone.",
+            AcceptText = "Delete",
+            DeclineText = "Keep",
+            OnDecline = function() logEvent("Confirm", "OnDecline", "danger") end,
+        }, function()
+            Kailex:Notify({ Text = "Deleted (pretend)", Type = "error", Duration = 2 })
+        end)
+    end,
+})
 
-T7:AddButton({
-    Name = "Show Key System",
-    Description = "Password is: demo123",
+tOv:AddButton({
+    Name = "Info Confirm (Type=info)",
+    Callback = function()
+        Kailex:Confirm({ Type = "info", Title = "Information", Text = "Enter accepts - Escape declines - backdrop click declines" }, function()
+            logEvent("Confirm", "Accept", "info")
+        end)
+    end,
+})
+
+tOv:AddButton({
+    Name = "Confirm queue (3 in a row)",
+    Callback = function()
+        for i = 1, 3 do
+            Kailex:Confirm({ Title = "Confirm #" .. i, Text = "They take turns from the queue automatically" }, function()
+                Kailex:Notify({ Text = "Executed #" .. i, Type = "success", Duration = 2 })
+            end)
+        end
+    end,
+})
+
+tOv:AddSection("KeySystem")
+
+tOv:AddParagraph({ Title = "Demo key", Text = "KAILEX-DEMO - Remember=false - the Get Key button copies the link" })
+
+tOv:AddButton({
+    Name = "Launch KeySystem",
     Callback = function()
         Kailex:KeySystem({
-            Title = "Demo Key System",
-            Description = "The key is 'demo123'. Try wrong keys first.",
-            Key = "demo123",
-            MaxAttempts = 5,
-            OnComplete = function(key)
-                Kailex:Notify({ Title = "Access Granted", Text = "Key accepted: " .. key, Type = "Success" })
-            end,
+            Title = "Key System (demo)",
+            Description = "The correct key is: KAILEX-DEMO",
+            Key = "KAILEX-DEMO",
+            Remember = false,
+            Link = "https://example.com/get-key",
+            OnComplete = function(key) logEvent("KeySystem", "OnComplete", tostring(key)) end,
+            OnWrong = function(key) logEvent("KeySystem", "OnWrong", tostring(key)) end,
+            OnDecline = function() logEvent("KeySystem", "OnDecline", "") end,
         })
     end,
 })
 
-T8:AddSection({ Name = "Grid Layout", Columns = 3 })
+tOv:AddSection("Windows")
 
-T8:AddParagraph({
-    Title = "3-Column Grid",
-    Text = "Elements flow into columns automatically. " ..
-        "Use Tab:AddRow(3) for manual rows, or Section Columns for automatic.",
-    Width = 1,
-})
+local secondWin
 
-T8:AddButton({ Name = "Col 1" })
-T8:AddToggle({ Name = "Col 2" })
-T8:AddSlider({ Name = "Col 3", Min = 0, Max = 10 })
-T8:AddButton({ Name = "Row 2 Col 1" })
-T8:AddToggle({ Name = "Row 2 Col 2" })
-
-T8:AddSection({ Name = "Manual Grid Row" })
-
-local row = T8:AddRow(2)
-row:AddButton({
-    Name = "Half Width A",
-    Callback = function() show("Button A") end,
-})
-row:AddButton({
-    Name = "Half Width B",
-    Callback = function() show("Button B") end,
-})
-
-T8:AddSection({ Name = "Element Methods" })
-
-local demoTgl
-demoTgl = T8:AddToggle({ Name = "Demo Toggle", Default = true })
-
-T8:AddButton({
-    Name = "Disable/Enable Toggle",
+tOv:AddButton({
+    Name = "Second window (ToggleKey=J)",
+    Description = "Size={520,340} - ConfirmClose - RememberPosition=false",
     Callback = function()
-        demoTgl:SetDisabled(not demoTgl:IsDisabled())
-    end,
-})
-
-T8:AddButton({
-    Name = "Hide/Show Toggle",
-    Callback = function()
-        demoTgl:Visible(not demoTgl.Row.Visible)
-    end,
-})
-
-T8:AddButton({
-    Name = "Rename Toggle",
-    Callback = function()
-        demoTgl:SetTitle("Renamed " .. os.clock())
-    end,
-})
-
-T8:AddButton({
-    Name = "Destroy Toggle",
-    Description = "Removes the element permanently",
-    Callback = function()
-        demoTgl:Destroy()
-    end,
-})
-
-T9:AddSection({ Name = "Themes" })
-
-T9:AddDropdown({
-    Name = "Switch Theme",
-    Description = "Changes colors instantly",
-    Options = Kailex:GetThemes(),
-    Default = Kailex.Setting.Theme,
-    Callback = function(name)
-        Kailex:SetTheme(name)
-    end,
-})
-
-T9:AddSection({ Name = "Save System" })
-
-T9:AddParagraph({
-    Title = "Auto-Save",
-    Text = "Every toggle, slider, dropdown, keybind, text input, and color picker " ..
-        "saves its value automatically. Values persist between sessions " ..
-        "(per PlaceId, requires executor filesystem).",
-})
-
-T9:AddButton({
-    Name = "Save Profile",
-    Callback = function()
-        if Kailex.Configs:Save("demo") then
-            show("Profile 'demo' saved")
-        else
-            show("Filesystem not available")
+        if secondWin and not secondWin._destroyed then
+            Kailex:Notify({ Text = "The second window is open - press J to toggle it", Type = "info" })
+            return
         end
+        secondWin = Kailex:CreateWindow({
+            Title = "Second window",
+            SubTitle = "String asset icon",
+            MinSize = Vector2.new(300, 220),
+            Icon = "rbxasset://textures/face.png",
+            ToggleKey = "Key:J",
+            RememberPosition = false,
+            ConfirmClose = "Close the second window?",
+        })
+        secondWin:Tab({ Title = "Button", Icon = "Pin" }):AddButton({
+            Name = "Click me",
+            Callback = CB("SecondWin/Button"),
+        })
+        secondWin.Closed:Connect(function()
+            logEvent("Window2", "Closed", "")
+            secondWin = nil
+        end)
     end,
 })
 
-T9:AddButton({
-    Name = "Load Profile",
+tOv:AddSection("Main window control")
+
+local titleInput = tOv:AddTextInput({ Name = "New title", Placeholder = "Type a title..." })
+
+tOv:AddButton({ Name = "SetTitle", Callback = function()
+    local t = titleInput:Get()
+    if t ~= "" then win:SetTitle(t) end
+end })
+
+tOv:AddSection("Themes")
+
+tOv:AddButton({
+    Name = "RegisterTheme + SetTheme",
     Callback = function()
-        if Kailex.Configs:Load("demo") then
-            show("Profile 'demo' loaded")
-        else
-            show("Profile not found")
-        end
+        Kailex:RegisterTheme("Demo Teal", {
+            Accent = Color3.fromRGB(94, 210, 190),
+            AccentHover = Color3.fromRGB(124, 224, 206),
+            Background = Color3.fromRGB(12, 16, 17),
+            Surface = Color3.fromRGB(17, 23, 24),
+        })
+        Kailex:SaveCustomThemes()
+        Kailex:SetTheme("Demo Teal")
+        Kailex:Notify({ Title = "Themes", Text = "Registered and applied Demo Teal (merged over Nocturne)", Type = "success" })
     end,
 })
 
-T9:AddSection({ Name = "Window Features" })
-
-T9:AddParagraph({
-    Title = "Built-in Features",
-    Text = "Search: Click the magnifying glass icon in the title bar. " ..
-        "Minimize: Click the minus icon. " ..
-        "Maximize: Double-click the title bar. " ..
-        "Resize: Drag the bottom-right corner. " ..
-        "Sidebar: Drag its edge to resize. " ..
-        "Hide/Show: Press RightShift. " ..
-        "Context Menu: Right-click any element.",
+tOv:AddButton({
+    Name = "RemoveTheme",
+    Callback = function()
+        Kailex:RemoveTheme("Demo Teal")
+        Kailex:Notify({ Text = "Removed - falls back if it was active" })
+    end,
 })
 
-T9:AddDivider({ Text = "Library Info" })
+tOv:AddButton({
+    Name = "GetThemes",
+    Callback = function()
+        Kailex:Notify({ Title = "Available themes", Text = table.concat(Kailex:GetThemes(), ", "), Duration = 8 })
+    end,
+})
 
-T9:AddLabel({ Text = "Version: " .. Kailex.Version })
-T9:AddLabel({ Text = "Windows open: " .. #Kailex.Windows })
+tOv:AddSection("Global")
 
-T9:AddButton({
-    Name = "Unload Everything",
-    Description = "Destroys the entire UI",
+tOv:AddButton({
+    Name = "SetVisible(false) - RightShift to restore",
     Callback = function()
         Kailex:Confirm({
-            Title = "Unload?",
-            Text = "This removes the UI completely.",
+            Title = "Hide the interface?",
+            Text = "Press RightShift (or the mobile button) to show it again.",
+            AcceptText = "Hide",
         }, function()
+            Kailex:SetVisible(false)
+        end)
+    end,
+})
+
+tOv:AddButton({
+    Name = "Unload (full teardown)",
+    Callback = function()
+        Kailex:Confirm({ Danger = true, Title = "Unload?", Text = "Everything will be destroyed permanently." }, function()
             Kailex:Unload()
         end)
     end,
 })
 
+local tVal = win:Tab({ Title = "Values", Icon = "Info" })
+
+tVal:AddParagraph({
+    Title = "Live values",
+    Text = "Updated automatically on every event - or manually. Shows the current Get() of every element in the Playground window.",
+})
+
+valuesTable = tVal:AddDataTable({
+    Name = "Get() of every element",
+    Columns = { { Name = "Element", Width = 140 }, { Name = "Get()", Width = 160 }, { Name = "Note", Width = 150 } },
+    Height = 250,
+})
+
+tVal:AddButton({ Name = "Refresh now", Callback = refreshValues })
+refreshValues()
+
+tVal:AddDivider({ Text = "Event log" })
+
+logTable = tVal:AddDataTable({
+    Name = "Events (callbacks + signals)",
+    Columns = { { Name = "Time", Width = 64 }, { Name = "Source", Width = 120 }, { Name = "Event", Width = 96 }, { Name = "Payload", Width = 170 } },
+    Height = 210,
+})
+logTable:SetRows(log, true)
+
 Kailex:CreateSettingsTab(win)
 
+local docs = Kailex:CreateWindow({
+    Title = "Kailex Guide",
+    SubTitle = "Every element's options + examples + API",
+})
+
+local REQ = { r = "recommended", o = "optional" }
+
+local DOC_COLS = {
+    { Name = "Option", Width = 84 },
+    { Name = "Type", Width = 70 },
+    { Name = "Required", Width = 90 },
+    { Name = "Default", Width = 92 },
+    { Name = "Description", Width = 210 },
+}
+
+local API_COLS = {
+    { Name = "Function", Width = 130 },
+    { Name = "Signature / value", Width = 170 },
+    { Name = "Description", Width = 210 },
+}
+
+local function addDocTable(tab, name, rows)
+    local mapped = {}
+    for _, r in ipairs(rows) do
+        mapped[#mapped + 1] = { Cells = { r[1], r[2], REQ[r[3]], r[4], r[5] } }
+    end
+    return tab:AddDataTable({
+        Name = name,
+        Columns = DOC_COLS,
+        Rows = mapped,
+        Height = math.min(44 + #rows * 28, 300),
+    })
+end
+
+local function addApiTable(tab, name, rows)
+    local mapped = {}
+    for _, r in ipairs(rows) do
+        mapped[#mapped + 1] = { Cells = { r[1], r[2], r[3] } }
+    end
+    return tab:AddDataTable({
+        Name = name,
+        Columns = API_COLS,
+        Rows = mapped,
+        Height = math.min(44 + #rows * 28, 300),
+    })
+end
+
+local function addExample(tab, text)
+    tab:AddParagraph({ Title = "Example", Text = text })
+end
+
+local COMMON_ROWS = {
+    { "Name", "string", "o", "depends", "Displayed name (alias: Title)" },
+    { "Description", "string", "o", '""', "Gray description line under the name" },
+    { "Tooltip", "string", "o", "none", "Hover tooltip - its text feeds search" },
+    { "Search", "string", "o", "none", "Extra hidden search keywords" },
+    { "Width", "number", "o", "1", "Width ratio 0-1; below 0.95 enables the automatic grid" },
+    { "SaveKey", "string", "o", "auto", "Save key: SavePrefix/Tab/Name" },
+    { "Span", "number", "o", "1", "Grid column span 1..Columns" },
+}
+
+local ELEMENT_DOCS = {
+    {
+        title = "Button",
+        rows = {
+            { "Callback", "function", "o", "function() end", "Fired on click" },
+            { "Icon", "string|number", "o", "none", "Vector icon name (Gear/Check/Alert...) or asset id/url" },
+        },
+        note = "Methods: SetCallback(cb) - for a confirmation use Kailex:Confirm inside the Callback",
+        example = [[local b = tab:AddButton({
+    Name = "My button",
+    Icon = "Gear",
+    Confirm = "Are you sure?",
+    Callback = function() print("clicked") end,
+})
+b:HandleAsync(function()
+    task.wait(2)
+end)]],
+    },
+    {
+        title = "Toggle",
+        rows = {
+            { "Default", "bool", "o", "false", "Alias: defaultVal" },
+            { "Callback", "function", "o", "none", "(state)" },
+            { "Pin", "bool", "o", "false", "Draggable floating widget" },
+        },
+        note = "The Changed(state) signal - the only element with one. On any element: el:AddToggle()",
+        example = [[local t = tab:AddToggle({
+    Name = "Feature",
+    Default = true,
+    Pin = true,
+    Callback = function(v) print(v) end,
+})
+t.Changed:Connect(function(v) end)]],
+    },
+    {
+        title = "Slider",
+        rows = {
+            { "Min", "number", "o", "0", "Alias: MinVal" },
+            { "Max", "number", "o", "100", "Alias: MaxVal" },
+            { "Step", "number", "o", "auto", "Alias: Increment - 1 or 0.01" },
+            { "Default", "number", "o", "Min", "Alias: Value" },
+            { "Prefix", "string", "o", "none", "Before the number" },
+            { "Suffix", "string", "o", "none", "After the number" },
+            { "FireOnRelease", "bool", "o", "false", "Callback only on release" },
+        },
+        note = "Right-click the track = Reset - arrow keys while hovering = one step",
+        example = [[local s = tab:AddSlider({
+    Name = "Speed",
+    Min = 0, Max = 100, Step = 5, Default = 50,
+    Suffix = "%", FireOnRelease = true,
+    Callback = function(v) print(v) end,
+})]],
+    },
+    {
+        title = "Dropdown",
+        rows = {
+            { "Options", "array", "r", "{}", "Alias: Items - strings or {Text, Value}" },
+            { "Default", "any", "o", "none", "With Multi: Defaults (list)" },
+            { "Multi", "bool", "o", "false", "Multi select + All/None buttons" },
+            { "Searchable", "bool", "o", "auto", "Turns on automatically above 12 options" },
+            { "Callback", "function", "o", "none", "(value) or (values) with Multi" },
+        },
+        note = "Methods: Set/Get/GetText/CopyValue/Reset/SetOptions - above 60 options: automatic virtualization - arrows + Enter inside the list",
+        example = [[local d = tab:AddDropdown({
+    Name = "Choice",
+    Options = { "A", { Text = "B", Value = 2 } },
+    Default = "A",
+    Callback = function(v) print(v) end,
+})
+d:SetOptions({ "Fresh" })]],
+    },
+    {
+        title = "Keybind",
+        rows = {
+            { "Default", "KeyCode|string", "o", "none", "Enum.KeyCode.B or Key:F or Mouse:MouseButton2" },
+            { "Mode", "string", "o", "press", "press | toggle | hold" },
+            { "MouseButtons", "bool", "o", "false", "Allow capturing mouse buttons 2/3" },
+            { "Callback", "function", "o", "none", "(code, state?)" },
+        },
+        note = "Automatic conflict detection - listen timeout 6s - Escape while listening = cancel - Methods: Set/Get/GetName/GetState/Reset",
+        example = [[local k = tab:AddKeybind({
+    Name = "Hotkey",
+    Default = Enum.KeyCode.B,
+    Mode = "toggle",
+    MouseButtons = true,
+    Callback = function(code, state) print(code, state) end,
+})]],
+    },
+    {
+        title = "TextInput",
+        rows = {
+            { "Default", "string", "o", '""', "" },
+            { "Placeholder", "string", "o", '""', "" },
+            { "Validator", "function", "o", "none", "(text) -> bool - rejection: shake + red stroke" },
+            { "Callback", "function", "o", "none", "(text) - Enter fires even without changes" },
+        },
+        example = [[local i = tab:AddTextInput({
+    Name = "Player name",
+    Placeholder = "Type here...",
+    Validator = function(t) return #t < 20 end,
+    Callback = function(t) print(t) end,
+})]],
+    },
+    {
+        title = "ColorPicker",
+        rows = {
+            { "Default", "Color3|string", "o", "(122,162,247)", "Alias: Color - accepts #RRGGBB" },
+            { "Callback", "function", "o", "none", "(color)" },
+        },
+        note = "Drag the square/hue bar - hex box and Copy button - shared Recent palette (8)",
+        example = [[local c = tab:AddColorPicker({
+    Name = "Color",
+    Default = "#ff0055",
+    Callback = function(color) print(color) end,
+})]],
+    },
+    {
+        title = "ProgressBar",
+        rows = {
+            { "Max", "number", "o", "1", "" },
+            { "Value", "number", "o", "0", "" },
+            { "ShowText", "bool", "o", "true", "" },
+            { "Format", "function", "o", "none", "(v) -> string" },
+            { "Callback", "function", "o", "none", "(v)" },
+        },
+        note = "Set accepts numbers only",
+        example = [[local p = tab:AddProgressBar({
+    Name = "Loading",
+    Max = 100, Value = 0,
+    Format = function(v) return v .. "%" end,
+})
+p:Set(50)]],
+    },
+    {
+        title = "Stepper",
+        rows = {
+            { "Min", "number", "o", "0", "" },
+            { "Max", "number", "o", "10", "" },
+            { "Step", "number", "o", "1", "Alias: Increment" },
+            { "Default", "number", "o", "Min", "" },
+            { "Prefix", "string", "o", "none", "" },
+            { "Suffix", "string", "o", "none", "" },
+            { "Format", "function", "o", "none", "(v) -> string - overrides Prefix/Suffix" },
+            { "Callback", "function", "o", "none", "(v)" },
+        },
+        note = "Press and hold to repeat - arrow keys while hovering",
+        example = [[local st = tab:AddStepper({
+    Name = "Count",
+    Min = 0, Max = 10, Step = 1,
+    Prefix = "x",
+    Callback = function(v) end,
+})]],
+    },
+    {
+        title = "Segmented",
+        rows = {
+            { "Options", "array", "r", "{}", "Strings or {Text, Value}" },
+            { "Default", "any", "o", "none", "" },
+            { "ItemWidth", "number", "o", "56", "" },
+            { "Callback", "function", "o", "none", "(value)" },
+        },
+        example = [[local sg = tab:AddSegmented({
+    Name = "Mode",
+    Options = { "Attack", "Defense" },
+    Default = "Attack",
+    Callback = function(v) end,
+})]],
+    },
+    {
+        title = "Vector3Input",
+        rows = {
+            { "Default", "Vector3", "o", "(0,0,0)", "" },
+            { "Callback", "function", "o", "none", "(Vector3)" },
+        },
+        example = [[local v = tab:AddVector3Input({
+    Name = "Position",
+    Default = Vector3.new(0, 10, 0),
+    Callback = function(vec) print(vec) end,
+})]],
+    },
+    {
+        title = "DataTable",
+        rows = {
+            { "Columns", "array", "o", "{}", "Strings or {Name, Width}" },
+            { "Rows", "array", "o", "{}", "{Cells={...}, Data=...} or a plain list" },
+            { "Height", "number", "o", "200", "" },
+            { "Callback", "function", "o", "none", "(Data, Index) on row click" },
+        },
+        note = "Click a column header = sort - Methods: SetRows(rows, keepSort) / GetRows() / Sort(col, asc)",
+        example = [[local dt = tab:AddDataTable({
+    Name = "List",
+    Columns = { "ID", "Name" },
+    Rows = { { Cells = { "1", "Alex" }, Data = 1 } },
+    Callback = function(data, index) end,
+})]],
+    },
+    {
+        title = "Label",
+        rows = {
+            { "Text", "string", "o", "Label", "Alias: Name" },
+        },
+        note = "Accepts a plain string directly: tab:AddLabel(\"some text\")",
+        note = "Method: Set(text) - keeps search in sync",
+        example = [[local l = tab:AddLabel({ Text = "Important note" })
+l:Set("New text")]],
+    },
+    {
+        title = "Paragraph",
+        rows = {
+            { "Title", "string", "o", '""', "Alias: Name" },
+            { "Text", "string", "o", '""', "" },
+        },
+        note = "Method: Set(text)",
+        example = [[local p = tab:AddParagraph({ Title = "Title", Text = "Long explanation..." })
+p:Set("New text")]],
+    },
+    {
+        title = "Divider",
+        rows = {
+            { "Text", "string", "o", "none", "Text inside the line" },
+        },
+        example = [[tab:AddDivider({ Text = "Advanced settings" })]],
+    },
+}
+
+local dE = docs:Tab({ Title = "Elements", Icon = "Check" })
+
+dE:AddParagraph({
+    Title = "Common options for every element",
+    Text = "No option is strictly required; recommended = the element is useless without it. Quoted values are literals.",
+})
+
+addDocTable(dE, "Common options", COMMON_ROWS)
+
+for _, d in ipairs(ELEMENT_DOCS) do
+    dE:AddSection(d.title)
+    addDocTable(dE, d.title .. " options", d.rows)
+    if d.note then dE:AddLabel({ Text = d.note }) end
+    if d.example then addExample(dE, d.example) end
+end
+
+local dW = docs:Tab({ Title = "Window & Overlays", Icon = "Search" })
+
+dW:AddSection("CreateWindow")
+
+addDocTable(dW, "Window options", {
+    { "Title", "string", "o", "Kailex", "Alias: Name" },
+    { "SubTitle", "string", "o", "none", "Secondary line under the title" },
+    { "MinSize", "Vector2", "o", "(380,280)", "" },
+    { "Icon", "string|number", "o", "none", "Vector or asset" },
+    { "ToggleKey", "KeyCode|string", "o", "none", "Show/hide this window only" },
+    { "RememberPosition", "bool", "o", "true", "Persist position and size" },
+    { "ConfirmClose", "string|true", "o", "none", "Confirm before closing" },
+})
+
+addExample(dW, [[local win = Kailex:CreateWindow({
+    Title = "My window",
+    SubTitle = "Secondary line",
+    MinSize = Vector2.new(380, 280),
+    Icon = "Gear",
+    ToggleKey = "Key:J",
+    RememberPosition = true,
+    ConfirmClose = "Close this window?",
+})
+win:SetSize(720, 520)]])
+
+dW:AddSection("Tab")
+
+addDocTable(dW, "Tab options", {
+    { "Title", "string", "o", "Tab", "Alias: Name" },
+    { "Icon", "string|number", "o", "none", "" },
+})
+
+addExample(dW, [[local tab = win:Tab({ Title = "Main", Icon = "Check" })
+tab:AddSection({ Name = "General", Columns = 2 })
+tab:AddToggle({ Name = "Feature", Default = true, Callback = function(v) end })]])
+
+dW:AddLabel({ Text = "Every element added after AddSection lands inside that section until the next one." })
+
+dW:AddSection("Section")
+
+addDocTable(dW, "Section options", {
+    { "Name", "string", "o", "Section", "" },
+    { "Columns", "number", "o", "1", "1-6 - section elements in a grid" },
+    { "Collapsed", "bool", "o", "none", "Start collapsed - aliases: Open / Expanded (inverted)" },
+})
+
+dW:AddSection("GridRow and the grid")
+
+dW:AddParagraph({
+    Title = "Grid rows",
+    Text = "AddRow(cols) creates a manual row: add elements through row:Add* with Span. Or automatically: any element with Width below 0.95.",
+})
+
+addExample(dW, [[local row = tab:AddRow(3)
+row:AddButton({ Name = "A", Callback = function() end })
+row:AddButton({ Name = "B (Span=2)", Span = 2, Callback = function() end })
+tab:AddButton({ Name = "Half", Width = 0.5, Callback = function() end })]])
+
+dW:AddSection("Notify")
+
+addDocTable(dW, "Notification options", {
+    { "Title", "string", "o", "Notice", "" },
+    { "Text", "string", "o", '""', "Alias: Description" },
+    { "Type", "string", "o", "info", "info | success | warning | error" },
+    { "Duration", "number", "o", "4", "Seconds - minimum 0.5" },
+    { "Actions", "array", "o", "none", "{{Text, Callback}} - up to 3 buttons" },
+})
+
+addExample(dW, [[Kailex:Notify({
+    Title = "Saved",
+    Text = "The file was saved successfully",
+    Type = "success",
+    Duration = 5,
+    Actions = {
+        { Text = "Open", Callback = function() end },
+    },
+})]])
+
+dW:AddSection("Confirm")
+
+addDocTable(dW, "Confirm options", {
+    { "Title", "string", "o", "Are you sure?", "" },
+    { "Text", "string", "o", '""', "Alias: Description" },
+    { "Type", "string", "o", "none", "danger or info" },
+    { "Danger", "bool", "o", "false", "Danger style (alias for Type)" },
+    { "AcceptText", "string", "o", "Confirm", "Alias: ConfirmText" },
+    { "DeclineText", "string", "o", "Cancel", "Alias: CancelText" },
+    { "OnDecline", "function", "o", "none", "On decline (Escape/backdrop/button)" },
+})
+
+dW:AddLabel({ Text = "Second argument = onAccept - Enter accepts - Escape declines - simultaneous calls queue up" })
+
+addExample(dW, [[Kailex:Confirm({
+    Title = "Delete the item?",
+    Text = "This cannot be undone",
+    Danger = true,
+    AcceptText = "Delete",
+    DeclineText = "Keep",
+    OnDecline = function() end,
+}, function()
+    print("accepted")
+end)]])
+
+dW:AddSection("KeySystem")
+
+addDocTable(dW, "Key system options", {
+    { "Key", "any", "o", "none", "A single key (any type)" },
+    { "Keys", "array", "o", "none", "A list of keys" },
+    { "Verify", "function", "o", "none", "(key)->bool - aliases: CustomVerify / CheckKey" },
+    { "OnComplete", "function", "r", "none", "(key) - aliases: Callback" },
+    { "OnDecline", "function", "o", "none", "Aliases: OnCancel" },
+    { "OnWrong", "function", "o", "none", "(key)" },
+    { "OnBlacklisted", "function", "o", "none", "(name)" },
+    { "Whitelist", "array", "o", "none", "Names - or CheckWhitelist(name)->bool" },
+    { "Blacklist", "array", "o", "none", "Names - or CheckBlacklist(name)->bool" },
+    { "BlacklistMessage", "string", "o", "You are not allowed...", "Rejection text" },
+    { "Title", "string", "o", "Key System", "" },
+    { "Description", "string", "o", "Enter your key to continue.", "Alias: SubTitle" },
+    { "Link", "string", "o", "none", "Get-key link - alias: GetKeyLink" },
+    { "Remember", "bool", "o", "true", "Persist the key" },
+    { "DeclineAction", "string", "o", "hide", "Alias: DeclineMode - hide | unload | none" },
+    { "DeclineText", "string", "o", "Decline", "" },
+    { "LinkText", "string", "o", "Get Key", "" },
+    { "Silent", "bool", "o", "false", "Mute the welcome notifications" },
+})
+
+addExample(dW, [[Kailex:KeySystem({
+    Key = "MY-KEY-123",
+    Link = "https://site.com/key",
+    OnComplete = function(key) print("welcome", key) end,
+    OnDecline = function() print("declined") end,
+})]])
+
+local dA = docs:Tab({ Title = "API", Icon = "Info" })
+
+dA:AddSection("Kailex - global")
+
+addApiTable(dA, "Global functions", {
+    { "Kailex:CreateWindow(cfg)", "Window", "Create a window" },
+    { "Kailex:Notify(data)", "-", "Send a notification" },
+    { "Kailex:Confirm(data, onAccept)", "-", "Confirmation dialog" },
+    { "Kailex:KeySystem(opts)", "card|nil", "Key gate" },
+    { "Kailex:CreateSettingsTab(win)", "Tab", "Ready-made settings tab: theme/scale/sounds/profiles" },
+    { "Kailex:SetVisible(bool) / IsVisible()", "-", "Show/hide the whole interface" },
+    { "Kailex:GetNotificationLog()", "{Title,Text,Type,Time}", "Last 50 notifications" },
+    { "Kailex:GetThemes() / SetTheme(name)", "-", "Themes" },
+    { "Kailex:RegisterTheme / RemoveTheme / SaveCustomThemes", "-", "Custom themes" },
+    { "Kailex:Unload()", "-", "Full clean teardown" },
+    { "Kailex.Version / .Audio / .Windows / .Setting", "-", "Public fields" },
+})
+
+dA:AddSection("Window - functions")
+
+addApiTable(dA, "Window functions", {
+    { "win:Tab({Title, Icon})", "Tab", "New tab" },
+    { "win:SetTitle(t)", "-", "Update the title" },
+    { "win:Close([true]) / Destroy()", "-", "Close - true skips the confirmation" },
+    { "win.MinimizedChanged / win.Closed", "Signal", "Window signals" },
+    { "Right-click the title bar", "-", "Menu: minimize/always on top/close" },
+})
+
+dA:AddSection("Element - common")
+
+addApiTable(dA, "Functions on every element", {
+    { "el:SetTitle(t) / SetTooltip(t) / SetDescription(t)", "-", "Live text updates" },
+    { "el:Visible(bool | nil)", "-", "nil = toggle" },
+    { "el:SetDisabled(bool) / IsDisabled()", "-", "Interactive disable" },
+    { "el:AddToggle(opts)", "Toggle", "Attached enable switch - adds SetEnabled/IsEnabled/Enabled" },
+    { "el:Destroy()", "-", "Clean destroy" },
+    { "Right-click / long-press an element", "-", "Context menu: Copy value / Reset / Disable" },
+})
+
+dA:AddSection("Built-in interactions")
+
+dA:AddParagraph({
+    Title = "No code needed",
+    Text = "Ctrl+F: search the current tab - Escape: close the topmost overlay - RightShift: show/hide the interface (changeable in settings) - arrow keys move Slider/Stepper while hovering - drag the title bar to move - bottom grip to resize - splitter for sidebar width - on mobile: floating button toggles visibility.",
+})
+
+logEvent("Playground", "Loaded", Kailex.Version)
 print("Kailex Playground loaded - Version:", Kailex.Version)
+
+Kailex:Notify({
+    Title = "Kailex Playground",
+    Text = "Every feature is live - explore the Playground tabs and the Guide window",
+    Type = "success",
+    Duration = 6,
+})
