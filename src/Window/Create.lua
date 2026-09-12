@@ -24,6 +24,10 @@ return function(ctx)
         return TweenInfo.new(dur, style or Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay or 0)
     end
 
+    function Window:Ready()
+        self._loadForce = true
+    end
+
     function Kailex:CreateWindow(cfg)
         cfg = cfg or {}
         local self = setmetatable({}, Window)
@@ -85,6 +89,8 @@ return function(ctx)
         self._introW = defW
         self._introFinalSize = UDim2.fromOffset(defW, defH)
         self._introKilled = false
+        self._tabQueue = {}
+        self._loadForce = false
 
         local cx = px + defW / 2
 
@@ -168,6 +174,23 @@ return function(ctx)
         I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = crown })
         self._introMaid:Give(crown)
 
+        local loadLabel = I.Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 2),
+            Size = UDim2.new(1, -16, 0, 14),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.Text,
+            TextTransparency = 1,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = self.Title,
+            ZIndex = 40,
+            Parent = self.Root,
+        })
+        I.Bind(loadLabel, "TextColor3", "Text")
+        self._introMaid:Give(loadLabel)
+
         local shimmer = I.Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.new(-0.3, 0, 0.5, 0),
@@ -193,21 +216,25 @@ return function(ctx)
         self._focus()
         Layout.geom(self, false, #self.Tabs > 1)
 
+        local skipStart = nil
         self._introMaid:Give(self.Root.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.Touch then
+                skipStart = input.Position
+            end
+        end))
+        self._introMaid:Give(self.Root.InputEnded:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not skipStart then return end
+            local moved = (input.Position - skipStart).Magnitude
+            skipStart = nil
+            if moved < 6 then
                 State.killIntro(self)
             end
         end))
 
-        if cfg.Intro == false then
-            State.killIntro(self)
-            return self
-        end
-
-        task.delay(0.05, function()
-            if self._destroyed or self._introKilled then return end
-
+        local function imposeBirth()
             self.Root.AnchorPoint = Vector2.new(0.5, 0)
             self.Root.Position = UDim2.fromOffset(cx, py + 10)
             self.Root.Size = UDim2.fromOffset(96, 46)
@@ -239,22 +266,39 @@ return function(ctx)
             end
             crown.Size = UDim2.fromOffset(0, 3)
             crown.BackgroundTransparency = 1
+            loadLabel.Visible = true
+            loadLabel.TextTransparency = 1
+        end
 
-            I.Tween(self.Root, TI(0.55, T_CORE), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
-            I.Tween(self._winScale, TI(0.65, T_CORE, Enum.EasingStyle.Back), { Scale = 1 })
-
-            I.Tween(crown, TI(0.3, T_CROWN_IN), { BackgroundTransparency = 0.1 })
-            I.Tween(crown, TI(0.75, T_CROWN_W), { Size = UDim2.fromOffset(defW, 3) })
-
+        local function startAssembly(hadLoader)
+            self._assemblyClock = os.clock()
+            local queue = self._tabQueue
+            self._tabQueue = nil
+            if queue then
+                for i, t in ipairs(queue) do
+                    if t.Button and t.Button.Parent and t._playIntro then
+                        t:_playIntro(math.min(T_HEIGHT + (i - 1) * 0.09, 2.85))
+                    end
+                end
+            end
+            if hadLoader then
+                I.Tween(crown, TI(0.18), { Size = UDim2.fromOffset(88, 3) })
+            else
+                I.Tween(self.Root, TI(0.55, T_CORE), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
+                I.Tween(self._winScale, TI(0.65, T_CORE, Enum.EasingStyle.Back), { Scale = 1 })
+                I.Tween(crown, TI(0.3, T_CROWN_IN), { BackgroundTransparency = 0.1 })
+            end
+            task.delay(T_CROWN_W, function()
+                if self._destroyed or self._introKilled then return end
+                I.Tween(crown, TI(0.75), { Size = UDim2.fromOffset(defW, 3) })
+            end)
             task.delay(0.5, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.7) end
             end)
-
             task.delay(T_WIDTH, function()
                 if self._destroyed or self._introKilled then return end
                 I.Tween(self.Root, TI(0.8), { Size = UDim2.fromOffset(defW, 46) })
             end)
-
             task.delay(T_HEIGHT, function()
                 if self._destroyed or self._introKilled then return end
                 self.Root.ClipsDescendants = true
@@ -264,7 +308,6 @@ return function(ctx)
                 I.Tween(self.Body, TI(0.55, 0.15), { Position = self._bodyFinal })
                 I.Tween(self.Sidebar, TI(0.6, 0.25), { Position = UDim2.new(0, 0, 0, 0) })
             end)
-
             if self.IconImg then
                 task.delay(T_ICON, function()
                     if self._destroyed or self._introKilled then return end
@@ -276,15 +319,11 @@ return function(ctx)
                     end
                 end)
             end
-
             I.Tween(self.TitleLabel, TI(0.5, T_TITLE), { TextTransparency = 0, Position = self._titleLabelFinal })
-
             if self.TitleDivider then
                 I.Tween(self.TitleDivider, TI(0.55, T_DIV), { Size = UDim2.new(1, 0, 0, 1) })
             end
-
             I.Tween(self.SubLabel, TI(0.45, T_SUB), { TextTransparency = 0, Position = self._subLabelFinal })
-
             local btnCount = #self._titleButtons
             for i, b in ipairs(self._titleButtons) do
                 task.delay(T_BTNS + (btnCount - i) * 0.12, function()
@@ -297,31 +336,85 @@ return function(ctx)
                     end
                 end)
             end
-
             task.delay(T_SHIMMER, function()
                 if self._destroyed or self._introKilled or not shimmer.Parent then return end
                 shimmer.Visible = true
                 I.Tween(shimmer, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                     { Position = UDim2.new(1.3, 0, 0.5, 0) })
             end)
-
             task.delay(2.1, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.35) end
             end)
-
             task.delay(2.8, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0) end
             end)
-
             task.delay(2.9, function()
                 if self._destroyed or self._introKilled or not crown.Parent then return end
                 I.Tween(crown, TI(0.55, 0, Enum.EasingStyle.Sine),
                     { BackgroundTransparency = 1, Size = UDim2.fromOffset(math.max(defW - 60, 0), 3) })
             end)
-
             task.delay(T_KILL, function()
                 if self._destroyed then return end
                 State.killIntro(self)
+            end)
+        end
+
+        if cfg.Intro == false then
+            State.killIntro(self)
+            return self
+        end
+
+        if cfg.Loading == false then
+            task.delay(0.05, function()
+                if self._destroyed or self._introKilled then return end
+                imposeBirth()
+                startAssembly(false)
+            end)
+            return self
+        end
+
+        local built = 0
+        self._introMaid:Give(self.Pages.DescendantAdded:Connect(function() built += 1 end))
+        self._introMaid:Give(self.TabList.DescendantAdded:Connect(function() built += 1 end))
+
+        task.spawn(function()
+            task.wait(0.05)
+            if self._destroyed or self._introKilled then return end
+            imposeBirth()
+            I.Tween(self.Root, TI(0.3), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
+            I.Tween(self._winScale, TI(0.45, 0, Enum.EasingStyle.Back), { Scale = 1 })
+            I.Tween(crown, TI(0.2), { BackgroundTransparency = 0.1 })
+            I.Tween(loadLabel, TI(0.3, 0.08), { TextTransparency = 0.25 })
+
+            local display, lastCount, quiet, ready, lastW = 0, 0, 0, false, -1
+            while not self._destroyed and not self._introKilled do
+                task.wait()
+                if self._destroyed or self._introKilled then return end
+                if self._loadForce then ready = true end
+                local c = built
+                if c ~= lastCount then
+                    lastCount = c
+                    quiet = 0
+                else
+                    quiet += 1
+                    if quiet >= 4 then ready = true end
+                end
+                local target = ready and 1 or (1 - math.exp(-built / 10)) * 0.93
+                display += (target - display) * (ready and 0.5 or 0.25)
+                local w = math.floor(4 + display * 60 + 0.5)
+                if w ~= lastW then
+                    lastW = w
+                    crown.Size = UDim2.fromOffset(w, 3)
+                end
+                if ready and display > 0.985 then break end
+            end
+            if self._destroyed or self._introKilled then return end
+            crown.Size = UDim2.fromOffset(64, 3)
+            I.Tween(loadLabel, TI(0.16), { TextTransparency = 1 })
+            task.delay(0.18, function()
+                if self._destroyed or self._introKilled then return end
+                loadLabel.Visible = false
+                startAssembly(true)
             end)
         end)
 

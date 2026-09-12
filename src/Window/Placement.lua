@@ -3,7 +3,8 @@ return function(ctx)
     local Window = I.WindowClass
 
     function Window:SavePlacement()
-        if self._destroyed or self.Minimized or self._hidden then return end
+        if self._destroyed or self._introActive then return end
+        if self.Minimized or self._hidden then return end
         if not self._remember then return end
         I.SaveManager:Set("__win:" .. self.SavePrefix, {
             X = math.floor(self.Root.Position.X.Offset + 0.5),
