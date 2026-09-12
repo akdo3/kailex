@@ -58,9 +58,9 @@ return function(ctx)
         self.Used += span
     end
 
-    function GridRow:AddButton(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddButton(opts) end
-    function GridRow:AddToggle(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddToggle(opts) end
-    function GridRow:AddSlider(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddSlider(opts) end
-    function GridRow:AddDropdown(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddDropdown(opts) end
-    function GridRow:AddLabel(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddLabel(opts) end
+    function GridRow:Button(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Button(opts) end
+    function GridRow:Toggle(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Toggle(opts) end
+    function GridRow:Slider(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Slider(opts) end
+    function GridRow:Dropdown(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Dropdown(opts) end
+    function GridRow:Label(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Label(opts) end
 end

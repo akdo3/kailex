@@ -276,7 +276,7 @@ return function(ctx)
             self._tabQueue = nil
             if queue then
                 for i, t in ipairs(queue) do
-                    if t.Button and t.Button.Parent and t._playIntro then
+                    if t.TabButton and t.TabButton.Parent and t._playIntro then
                         t:_playIntro(math.min(T_HEIGHT + (i - 1) * 0.09, 2.85))
                     end
                 end

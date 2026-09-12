@@ -76,8 +76,8 @@ return function(ctx)
             end
         end
         for _, t in ipairs(self.Tabs) do
-            if t.Label and t._labelFinal then
-                I.Tween(t.Label, "Instant", { TextTransparency = 0, Position = t._labelFinal })
+            if t.TabLabel and t._labelFinal then
+                I.Tween(t.TabLabel, "Instant", { TextTransparency = 0, Position = t._labelFinal })
             end
             if t.IconImg and t._iconTabFinal then
                 t.IconImg.Visible = true
@@ -148,7 +148,7 @@ return function(ctx)
         table.remove(self.Tabs, idx)
         tab.Maid:Destroy()
         tab.Page:Destroy()
-        tab.Button:Destroy()
+        tab.TabButton:Destroy()
         self:UpdateLayout()
         if not self.CurrentTab then
             self.EmptyLabel.Text = "No tabs"

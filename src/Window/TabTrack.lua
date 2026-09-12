@@ -85,7 +85,7 @@ return function(ctx)
         return el
     end
 
-    function TabClass:AddSection(opts)
+    function TabClass:Section(opts)
         if type(opts) == "string" then opts = { Name = opts } end
         opts = opts or {}
         self._autoRow = nil

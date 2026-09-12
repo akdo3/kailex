@@ -63,7 +63,7 @@ return function(ctx)
             Parent = self.Content,
         })
 
-        self.Button = I.Create("TextButton", {
+        self.TabButton = I.Create("TextButton", {
             BackgroundTransparency = 1,
             BackgroundColor3 = I.CurrentTheme.Element,
             BorderSizePixel = 0,
@@ -72,9 +72,9 @@ return function(ctx)
             AutoButtonColor = false,
             Parent = window.TabList,
         })
-        I.Bind(self.Button, "BackgroundColor3", "Element")
-        I.Create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = self.Button })
-        I.Create("UIPadding", { PaddingRight = UDim.new(0, 8), Parent = self.Button })
+        I.Bind(self.TabButton, "BackgroundColor3", "Element")
+        I.Create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = self.TabButton })
+        I.Create("UIPadding", { PaddingRight = UDim.new(0, 8), Parent = self.TabButton })
         self.Bar = I.Create("Frame", {
             AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
             Position = Setting.RTL and UDim2.new(1, 0, 0.5, 0) or UDim2.new(0, 0, 0.5, 0),
@@ -82,7 +82,7 @@ return function(ctx)
             BackgroundColor3 = I.CurrentTheme.Accent,
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
         I.Bind(self.Bar, "BackgroundColor3", "Accent")
         I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = self.Bar })
@@ -98,14 +98,14 @@ return function(ctx)
             TextColor3 = I.CurrentTheme.SubText,
             Text = "",
             Visible = false,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
         I.Bind(self.Badge, "TextColor3", "SubText")
 
         local iconOffset = 12
         if opts.Icon then
             iconOffset = 32
-            self.IconImg = I.MkIcon(self.Button, opts.Icon, {
+            self.IconImg = I.MkIcon(self.TabButton, opts.Icon, {
                 AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
                 Position = Setting.RTL and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0),
                 Size = UDim2.fromOffset(16, 16),
@@ -113,7 +113,7 @@ return function(ctx)
         end
 
         self._iconOffset = iconOffset
-        self.Label = I.Create("TextLabel", {
+        self.TabLabel = I.Create("TextLabel", {
             Position = Setting.RTL and UDim2.new(1, -iconOffset, 0, 0) or UDim2.fromOffset(iconOffset, 0),
             Size = UDim2.new(1, -iconOffset - 6, 1, 0),
             BackgroundTransparency = 1,
@@ -123,13 +123,13 @@ return function(ctx)
             TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = self.Title,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
 
         self.Maid = I.Maid.new()
         window.Maid:Give(self.Maid)
-        self.Maid:Give(self.Button.MouseButton1Click:Connect(function()
-            I.ApplyRipple(self.Button)
+        self.Maid:Give(self.TabButton.MouseButton1Click:Connect(function()
+            I.ApplyRipple(self.TabButton)
             I.PlaySound("Click", 0.6)
             self:Select()
         end))
@@ -139,18 +139,18 @@ return function(ctx)
         self:_setSelected(false)
 
         if window._introKilled then return self end
-        self._labelFinal = self.Label.Position
+        self._labelFinal = self.TabLabel.Position
         self._iconTabFinal = self.IconImg and self.IconImg.Position
         local slide = UDim2.fromOffset(Setting.RTL and 20 or -20, 0)
-        self.Label.TextTransparency = 1
-        self.Label.Position = self._labelFinal + slide
+        self.TabLabel.TextTransparency = 1
+        self.TabLabel.Position = self._labelFinal + slide
         if self._iconTabFinal then
             self.IconImg.Visible = false
             self.IconImg.Position = self._iconTabFinal + slide
         end
 
         local function play(delay)
-            I.Tween(self.Label, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay),
+            I.Tween(self.TabLabel, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay),
                 { TextTransparency = 0, Position = self._labelFinal })
             if self._iconTabFinal then
                 task.delay(delay, function()
@@ -178,12 +178,12 @@ return function(ctx)
 
     function TabClass:_setSelected(on)
         self._selected = on
-        I.Tween(self.Button, "Fast", { BackgroundTransparency = on and 0 or 1 })
+        I.Tween(self.TabButton, "Fast", { BackgroundTransparency = on and 0 or 1 })
         I.Tween(self.Bar, "PopSoft", {
             BackgroundTransparency = on and 0 or 1,
             Size = on and UDim2.fromOffset(3, 16) or UDim2.fromOffset(3, 8),
         })
-        I.Tween(self.Label, "Fast", { TextColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
+        I.Tween(self.TabLabel, "Fast", { TextColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
         if self.IconImg and self.IconImg:IsA("ImageLabel") then
             I.Tween(self.IconImg, "Fast", { ImageColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
         end
@@ -193,16 +193,16 @@ return function(ctx)
         if self._horizontalState == on then return end
         self._horizontalState = on
         if on then
-            self.Button.AutomaticSize = Enum.AutomaticSize.X
-            self.Button.Size = UDim2.new(0, 0, 1, -8)
-            self.Label.AutomaticSize = Enum.AutomaticSize.X
-            self.Label.Size = UDim2.new(0, 0, 1, 0)
+            self.TabButton.AutomaticSize = Enum.AutomaticSize.X
+            self.TabButton.Size = UDim2.new(0, 0, 1, -8)
+            self.TabLabel.AutomaticSize = Enum.AutomaticSize.X
+            self.TabLabel.Size = UDim2.new(0, 0, 1, 0)
             self.Bar.Visible = false
         else
-            self.Button.AutomaticSize = Enum.AutomaticSize.None
-            self.Button.Size = UDim2.new(1, 0, 0, 30)
-            self.Label.AutomaticSize = Enum.AutomaticSize.None
-            self.Label.Size = UDim2.new(1, -(self._iconOffset or 12) - 6, 1, 0)
+            self.TabButton.AutomaticSize = Enum.AutomaticSize.None
+            self.TabButton.Size = UDim2.new(1, 0, 0, 30)
+            self.TabLabel.AutomaticSize = Enum.AutomaticSize.None
+            self.TabLabel.Size = UDim2.new(1, -(self._iconOffset or 12) - 6, 1, 0)
             self.Bar.Visible = true
         end
     end
@@ -253,14 +253,14 @@ return function(ctx)
         Paragraph = Elements.Paragraph, Divider = Elements.Divider,
     }
     for name, class in pairs(ADD) do
-        TabClass["Add" .. name] = function(self, opts)
+        TabClass[name] = function(self, opts)
             opts = opts or {}
             self._pendingKeyRelease = nil
             return self:_track(class.new(self, opts))
         end
     end
 
-    function TabClass:AddRow(cols)
+    function TabClass:Row(cols)
         self._autoRow = nil
         cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
         local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)

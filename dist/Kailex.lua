@@ -7311,8 +7311,8 @@ Bundle["Window/State"] = function(ctx)
             end
         end
         for _, t in ipairs(self.Tabs) do
-            if t.Label and t._labelFinal then
-                I.Tween(t.Label, "Instant", { TextTransparency = 0, Position = t._labelFinal })
+            if t.TabLabel and t._labelFinal then
+                I.Tween(t.TabLabel, "Instant", { TextTransparency = 0, Position = t._labelFinal })
             end
             if t.IconImg and t._iconTabFinal then
                 t.IconImg.Visible = true
@@ -7383,7 +7383,7 @@ Bundle["Window/State"] = function(ctx)
         table.remove(self.Tabs, idx)
         tab.Maid:Destroy()
         tab.Page:Destroy()
-        tab.Button:Destroy()
+        tab.TabButton:Destroy()
         self:UpdateLayout()
         if not self.CurrentTab then
             self.EmptyLabel.Text = "No tabs"
@@ -7475,7 +7475,8 @@ Bundle["Window/Placement"] = function(ctx)
     local Window = I.WindowClass
 
     function Window:SavePlacement()
-        if self._destroyed or self.Minimized or self._hidden then return end
+        if self._destroyed or self._introActive then return end
+        if self.Minimized or self._hidden then return end
         if not self._remember then return end
         I.SaveManager:Set("__win:" .. self.SavePrefix, {
             X = math.floor(self.Root.Position.X.Offset + 0.5),
@@ -7548,11 +7549,11 @@ Bundle["Window/GridRow"] = function(ctx)
         self.Used += span
     end
 
-    function GridRow:AddButton(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddButton(opts) end
-    function GridRow:AddToggle(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddToggle(opts) end
-    function GridRow:AddSlider(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddSlider(opts) end
-    function GridRow:AddDropdown(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddDropdown(opts) end
-    function GridRow:AddLabel(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:AddLabel(opts) end
+    function GridRow:Button(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Button(opts) end
+    function GridRow:Toggle(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Toggle(opts) end
+    function GridRow:Slider(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Slider(opts) end
+    function GridRow:Dropdown(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Dropdown(opts) end
+    function GridRow:Label(opts) opts = opts or {}; opts._gridRow = self; return self.Tab:Label(opts) end
 end
 
 
@@ -7622,7 +7623,7 @@ Bundle["Window/Tab"] = function(ctx)
             Parent = self.Content,
         })
 
-        self.Button = I.Create("TextButton", {
+        self.TabButton = I.Create("TextButton", {
             BackgroundTransparency = 1,
             BackgroundColor3 = I.CurrentTheme.Element,
             BorderSizePixel = 0,
@@ -7631,9 +7632,9 @@ Bundle["Window/Tab"] = function(ctx)
             AutoButtonColor = false,
             Parent = window.TabList,
         })
-        I.Bind(self.Button, "BackgroundColor3", "Element")
-        I.Create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = self.Button })
-        I.Create("UIPadding", { PaddingRight = UDim.new(0, 8), Parent = self.Button })
+        I.Bind(self.TabButton, "BackgroundColor3", "Element")
+        I.Create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = self.TabButton })
+        I.Create("UIPadding", { PaddingRight = UDim.new(0, 8), Parent = self.TabButton })
         self.Bar = I.Create("Frame", {
             AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
             Position = Setting.RTL and UDim2.new(1, 0, 0.5, 0) or UDim2.new(0, 0, 0.5, 0),
@@ -7641,7 +7642,7 @@ Bundle["Window/Tab"] = function(ctx)
             BackgroundColor3 = I.CurrentTheme.Accent,
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
         I.Bind(self.Bar, "BackgroundColor3", "Accent")
         I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = self.Bar })
@@ -7657,14 +7658,14 @@ Bundle["Window/Tab"] = function(ctx)
             TextColor3 = I.CurrentTheme.SubText,
             Text = "",
             Visible = false,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
         I.Bind(self.Badge, "TextColor3", "SubText")
 
         local iconOffset = 12
         if opts.Icon then
             iconOffset = 32
-            self.IconImg = I.MkIcon(self.Button, opts.Icon, {
+            self.IconImg = I.MkIcon(self.TabButton, opts.Icon, {
                 AnchorPoint = Vector2.new(Setting.RTL and 1 or 0, 0.5),
                 Position = Setting.RTL and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0),
                 Size = UDim2.fromOffset(16, 16),
@@ -7672,7 +7673,7 @@ Bundle["Window/Tab"] = function(ctx)
         end
 
         self._iconOffset = iconOffset
-        self.Label = I.Create("TextLabel", {
+        self.TabLabel = I.Create("TextLabel", {
             Position = Setting.RTL and UDim2.new(1, -iconOffset, 0, 0) or UDim2.fromOffset(iconOffset, 0),
             Size = UDim2.new(1, -iconOffset - 6, 1, 0),
             BackgroundTransparency = 1,
@@ -7682,13 +7683,13 @@ Bundle["Window/Tab"] = function(ctx)
             TextXAlignment = I.XAlign(),
             TextTruncate = Enum.TextTruncate.AtEnd,
             Text = self.Title,
-            Parent = self.Button,
+            Parent = self.TabButton,
         })
 
         self.Maid = I.Maid.new()
         window.Maid:Give(self.Maid)
-        self.Maid:Give(self.Button.MouseButton1Click:Connect(function()
-            I.ApplyRipple(self.Button)
+        self.Maid:Give(self.TabButton.MouseButton1Click:Connect(function()
+            I.ApplyRipple(self.TabButton)
             I.PlaySound("Click", 0.6)
             self:Select()
         end))
@@ -7698,39 +7699,51 @@ Bundle["Window/Tab"] = function(ctx)
         self:_setSelected(false)
 
         if window._introKilled then return self end
-        self._labelFinal = self.Label.Position
+        self._labelFinal = self.TabLabel.Position
         self._iconTabFinal = self.IconImg and self.IconImg.Position
         local slide = UDim2.fromOffset(Setting.RTL and 20 or -20, 0)
-        local stagger = math.min(1.95 + #window.Tabs * 0.09, 2.85)
-        self.Label.TextTransparency = 1
-        self.Label.Position = self._labelFinal + slide
-        I.Tween(self.Label, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, stagger),
-            { TextTransparency = 0, Position = self._labelFinal })
+        self.TabLabel.TextTransparency = 1
+        self.TabLabel.Position = self._labelFinal + slide
         if self._iconTabFinal then
             self.IconImg.Visible = false
             self.IconImg.Position = self._iconTabFinal + slide
-            task.delay(stagger, function()
-                if window._destroyed then return end
-                self.IconImg.Visible = true
-                if window._introKilled then
-                    self.IconImg.Position = self._iconTabFinal
-                else
-                    I.Tween(self.IconImg, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-                        { Position = self._iconTabFinal })
-                end
-            end)
+        end
+
+        local function play(delay)
+            I.Tween(self.TabLabel, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay),
+                { TextTransparency = 0, Position = self._labelFinal })
+            if self._iconTabFinal then
+                task.delay(delay, function()
+                    if window._destroyed then return end
+                    self.IconImg.Visible = true
+                    if window._introKilled then
+                        self.IconImg.Position = self._iconTabFinal
+                    else
+                        I.Tween(self.IconImg, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                            { Position = self._iconTabFinal })
+                    end
+                end)
+            end
+        end
+
+        if window._assemblyClock then
+            local elapsed = os.clock() - window._assemblyClock
+            play(math.max(0, 1.85 - elapsed))
+        else
+            table.insert(window._tabQueue, self)
+            self._playIntro = function(_, delay) play(delay) end
         end
         return self
     end
 
     function TabClass:_setSelected(on)
         self._selected = on
-        I.Tween(self.Button, "Fast", { BackgroundTransparency = on and 0 or 1 })
+        I.Tween(self.TabButton, "Fast", { BackgroundTransparency = on and 0 or 1 })
         I.Tween(self.Bar, "PopSoft", {
             BackgroundTransparency = on and 0 or 1,
             Size = on and UDim2.fromOffset(3, 16) or UDim2.fromOffset(3, 8),
         })
-        I.Tween(self.Label, "Fast", { TextColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
+        I.Tween(self.TabLabel, "Fast", { TextColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
         if self.IconImg and self.IconImg:IsA("ImageLabel") then
             I.Tween(self.IconImg, "Fast", { ImageColor3 = on and I.CurrentTheme.Text or I.CurrentTheme.SubText })
         end
@@ -7740,16 +7753,16 @@ Bundle["Window/Tab"] = function(ctx)
         if self._horizontalState == on then return end
         self._horizontalState = on
         if on then
-            self.Button.AutomaticSize = Enum.AutomaticSize.X
-            self.Button.Size = UDim2.new(0, 0, 1, -8)
-            self.Label.AutomaticSize = Enum.AutomaticSize.X
-            self.Label.Size = UDim2.new(0, 0, 1, 0)
+            self.TabButton.AutomaticSize = Enum.AutomaticSize.X
+            self.TabButton.Size = UDim2.new(0, 0, 1, -8)
+            self.TabLabel.AutomaticSize = Enum.AutomaticSize.X
+            self.TabLabel.Size = UDim2.new(0, 0, 1, 0)
             self.Bar.Visible = false
         else
-            self.Button.AutomaticSize = Enum.AutomaticSize.None
-            self.Button.Size = UDim2.new(1, 0, 0, 30)
-            self.Label.AutomaticSize = Enum.AutomaticSize.None
-            self.Label.Size = UDim2.new(1, -(self._iconOffset or 12) - 6, 1, 0)
+            self.TabButton.AutomaticSize = Enum.AutomaticSize.None
+            self.TabButton.Size = UDim2.new(1, 0, 0, 30)
+            self.TabLabel.AutomaticSize = Enum.AutomaticSize.None
+            self.TabLabel.Size = UDim2.new(1, -(self._iconOffset or 12) - 6, 1, 0)
             self.Bar.Visible = true
         end
     end
@@ -7800,14 +7813,14 @@ Bundle["Window/Tab"] = function(ctx)
         Paragraph = Elements.Paragraph, Divider = Elements.Divider,
     }
     for name, class in pairs(ADD) do
-        TabClass["Add" .. name] = function(self, opts)
+        TabClass[name] = function(self, opts)
             opts = opts or {}
             self._pendingKeyRelease = nil
             return self:_track(class.new(self, opts))
         end
     end
 
-    function TabClass:AddRow(cols)
+    function TabClass:Row(cols)
         self._autoRow = nil
         cols = math.clamp(math.floor(tonumber(cols) or 2), 1, 6)
         local row = setmetatable({ Tab = self, Cols = cols }, I.GridRow)
@@ -7911,7 +7924,7 @@ Bundle["Window/TabTrack"] = function(ctx)
         return el
     end
 
-    function TabClass:AddSection(opts)
+    function TabClass:Section(opts)
         if type(opts) == "string" then opts = { Name = opts } end
         opts = opts or {}
         self._autoRow = nil
@@ -8091,6 +8104,10 @@ Bundle["Window/Create"] = function(ctx)
         return TweenInfo.new(dur, style or Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay or 0)
     end
 
+    function Window:Ready()
+        self._loadForce = true
+    end
+
     function Kailex:CreateWindow(cfg)
         cfg = cfg or {}
         local self = setmetatable({}, Window)
@@ -8152,6 +8169,8 @@ Bundle["Window/Create"] = function(ctx)
         self._introW = defW
         self._introFinalSize = UDim2.fromOffset(defW, defH)
         self._introKilled = false
+        self._tabQueue = {}
+        self._loadForce = false
 
         local cx = px + defW / 2
 
@@ -8235,6 +8254,23 @@ Bundle["Window/Create"] = function(ctx)
         I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = crown })
         self._introMaid:Give(crown)
 
+        local loadLabel = I.Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 2),
+            Size = UDim2.new(1, -16, 0, 14),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextColor3 = I.CurrentTheme.Text,
+            TextTransparency = 1,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = self.Title,
+            ZIndex = 40,
+            Parent = self.Root,
+        })
+        I.Bind(loadLabel, "TextColor3", "Text")
+        self._introMaid:Give(loadLabel)
+
         local shimmer = I.Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.new(-0.3, 0, 0.5, 0),
@@ -8260,21 +8296,25 @@ Bundle["Window/Create"] = function(ctx)
         self._focus()
         Layout.geom(self, false, #self.Tabs > 1)
 
+        local skipStart = nil
         self._introMaid:Give(self.Root.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.Touch then
+                skipStart = input.Position
+            end
+        end))
+        self._introMaid:Give(self.Root.InputEnded:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not skipStart then return end
+            local moved = (input.Position - skipStart).Magnitude
+            skipStart = nil
+            if moved < 6 then
                 State.killIntro(self)
             end
         end))
 
-        if cfg.Intro == false then
-            State.killIntro(self)
-            return self
-        end
-
-        task.delay(0.05, function()
-            if self._destroyed or self._introKilled then return end
-
+        local function imposeBirth()
             self.Root.AnchorPoint = Vector2.new(0.5, 0)
             self.Root.Position = UDim2.fromOffset(cx, py + 10)
             self.Root.Size = UDim2.fromOffset(96, 46)
@@ -8306,22 +8346,39 @@ Bundle["Window/Create"] = function(ctx)
             end
             crown.Size = UDim2.fromOffset(0, 3)
             crown.BackgroundTransparency = 1
+            loadLabel.Visible = true
+            loadLabel.TextTransparency = 1
+        end
 
-            I.Tween(self.Root, TI(0.55, T_CORE), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
-            I.Tween(self._winScale, TI(0.65, T_CORE, Enum.EasingStyle.Back), { Scale = 1 })
-
-            I.Tween(crown, TI(0.3, T_CROWN_IN), { BackgroundTransparency = 0.1 })
-            I.Tween(crown, TI(0.75, T_CROWN_W), { Size = UDim2.fromOffset(defW, 3) })
-
+        local function startAssembly(hadLoader)
+            self._assemblyClock = os.clock()
+            local queue = self._tabQueue
+            self._tabQueue = nil
+            if queue then
+                for i, t in ipairs(queue) do
+                    if t.TabButton and t.TabButton.Parent and t._playIntro then
+                        t:_playIntro(math.min(T_HEIGHT + (i - 1) * 0.09, 2.85))
+                    end
+                end
+            end
+            if hadLoader then
+                I.Tween(crown, TI(0.18), { Size = UDim2.fromOffset(88, 3) })
+            else
+                I.Tween(self.Root, TI(0.55, T_CORE), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
+                I.Tween(self._winScale, TI(0.65, T_CORE, Enum.EasingStyle.Back), { Scale = 1 })
+                I.Tween(crown, TI(0.3, T_CROWN_IN), { BackgroundTransparency = 0.1 })
+            end
+            task.delay(T_CROWN_W, function()
+                if self._destroyed or self._introKilled then return end
+                I.Tween(crown, TI(0.75), { Size = UDim2.fromOffset(defW, 3) })
+            end)
             task.delay(0.5, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.7) end
             end)
-
             task.delay(T_WIDTH, function()
                 if self._destroyed or self._introKilled then return end
                 I.Tween(self.Root, TI(0.8), { Size = UDim2.fromOffset(defW, 46) })
             end)
-
             task.delay(T_HEIGHT, function()
                 if self._destroyed or self._introKilled then return end
                 self.Root.ClipsDescendants = true
@@ -8331,7 +8388,6 @@ Bundle["Window/Create"] = function(ctx)
                 I.Tween(self.Body, TI(0.55, 0.15), { Position = self._bodyFinal })
                 I.Tween(self.Sidebar, TI(0.6, 0.25), { Position = UDim2.new(0, 0, 0, 0) })
             end)
-
             if self.IconImg then
                 task.delay(T_ICON, function()
                     if self._destroyed or self._introKilled then return end
@@ -8343,15 +8399,11 @@ Bundle["Window/Create"] = function(ctx)
                     end
                 end)
             end
-
             I.Tween(self.TitleLabel, TI(0.5, T_TITLE), { TextTransparency = 0, Position = self._titleLabelFinal })
-
             if self.TitleDivider then
                 I.Tween(self.TitleDivider, TI(0.55, T_DIV), { Size = UDim2.new(1, 0, 0, 1) })
             end
-
             I.Tween(self.SubLabel, TI(0.45, T_SUB), { TextTransparency = 0, Position = self._subLabelFinal })
-
             local btnCount = #self._titleButtons
             for i, b in ipairs(self._titleButtons) do
                 task.delay(T_BTNS + (btnCount - i) * 0.12, function()
@@ -8364,31 +8416,85 @@ Bundle["Window/Create"] = function(ctx)
                     end
                 end)
             end
-
             task.delay(T_SHIMMER, function()
                 if self._destroyed or self._introKilled or not shimmer.Parent then return end
                 shimmer.Visible = true
                 I.Tween(shimmer, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                     { Position = UDim2.new(1.3, 0, 0.5, 0) })
             end)
-
             task.delay(2.1, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.35) end
             end)
-
             task.delay(2.8, function()
                 if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0) end
             end)
-
             task.delay(2.9, function()
                 if self._destroyed or self._introKilled or not crown.Parent then return end
                 I.Tween(crown, TI(0.55, 0, Enum.EasingStyle.Sine),
                     { BackgroundTransparency = 1, Size = UDim2.fromOffset(math.max(defW - 60, 0), 3) })
             end)
-
             task.delay(T_KILL, function()
                 if self._destroyed then return end
                 State.killIntro(self)
+            end)
+        end
+
+        if cfg.Intro == false then
+            State.killIntro(self)
+            return self
+        end
+
+        if cfg.Loading == false then
+            task.delay(0.05, function()
+                if self._destroyed or self._introKilled then return end
+                imposeBirth()
+                startAssembly(false)
+            end)
+            return self
+        end
+
+        local built = 0
+        self._introMaid:Give(self.Pages.DescendantAdded:Connect(function() built += 1 end))
+        self._introMaid:Give(self.TabList.DescendantAdded:Connect(function() built += 1 end))
+
+        task.spawn(function()
+            task.wait(0.05)
+            if self._destroyed or self._introKilled then return end
+            imposeBirth()
+            I.Tween(self.Root, TI(0.3), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
+            I.Tween(self._winScale, TI(0.45, 0, Enum.EasingStyle.Back), { Scale = 1 })
+            I.Tween(crown, TI(0.2), { BackgroundTransparency = 0.1 })
+            I.Tween(loadLabel, TI(0.3, 0.08), { TextTransparency = 0.25 })
+
+            local display, lastCount, quiet, ready, lastW = 0, 0, 0, false, -1
+            while not self._destroyed and not self._introKilled do
+                task.wait()
+                if self._destroyed or self._introKilled then return end
+                if self._loadForce then ready = true end
+                local c = built
+                if c ~= lastCount then
+                    lastCount = c
+                    quiet = 0
+                else
+                    quiet += 1
+                    if quiet >= 4 then ready = true end
+                end
+                local target = ready and 1 or (1 - math.exp(-built / 10)) * 0.93
+                display += (target - display) * (ready and 0.5 or 0.25)
+                local w = math.floor(4 + display * 60 + 0.5)
+                if w ~= lastW then
+                    lastW = w
+                    crown.Size = UDim2.fromOffset(w, 3)
+                end
+                if ready and display > 0.985 then break end
+            end
+            if self._destroyed or self._introKilled then return end
+            crown.Size = UDim2.fromOffset(64, 3)
+            I.Tween(loadLabel, TI(0.16), { TextTransparency = 1 })
+            task.delay(0.18, function()
+                if self._destroyed or self._introKilled then return end
+                loadLabel.Visible = false
+                startAssembly(true)
             end)
         end)
 
