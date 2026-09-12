@@ -6773,6 +6773,7 @@ Bundle["Window/Chrome"] = function(ctx)
             Parent = titleBar,
         })
         I.Bind(titleDivider, "BackgroundColor3", "Stroke")
+        self.TitleDivider = titleDivider
 
         local searchBox = I.Create("TextBox", {
             Position = UDim2.fromOffset(14, 11),
@@ -6816,6 +6817,7 @@ Bundle["Window/Chrome"] = function(ctx)
                 AutoButtonColor = false,
                 Parent = titleBar,
             })
+            b:SetAttribute("FinalX", xPos)
             I.Icon(b, kind, colorKey or "SubText", 12)
             I.AddTooltip(b, { Text = TIPS[kind] or kind })
             return b
@@ -7159,7 +7161,7 @@ Bundle["Window/Layout"] = function(ctx)
     end
 
     function Layout.geom(self, horizontal, multi)
-        local w = self.Root.Size.X.Offset
+        local w = self._introActive and self._introW or self.Root.Size.X.Offset
         local maxSw = math.max(110, math.min(320, w - 240))
         local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
         local halfSplit = math.floor((self._splitW or 9) / 2)
@@ -7206,7 +7208,7 @@ Bundle["Window/Layout"] = function(ctx)
         task.defer(function()
             self._layoutQueued = false
             if self._destroyed then return end
-            local w = self.Root.Size.X.Offset
+            local w = self._introActive and self._introW or self.Root.Size.X.Offset
             local multi = #self.Tabs > 1
             local horizontal = multi and w < 500
             local maxSw = math.max(110, math.min(320, w - 240))
@@ -7258,23 +7260,71 @@ Bundle["Window/State"] = function(ctx)
             self.Root.ZIndex = math.min(99, z + 1)
         end
         for _, w in ipairs(Kailex.Windows) do
-            if w ~= self and not w._destroyed and w.TitleLabel then
+            if w ~= self and not w._destroyed and w.TitleLabel and not w._introActive then
                 I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0.45 })
             end
         end
-        if self.TitleLabel then
+        if self.TitleLabel and not self._introActive then
             I.Tween(self.TitleLabel, "Fast", { TextTransparency = 0 })
         end
         Kailex._lastActive = self
     end
 
     function State.killIntro(self)
-        I.Tween(self.Root, "Instant", { Position = self._rootFinal, GroupTransparency = 0 })
+        if self._introKilled then return end
+        self._introKilled = true
+        self._introActive = false
+        self.Root.ClipsDescendants = true
+        self.Root.AnchorPoint = Vector2.new(0, 0)
+        I.Tween(self.Root, "Instant", {
+            Position = self._rootFinal,
+            Size = self._introFinalSize or self.Root.Size,
+            GroupTransparency = 0,
+        })
         I.Tween(self._winScale, "Instant", { Scale = 1 })
         I.Tween(self.TitleBar, "Instant", { Position = self._titleFinal })
+        self.Body.Visible = true
         I.Tween(self.Body, "Instant", { Position = self._bodyFinal })
+        if self.ResizeGrip then self.ResizeGrip.Visible = true end
+        if self.Sidebar then I.Tween(self.Sidebar, "Instant", { Position = UDim2.new(0, 0, 0, 0) }) end
+        if self.TitleLabel and self._titleLabelFinal then
+            I.Tween(self.TitleLabel, "Instant", { TextTransparency = 0, Position = self._titleLabelFinal })
+        end
+        if self.SubLabel and self._subLabelFinal then
+            I.Tween(self.SubLabel, "Instant", { TextTransparency = 0, Position = self._subLabelFinal })
+        end
+        if self.IconImg and self._iconFinal then
+            self.IconImg.Visible = true
+            I.Tween(self.IconImg, "Instant", { Position = self._iconFinal })
+            local us = self.IconImg:FindFirstChildOfClass("UIScale")
+            if us then I.Tween(us, "Instant", { Scale = 1 }) end
+        end
+        if self.TitleDivider then
+            I.Tween(self.TitleDivider, "Instant", { Size = UDim2.new(1, 0, 0, 1) })
+        end
+        if self._titleButtons and self._titleBtnFinals then
+            for i, b in ipairs(self._titleButtons) do
+                b.Visible = true
+                I.Tween(b, "Instant", { Position = self._titleBtnFinals[i] })
+                local us = b:FindFirstChildOfClass("UIScale")
+                if us then I.Tween(us, "Instant", { Scale = 1 }) end
+            end
+        end
+        for _, t in ipairs(self.Tabs) do
+            if t.Label and t._labelFinal then
+                I.Tween(t.Label, "Instant", { TextTransparency = 0, Position = t._labelFinal })
+            end
+            if t.IconImg and t._iconTabFinal then
+                t.IconImg.Visible = true
+                t.IconImg.Position = t._iconTabFinal
+            end
+        end
         if self._shadow then self._shadow.SetFade(0) end
-        if self._introMaid then self._introMaid:Destroy() end
+        if self._introMaid then
+            self._introMaid:Destroy()
+            self._introMaid = nil
+        end
+        self:UpdateLayout()
     end
 
     function Window:SetMinimized(state)
@@ -7355,6 +7405,7 @@ Bundle["Window/State"] = function(ctx)
 
     function Window:OnViewport()
         if self._destroyed then return end
+        if self._introActive then return end
         local sc = I.GetScale()
         I.ClampWindowToScreen(self.Root)
         if self.Minimized then return end
@@ -7392,12 +7443,12 @@ Bundle["Window/State"] = function(ctx)
                 I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0 })
             end
         end
+        State.killIntro(self)
         self:SavePlacement()
         self.Closed:Fire()
         local i = table.find(Kailex.Windows, self)
         if i then table.remove(Kailex.Windows, i) end
         I.ModalManager.CloseAll(self)
-        State.killIntro(self)
         if self._shadow then self._shadow.FadeOut() end
         local root = self.Root
         local done = false
@@ -7645,6 +7696,30 @@ Bundle["Window/Tab"] = function(ctx)
             self:_setSelected(self._selected)
         end))
         self:_setSelected(false)
+
+        if window._introKilled then return self end
+        self._labelFinal = self.Label.Position
+        self._iconTabFinal = self.IconImg and self.IconImg.Position
+        local slide = UDim2.fromOffset(Setting.RTL and 20 or -20, 0)
+        local stagger = math.min(1.95 + #window.Tabs * 0.09, 2.85)
+        self.Label.TextTransparency = 1
+        self.Label.Position = self._labelFinal + slide
+        I.Tween(self.Label, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, stagger),
+            { TextTransparency = 0, Position = self._labelFinal })
+        if self._iconTabFinal then
+            self.IconImg.Visible = false
+            self.IconImg.Position = self._iconTabFinal + slide
+            task.delay(stagger, function()
+                if window._destroyed then return end
+                self.IconImg.Visible = true
+                if window._introKilled then
+                    self.IconImg.Position = self._iconTabFinal
+                else
+                    I.Tween(self.IconImg, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                        { Position = self._iconTabFinal })
+                end
+            end)
+        end
         return self
     end
 
@@ -7999,6 +8074,23 @@ Bundle["Window/Create"] = function(ctx)
     local Layout = I.WindowLayout
     local State = I.WindowState
 
+    local T_CORE = 0
+    local T_CROWN_IN = 0.45
+    local T_CROWN_W = 0.6
+    local T_WIDTH = 1.05
+    local T_HEIGHT = 1.85
+    local T_ICON = 2.05
+    local T_TITLE = 2.25
+    local T_BTNS = 2.35
+    local T_DIV = 2.45
+    local T_SUB = 2.65
+    local T_SHIMMER = 2.95
+    local T_KILL = 4.15
+
+    local function TI(dur, delay, style)
+        return TweenInfo.new(dur, style or Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay or 0)
+    end
+
     function Kailex:CreateWindow(cfg)
         cfg = cfg or {}
         local self = setmetatable({}, Window)
@@ -8056,12 +8148,20 @@ Bundle["Window/Create"] = function(ctx)
         self._titleFinal = UDim2.new(0, 0, 0, 0)
         self._bodyFinal = UDim2.new(0, 0, 0, 56)
 
+        self._introActive = true
+        self._introW = defW
+        self._introFinalSize = UDim2.fromOffset(defW, defH)
+        self._introKilled = false
+
+        local cx = px + defW / 2
+
         self.Root = I.Create("CanvasGroup", {
-            Position = self._rootFinal,
-            Size = UDim2.fromOffset(defW, defH),
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.fromOffset(cx, py + 10),
+            Size = UDim2.fromOffset(96, 46),
             BackgroundColor3 = I.CurrentTheme.Background,
             BorderSizePixel = 0,
-            ClipsDescendants = true,
+            ClipsDescendants = false,
             GroupTransparency = 1,
             Parent = I.LayerWindows,
         })
@@ -8073,7 +8173,7 @@ Bundle["Window/Create"] = function(ctx)
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Parent = self.Root,
         }), "Color", "Stroke")
-        self._winScale = I.Create("UIScale", { Scale = 0.94, Parent = self.Root })
+        self._winScale = I.Create("UIScale", { Scale = 0.92, Parent = self.Root })
         self._shadow = I.DropShadow(self.Root, { Radius = 14 })
 
         self.Maid = I.Maid.new()
@@ -8093,46 +8193,203 @@ Bundle["Window/Create"] = function(ctx)
             State.bringToFront(self)
         end))
 
+        self.Body.Visible = false
+        self.ResizeGrip.Visible = false
+        self.Body.Position = UDim2.new(0, 0, 0, 78)
+        self.Sidebar.Position = UDim2.fromOffset(-12, 0)
+
+        I.Tween(self.TitleLabel, "Instant", { TextTransparency = 1 })
+        self._titleLabelFinal = self.TitleLabel.Position
+        self._subLabelFinal = self.SubLabel.Position
+        self.TitleLabel.Position = self._titleLabelFinal - UDim2.fromOffset(16, 0)
+        self.SubLabel.TextTransparency = 1
+        self.SubLabel.Position = self._subLabelFinal - UDim2.fromOffset(12, 0)
+        if self.TitleDivider then
+            self.TitleDivider.Size = UDim2.new(0, 0, 0, 1)
+        end
+        if self.IconImg then
+            self._iconFinal = self.IconImg.Position
+            self.IconImg.Visible = false
+            self.IconImg.Position = self._iconFinal - UDim2.fromOffset(10, 0)
+            I.Create("UIScale", { Scale = 0.4, Parent = self.IconImg })
+        end
+
+        self._titleBtnFinals = {}
+        for i, b in ipairs(self._titleButtons) do
+            self._titleBtnFinals[i] = b.Position
+            b.Visible = false
+            b.Position = self._titleBtnFinals[i] + UDim2.fromOffset(26, 0)
+            I.Create("UIScale", { Scale = 0.5, Parent = b })
+        end
+
+        local crown = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.new(0.5, 0, 0, 0),
+            Size = UDim2.fromOffset(0, 3),
+            BackgroundColor3 = I.CurrentTheme.Accent,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 30,
+            Parent = self.Root,
+        })
+        I.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = crown })
+        self._introMaid:Give(crown)
+
+        local shimmer = I.Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(-0.3, 0, 0.5, 0),
+            Size = UDim2.new(0, 90, 2.4, 0),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            Rotation = 16,
+            ZIndex = 50,
+            Visible = false,
+            Parent = self.Root,
+        })
+        I.Create("UIGradient", {
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1),
+                NumberSequenceKeypoint.new(0.5, 0.55),
+                NumberSequenceKeypoint.new(1, 1),
+            }),
+            Parent = shimmer,
+        })
+        self._introMaid:Give(shimmer)
+
         table.insert(Kailex.Windows, self)
         self._focus()
         Layout.geom(self, false, #self.Tabs > 1)
 
-        local dim
-        if #Kailex.Windows == 1 then
-            dim = I.Create("Frame", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundColor3 = Color3.new(0, 0, 0),
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                ZIndex = 0,
-                Parent = I.LayerWindows,
-            })
-            self._introMaid:Give(dim)
-            I.Tween(dim, "Smooth", { BackgroundTransparency = 0.5 })
+        self._introMaid:Give(self.Root.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                State.killIntro(self)
+            end
+        end))
+
+        if cfg.Intro == false then
+            State.killIntro(self)
+            return self
         end
 
-        self.TitleBar.Position = UDim2.new(0, 0, 0, -18)
-        self.Body.Position = UDim2.new(0, 0, 0, 74)
-        I.Tween(self.Root, TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-            { GroupTransparency = 0, Position = self._rootFinal })
-        I.Tween(self._winScale, TweenInfo.new(0.44, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
-        I.Tween(self.TitleBar, TweenInfo.new(0.46, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-            { Position = self._titleFinal })
-        I.Tween(self.Body, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-            { Position = self._bodyFinal })
+        task.delay(0.05, function()
+            if self._destroyed or self._introKilled then return end
 
-        task.delay(0.1, function()
-            if not self._destroyed and self._shadow then self._shadow.SetFade(0.55) end
-        end)
-        task.delay(0.24, function()
-            if not self._destroyed and self._shadow then self._shadow.SetFade(0) end
-        end)
-        task.delay(0.55, function()
-            if not self._destroyed and dim then
-                I.Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()
-                    dim:Destroy()
+            self.Root.AnchorPoint = Vector2.new(0.5, 0)
+            self.Root.Position = UDim2.fromOffset(cx, py + 10)
+            self.Root.Size = UDim2.fromOffset(96, 46)
+            self.Root.Rotation = 0
+            self.Root.ClipsDescendants = false
+            self._winScale.Scale = 0.92
+            self.Body.Visible = false
+            self.ResizeGrip.Visible = false
+            self.Body.Position = UDim2.new(0, 0, 0, 78)
+            self.Sidebar.Position = UDim2.fromOffset(-12, 0)
+            self.TitleLabel.TextTransparency = 1
+            self.TitleLabel.Position = self._titleLabelFinal - UDim2.fromOffset(16, 0)
+            self.SubLabel.TextTransparency = 1
+            self.SubLabel.Position = self._subLabelFinal - UDim2.fromOffset(12, 0)
+            if self.TitleDivider then
+                self.TitleDivider.Size = UDim2.new(0, 0, 0, 1)
+            end
+            if self.IconImg then
+                self.IconImg.Visible = false
+                self.IconImg.Position = self._iconFinal - UDim2.fromOffset(10, 0)
+                local us = self.IconImg:FindFirstChildOfClass("UIScale")
+                if us then us.Scale = 0.4 end
+            end
+            for i, b in ipairs(self._titleButtons) do
+                b.Visible = false
+                b.Position = self._titleBtnFinals[i] + UDim2.fromOffset(26, 0)
+                local us = b:FindFirstChildOfClass("UIScale")
+                if us then us.Scale = 0.5 end
+            end
+            crown.Size = UDim2.fromOffset(0, 3)
+            crown.BackgroundTransparency = 1
+
+            I.Tween(self.Root, TI(0.55, T_CORE), { GroupTransparency = 0, Position = UDim2.fromOffset(cx, py) })
+            I.Tween(self._winScale, TI(0.65, T_CORE, Enum.EasingStyle.Back), { Scale = 1 })
+
+            I.Tween(crown, TI(0.3, T_CROWN_IN), { BackgroundTransparency = 0.1 })
+            I.Tween(crown, TI(0.75, T_CROWN_W), { Size = UDim2.fromOffset(defW, 3) })
+
+            task.delay(0.5, function()
+                if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.7) end
+            end)
+
+            task.delay(T_WIDTH, function()
+                if self._destroyed or self._introKilled then return end
+                I.Tween(self.Root, TI(0.8), { Size = UDim2.fromOffset(defW, 46) })
+            end)
+
+            task.delay(T_HEIGHT, function()
+                if self._destroyed or self._introKilled then return end
+                self.Root.ClipsDescendants = true
+                self.Body.Visible = true
+                self.ResizeGrip.Visible = true
+                I.Tween(self.Root, TI(0.95), { Size = self._introFinalSize })
+                I.Tween(self.Body, TI(0.55, 0.15), { Position = self._bodyFinal })
+                I.Tween(self.Sidebar, TI(0.6, 0.25), { Position = UDim2.new(0, 0, 0, 0) })
+            end)
+
+            if self.IconImg then
+                task.delay(T_ICON, function()
+                    if self._destroyed or self._introKilled then return end
+                    self.IconImg.Visible = true
+                    I.Tween(self.IconImg, TI(0.45), { Position = self._iconFinal })
+                    local us = self.IconImg:FindFirstChildOfClass("UIScale")
+                    if us then
+                        I.Tween(us, TI(0.5, 0, Enum.EasingStyle.Back), { Scale = 1 })
+                    end
                 end)
             end
+
+            I.Tween(self.TitleLabel, TI(0.5, T_TITLE), { TextTransparency = 0, Position = self._titleLabelFinal })
+
+            if self.TitleDivider then
+                I.Tween(self.TitleDivider, TI(0.55, T_DIV), { Size = UDim2.new(1, 0, 0, 1) })
+            end
+
+            I.Tween(self.SubLabel, TI(0.45, T_SUB), { TextTransparency = 0, Position = self._subLabelFinal })
+
+            local btnCount = #self._titleButtons
+            for i, b in ipairs(self._titleButtons) do
+                task.delay(T_BTNS + (btnCount - i) * 0.12, function()
+                    if self._destroyed or self._introKilled then return end
+                    b.Visible = true
+                    I.Tween(b, TI(0.5), { Position = self._titleBtnFinals[i] })
+                    local us = b:FindFirstChildOfClass("UIScale")
+                    if us then
+                        I.Tween(us, TI(0.45, 0.02, Enum.EasingStyle.Back), { Scale = 1 })
+                    end
+                end)
+            end
+
+            task.delay(T_SHIMMER, function()
+                if self._destroyed or self._introKilled or not shimmer.Parent then return end
+                shimmer.Visible = true
+                I.Tween(shimmer, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                    { Position = UDim2.new(1.3, 0, 0.5, 0) })
+            end)
+
+            task.delay(2.1, function()
+                if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0.35) end
+            end)
+
+            task.delay(2.8, function()
+                if not self._destroyed and not self._introKilled and self._shadow then self._shadow.SetFade(0) end
+            end)
+
+            task.delay(2.9, function()
+                if self._destroyed or self._introKilled or not crown.Parent then return end
+                I.Tween(crown, TI(0.55, 0, Enum.EasingStyle.Sine),
+                    { BackgroundTransparency = 1, Size = UDim2.fromOffset(math.max(defW - 60, 0), 3) })
+            end)
+
+            task.delay(T_KILL, function()
+                if self._destroyed then return end
+                State.killIntro(self)
+            end)
         end)
 
         return self

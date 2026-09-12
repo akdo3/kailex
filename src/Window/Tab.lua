@@ -137,6 +137,30 @@ return function(ctx)
             self:_setSelected(self._selected)
         end))
         self:_setSelected(false)
+
+        if window._introKilled then return self end
+        self._labelFinal = self.Label.Position
+        self._iconTabFinal = self.IconImg and self.IconImg.Position
+        local slide = UDim2.fromOffset(Setting.RTL and 20 or -20, 0)
+        local stagger = math.min(1.95 + #window.Tabs * 0.09, 2.85)
+        self.Label.TextTransparency = 1
+        self.Label.Position = self._labelFinal + slide
+        I.Tween(self.Label, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, stagger),
+            { TextTransparency = 0, Position = self._labelFinal })
+        if self._iconTabFinal then
+            self.IconImg.Visible = false
+            self.IconImg.Position = self._iconTabFinal + slide
+            task.delay(stagger, function()
+                if window._destroyed then return end
+                self.IconImg.Visible = true
+                if window._introKilled then
+                    self.IconImg.Position = self._iconTabFinal
+                else
+                    I.Tween(self.IconImg, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                        { Position = self._iconTabFinal })
+                end
+            end)
+        end
         return self
     end
 

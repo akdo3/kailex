@@ -152,7 +152,7 @@ return function(ctx)
     end
 
     function Layout.geom(self, horizontal, multi)
-        local w = self.Root.Size.X.Offset
+        local w = self._introActive and self._introW or self.Root.Size.X.Offset
         local maxSw = math.max(110, math.min(320, w - 240))
         local sw = math.clamp(self._sidebarWidth or 152, 110, maxSw)
         local halfSplit = math.floor((self._splitW or 9) / 2)
@@ -199,7 +199,7 @@ return function(ctx)
         task.defer(function()
             self._layoutQueued = false
             if self._destroyed then return end
-            local w = self.Root.Size.X.Offset
+            local w = self._introActive and self._introW or self.Root.Size.X.Offset
             local multi = #self.Tabs > 1
             local horizontal = multi and w < 500
             local maxSw = math.max(110, math.min(320, w - 240))

@@ -25,23 +25,71 @@ return function(ctx)
             self.Root.ZIndex = math.min(99, z + 1)
         end
         for _, w in ipairs(Kailex.Windows) do
-            if w ~= self and not w._destroyed and w.TitleLabel then
+            if w ~= self and not w._destroyed and w.TitleLabel and not w._introActive then
                 I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0.45 })
             end
         end
-        if self.TitleLabel then
+        if self.TitleLabel and not self._introActive then
             I.Tween(self.TitleLabel, "Fast", { TextTransparency = 0 })
         end
         Kailex._lastActive = self
     end
 
     function State.killIntro(self)
-        I.Tween(self.Root, "Instant", { Position = self._rootFinal, GroupTransparency = 0 })
+        if self._introKilled then return end
+        self._introKilled = true
+        self._introActive = false
+        self.Root.ClipsDescendants = true
+        self.Root.AnchorPoint = Vector2.new(0, 0)
+        I.Tween(self.Root, "Instant", {
+            Position = self._rootFinal,
+            Size = self._introFinalSize or self.Root.Size,
+            GroupTransparency = 0,
+        })
         I.Tween(self._winScale, "Instant", { Scale = 1 })
         I.Tween(self.TitleBar, "Instant", { Position = self._titleFinal })
+        self.Body.Visible = true
         I.Tween(self.Body, "Instant", { Position = self._bodyFinal })
+        if self.ResizeGrip then self.ResizeGrip.Visible = true end
+        if self.Sidebar then I.Tween(self.Sidebar, "Instant", { Position = UDim2.new(0, 0, 0, 0) }) end
+        if self.TitleLabel and self._titleLabelFinal then
+            I.Tween(self.TitleLabel, "Instant", { TextTransparency = 0, Position = self._titleLabelFinal })
+        end
+        if self.SubLabel and self._subLabelFinal then
+            I.Tween(self.SubLabel, "Instant", { TextTransparency = 0, Position = self._subLabelFinal })
+        end
+        if self.IconImg and self._iconFinal then
+            self.IconImg.Visible = true
+            I.Tween(self.IconImg, "Instant", { Position = self._iconFinal })
+            local us = self.IconImg:FindFirstChildOfClass("UIScale")
+            if us then I.Tween(us, "Instant", { Scale = 1 }) end
+        end
+        if self.TitleDivider then
+            I.Tween(self.TitleDivider, "Instant", { Size = UDim2.new(1, 0, 0, 1) })
+        end
+        if self._titleButtons and self._titleBtnFinals then
+            for i, b in ipairs(self._titleButtons) do
+                b.Visible = true
+                I.Tween(b, "Instant", { Position = self._titleBtnFinals[i] })
+                local us = b:FindFirstChildOfClass("UIScale")
+                if us then I.Tween(us, "Instant", { Scale = 1 }) end
+            end
+        end
+        for _, t in ipairs(self.Tabs) do
+            if t.Label and t._labelFinal then
+                I.Tween(t.Label, "Instant", { TextTransparency = 0, Position = t._labelFinal })
+            end
+            if t.IconImg and t._iconTabFinal then
+                t.IconImg.Visible = true
+                t.IconImg.Position = t._iconTabFinal
+            end
+        end
         if self._shadow then self._shadow.SetFade(0) end
-        if self._introMaid then self._introMaid:Destroy() end
+        if self._introMaid then
+            self._introMaid:Destroy()
+            self._introMaid = nil
+        end
+        self:UpdateLayout()
     end
 
     function Window:SetMinimized(state)
@@ -122,6 +170,7 @@ return function(ctx)
 
     function Window:OnViewport()
         if self._destroyed then return end
+        if self._introActive then return end
         local sc = I.GetScale()
         I.ClampWindowToScreen(self.Root)
         if self.Minimized then return end
@@ -159,12 +208,12 @@ return function(ctx)
                 I.Tween(w.TitleLabel, "Fast", { TextTransparency = 0 })
             end
         end
+        State.killIntro(self)
         self:SavePlacement()
         self.Closed:Fire()
         local i = table.find(Kailex.Windows, self)
         if i then table.remove(Kailex.Windows, i) end
         I.ModalManager.CloseAll(self)
-        State.killIntro(self)
         if self._shadow then self._shadow.FadeOut() end
         local root = self.Root
         local done = false

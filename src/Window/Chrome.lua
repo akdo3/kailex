@@ -91,6 +91,7 @@ return function(ctx)
             Parent = titleBar,
         })
         I.Bind(titleDivider, "BackgroundColor3", "Stroke")
+        self.TitleDivider = titleDivider
 
         local searchBox = I.Create("TextBox", {
             Position = UDim2.fromOffset(14, 11),
@@ -134,6 +135,7 @@ return function(ctx)
                 AutoButtonColor = false,
                 Parent = titleBar,
             })
+            b:SetAttribute("FinalX", xPos)
             I.Icon(b, kind, colorKey or "SubText", 12)
             I.AddTooltip(b, { Text = TIPS[kind] or kind })
             return b
