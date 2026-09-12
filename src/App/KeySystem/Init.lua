@@ -55,6 +55,13 @@ return function(ctx)
         end
         K.declineNow = declineNow
 
+        local descH = 15
+        do
+            local measured = I.TextService:GetTextSize(K.desc, I.TS(12), Enum.Font.Gotham, Vector2.new(324, 60))
+            descH = math.clamp(measured.Y, 15, 60)
+        end
+        K._descSpace = descH
+        K.cardSize = UDim2.fromOffset(360, descH + 179)
         View.build(K)
 
         local function grantAccess(key)

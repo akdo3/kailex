@@ -134,7 +134,7 @@ return function(ctx)
         end
 
         self:_bindSaveReload(saveKey, function(v)
-            if type(v) == "boolean" then self:Set(v) end
+            if type(v) == "boolean" then self:Set(v, true) end
         end)
 
         self:_initialCallback(opts.Default ~= nil or hadSaved, self.State)

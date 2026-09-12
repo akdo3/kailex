@@ -14,7 +14,7 @@ return {
     "Elements/Dropdown/View", "Elements/Dropdown/Paint", "Elements/Dropdown/Virtual", "Elements/Dropdown/Actions", "Elements/Dropdown/Init",
     "Elements/TextInput",
     "Elements/ColorPicker/View", "Elements/ColorPicker/Init",
-    "Elements/ProgressBar", "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
+    "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
     "Window/Chrome", "Window/Search", "Window/Layout", "Window/State", "Window/Placement",
     "Window/GridRow", "Window/Tab", "Window/TabTrack", "Window/TabFilter", "Window/Create", "Window/Init",
     "App/MobileButton",

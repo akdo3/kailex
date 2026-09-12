@@ -1,6 +1,7 @@
 return function(ctx)
     local I = ctx.Internal
     local TextService = I.TextService
+    local TweenService = I.TweenService
     local N = I.NotifyState
 
     function N.process()
@@ -94,9 +95,10 @@ return function(ctx)
                 meta.DelayThread = nil
                 N.dismiss(meta)
             end)
-            meta.ProgressTween = I.Tween(meta.Progress,
+            meta.ProgressTween = TweenService:Create(meta.Progress,
                 TweenInfo.new(duration, Enum.EasingStyle.Linear),
                 { Size = UDim2.new(0, 0, 0, 2) })
+            meta.ProgressTween:Play()
 
             meta.Maid:Give(meta.Hit.MouseEnter:Connect(function()
                 if not meta.InUse then return end
@@ -112,9 +114,10 @@ return function(ctx)
                 startedAt = os.clock()
                 if meta.ProgressTween then
                     pcall(function() meta.ProgressTween:Cancel() end)
-                    meta.ProgressTween = I.Tween(meta.Progress,
+                    meta.ProgressTween = TweenService:Create(meta.Progress,
                         TweenInfo.new(math.max(0.05, remaining), Enum.EasingStyle.Linear),
                         { Size = UDim2.new(0, 0, 0, 2) })
+                    meta.ProgressTween:Play()
                 end
                 meta.DelayThread = task.delay(remaining, function()
                     meta.DelayThread = nil

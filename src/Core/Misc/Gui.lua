@@ -69,7 +69,7 @@ return function(ctx)
     I.LayerOverlay = LayerOverlay
     I.LayerNotify = LayerNotify
     I.LayerTooltip = LayerTooltip
-    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerNotify, LayerTooltip }
+    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerTooltip }
     I.GetScale = GetScale
     I.UpdateViewport = UpdateViewport
 end

@@ -50,16 +50,23 @@ return function(ctx)
 
         tab:AddSection("Behavior")
         for _, t in ipairs(TOGGLES) do
-            tab:AddToggle({
-                Name = t.Name, Description = t.Desc,
+            local el = tab:AddToggle({
+                Name = t.Name,
+                Description = t.Desc,
                 Default = Setting[t.Key] == true,
                 Callback = function(v)
                     Setting[t.Key] = v
                     I.SaveManager:Set(t.Save, v)
                 end,
             })
+
+            el.Changed:Connect(function(v)
+                Setting[t.Key] = v
+                I.SaveManager:Set(t.Save, v)
+            end)
         end
-        tab:AddToggle({
+
+        local autoSaveEl = tab:AddToggle({
             Name = "Auto-Save",
             Description = "Write settings to disk automatically",
             Default = Setting.AutoSave ~= false,
@@ -68,6 +75,11 @@ return function(ctx)
                 I.SaveManager:Flush()
             end,
         })
+
+        autoSaveEl.Changed:Connect(function(v)
+            Setting.AutoSave = v
+        end)
+
         tab:AddSlider({
             Name = "Sound Volume",
             Min = 0, Max = 1, Increment = 0.05,

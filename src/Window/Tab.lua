@@ -211,7 +211,7 @@ return function(ctx)
         Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
         Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
         TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
-        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
+        Stepper = Elements.Stepper,
         Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
         DataTable = Elements.DataTable, Label = Elements.Label,
         Paragraph = Elements.Paragraph, Divider = Elements.Divider,

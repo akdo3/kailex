@@ -71,7 +71,7 @@ return function(ctx)
             if self._destroyed then return end
             local n = tonumber(v)
             if n == nil then return end
-            n = math.clamp(n, min, max)
+            n = snap(n)
             if n == value then return end
             value = n
             refreshLabel()

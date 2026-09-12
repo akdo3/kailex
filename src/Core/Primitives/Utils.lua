@@ -217,6 +217,7 @@ return function(ctx)
             BackgroundColor3 = I.CurrentTheme.Surface,
             BorderSizePixel = 0,
             AutoButtonColor = false,
+            Text = "",
             ZIndex = cfg.ZIndex or 5,
             Parent = cfg.Parent or I.LayerPersistent,
         })

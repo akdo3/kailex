@@ -17,7 +17,7 @@ return {
     "Elements/Dropdown/View", "Elements/Dropdown/Paint", "Elements/Dropdown/Virtual", "Elements/Dropdown/Actions", "Elements/Dropdown/Init",
     "Elements/TextInput",
     "Elements/ColorPicker/View", "Elements/ColorPicker/Init",
-    "Elements/ProgressBar", "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
+    "Elements/Stepper", "Elements/Segmented", "Elements/Vector3Input", "Elements/DataTable",
     "Window/Chrome", "Window/Search", "Window/Layout", "Window/State", "Window/Placement",
     "Window/GridRow", "Window/Tab", "Window/TabTrack", "Window/TabFilter", "Window/Create", "Window/Init",
     "App/MobileButton",
@@ -528,6 +528,7 @@ Bundle["Core/Primitives/Utils"] = function(ctx)
             BackgroundColor3 = I.CurrentTheme.Surface,
             BorderSizePixel = 0,
             AutoButtonColor = false,
+            Text = "",
             ZIndex = cfg.ZIndex or 5,
             Parent = cfg.Parent or I.LayerPersistent,
         })
@@ -776,7 +777,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Text = RGB(232,236,246),      SubText = RGB(142,152,175),
             Accent = RGB(122,162,247),    AccentHover = RGB(150,183,250), OnAccent = RGB(10,14,24),
             Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
-            TabBar = RGB(17,19,26),
+            TabBar = RGB(17,19,26),       Ripple = RGB(255,255,255),
         },
         Aurora = {
             Background = RGB(12,16,17),   Surface = RGB(17,23,24),    SurfaceLight = RGB(23,31,32),
@@ -785,7 +786,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Text = RGB(230,240,238),      SubText = RGB(138,158,155),
             Accent = RGB(94,210,190),     AccentHover = RGB(124,224,206), OnAccent = RGB(8,20,18),
             Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
-            TabBar = RGB(14,19,20),
+            TabBar = RGB(14,19,20),       Ripple = RGB(255,255,255),
         },
         Sakura = {
             Background = RGB(18,14,18),   Surface = RGB(25,19,24),    SurfaceLight = RGB(33,25,31),
@@ -794,7 +795,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Text = RGB(244,236,242),      SubText = RGB(168,150,162),
             Accent = RGB(240,146,196),    AccentHover = RGB(246,169,211), OnAccent = RGB(26,12,20),
             Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
-            TabBar = RGB(21,16,20),
+            TabBar = RGB(21,16,20),       Ripple = RGB(255,255,255),
         },
         Daylight = {
             Background = RGB(244,246,250), Surface = RGB(255,255,255), SurfaceLight = RGB(236,240,247),
@@ -812,7 +813,7 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Text = RGB(228,230,238),      SubText = RGB(136,140,158),
             Accent = RGB(124,170,255),    AccentHover = RGB(152,190,255), OnAccent = RGB(8,10,16),
             Success = RGB(158,206,106),   Warning = RGB(224,175,104), Error = RGB(247,118,142),
-            TabBar = RGB(10,10,12),
+            TabBar = RGB(10,10,12),       Ripple = RGB(255,255,255),
         },
         Ember = {
             Background = RGB(20,14,11),   Surface = RGB(27,19,15),    SurfaceLight = RGB(36,25,19),
@@ -821,13 +822,13 @@ Bundle["Core/Rendering/Theme"] = function(ctx)
             Text = RGB(245,236,229),      SubText = RGB(171,150,136),
             Accent = RGB(255,149,94),     AccentHover = RGB(255,168,117), OnAccent = RGB(28,13,6),
             Success = RGB(158,206,106),   Warning = RGB(235,187,120), Error = RGB(247,118,142),
-            TabBar = RGB(23,16,13),
+            TabBar = RGB(23,16,13),       Ripple = RGB(255,255,255),
         },
     }
 
     local ThemeKeys = {
         "Background","Surface","SurfaceLight","Element","ElementHover","Stroke","StrokeBright",
-        "Text","SubText","Accent","AccentHover","OnAccent","Success","Warning","Error","TabBar",
+        "Text","SubText","Accent","AccentHover","OnAccent","Success","Warning","Error","TabBar","Ripple",
     }
 
     I.CurrentTheme = Themes.Nocturne
@@ -1539,7 +1540,7 @@ Bundle["Core/Misc/Gui"] = function(ctx)
     I.LayerOverlay = LayerOverlay
     I.LayerNotify = LayerNotify
     I.LayerTooltip = LayerTooltip
-    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerNotify, LayerTooltip }
+    I.ToggleLayers = { LayerWindows, LayerOverlay, LayerTooltip }
     I.GetScale = GetScale
     I.UpdateViewport = UpdateViewport
 end
@@ -1794,13 +1795,14 @@ Bundle["Core/Interaction/Ripple"] = function(ctx)
 
         local function newRipple()
             local r = I.Create("Frame", {
-                BackgroundColor3 = Color3.new(1, 1, 1),
+                BackgroundColor3 = I.CurrentTheme.Ripple,
                 BorderSizePixel = 0,
                 Visible = false,
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 ZIndex = 50,
                 Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
             })
+            I.Bind(r, "BackgroundColor3", "Ripple")
             I.Once(r.Destroying, function()
                 I.RemoveFrom(RipplePool, r)
             end)
@@ -1913,7 +1915,7 @@ Bundle["Core/Overlays/Tooltip"] = function(ctx)
         TextSize = 12,
         TextColor3 = I.CurrentTheme.Text,
         TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
+        TextXAlignment = I.XAlign(),
         Parent = frame,
     })
     I.Bind(label, "TextColor3", "Text")
@@ -2083,6 +2085,7 @@ end
 Bundle["Core/Overlays/NotifyProcess"] = function(ctx)
     local I = ctx.Internal
     local TextService = I.TextService
+    local TweenService = I.TweenService
     local N = I.NotifyState
 
     function N.process()
@@ -2176,9 +2179,10 @@ Bundle["Core/Overlays/NotifyProcess"] = function(ctx)
                 meta.DelayThread = nil
                 N.dismiss(meta)
             end)
-            meta.ProgressTween = I.Tween(meta.Progress,
+            meta.ProgressTween = TweenService:Create(meta.Progress,
                 TweenInfo.new(duration, Enum.EasingStyle.Linear),
                 { Size = UDim2.new(0, 0, 0, 2) })
+            meta.ProgressTween:Play()
 
             meta.Maid:Give(meta.Hit.MouseEnter:Connect(function()
                 if not meta.InUse then return end
@@ -2194,9 +2198,10 @@ Bundle["Core/Overlays/NotifyProcess"] = function(ctx)
                 startedAt = os.clock()
                 if meta.ProgressTween then
                     pcall(function() meta.ProgressTween:Cancel() end)
-                    meta.ProgressTween = I.Tween(meta.Progress,
+                    meta.ProgressTween = TweenService:Create(meta.Progress,
                         TweenInfo.new(math.max(0.05, remaining), Enum.EasingStyle.Linear),
                         { Size = UDim2.new(0, 0, 0, 2) })
+                    meta.ProgressTween:Play()
                 end
                 meta.DelayThread = task.delay(remaining, function()
                     meta.DelayThread = nil
@@ -2318,7 +2323,7 @@ Bundle["Core/Overlays/NotifyCards"] = function(ctx)
         I.Tween(meta.Body, "Fast", { TextTransparency = 1 })
         I.Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
         for _, b in ipairs(meta.Actions:GetChildren()) do
-            if b:IsA("TextButton") then b:Destroy() end
+            if b:IsA("TextButton") then I.Tween(b, "Fast", { TextTransparency = 1 }) end
         end
         if meta.CardScale then I.Tween(meta.CardScale, "Vanish", { Scale = 0.88 }) end
         I.Tween(meta.Card, "Snappy", { Size = UDim2.new(1, 0, 0, 0) }, function()
@@ -2406,7 +2411,7 @@ Bundle["Core/Overlays/ModalCard"] = function(ctx)
         h.Card = I.Create("CanvasGroup", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.fromScale(0.5, 0.5),
-            Size = cfg.Size or UDim2.fromOffset(360, 200),
+            Size = cfg.Size or UDim2.fromOffset(360, 246),
             BackgroundColor3 = I.CurrentTheme.Surface,
             BorderSizePixel = 0,
             GroupTransparency = 1,
@@ -2582,7 +2587,13 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
             closed = true
             if h then h.Close() end
 
-            I.RunCallback(accepted and data.OnAccept or data.OnDecline, data.Title or "Confirm", accepted)
+            local cb
+            if accepted then
+                cb = data.OnAccept
+            else
+                cb = data.OnDecline
+            end
+            I.RunCallback(cb, data.Title or "Confirm", accepted)
         end
 
         local ok
@@ -2684,14 +2695,14 @@ Bundle["Core/Overlays/Confirm"] = function(ctx)
         local accept = mkBtn(data.AcceptText or data.ConfirmText or "Confirm", true, 2)
 
         h.Maid:Give(accept.MouseButton1Click:Connect(function()
-            close(true)
             I.ApplyRipple(accept)
             I.PlaySound("Click")
+            close(true)
         end))
         h.Maid:Give(decline.MouseButton1Click:Connect(function()
-            close(false)
             I.ApplyRipple(decline)
             I.PlaySound("Click")
+            close(false)
         end))
 
         local hook = I.AddInputHook(function() return not closed end, function(input, gp)
@@ -2920,6 +2931,8 @@ Bundle["Core/Overlays/ContextMenu"] = function(ctx)
 
     function ContextMenu.Show(items, x, y)
         if not items or #items == 0 then return end
+        x = tonumber(x) or 0
+        y = tonumber(y) or 0
         if not frame then build() end
         hideToken += 1
         for _, ch in ipairs(frame:GetChildren()) do
@@ -3877,7 +3890,7 @@ Bundle["Elements/Toggle"] = function(ctx)
         end
 
         self:_bindSaveReload(saveKey, function(v)
-            if type(v) == "boolean" then self:Set(v) end
+            if type(v) == "boolean" then self:Set(v, true) end
         end)
 
         self:_initialCallback(opts.Default ~= nil or hadSaved, self.State)
@@ -4932,7 +4945,10 @@ Bundle["Elements/Dropdown/Paint"] = function(ctx)
             rec.Fill.Size = isSel and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 0)
         elseif rec.Check then
             rec.Check.Visible = isSel
-            if isSel and rec.Check.Rotation < -10 then rec.Check.Rotation = -80 end
+            if isSel and rec.Check.Rotation < -10 then
+                rec.Check.Rotation = -80
+                I.Tween(rec.Check, "Spring", { Rotation = 0 })
+            end
         end
     end
 
@@ -5083,6 +5099,7 @@ Bundle["Elements/Dropdown/Paint"] = function(ctx)
             chk.Position = Setting.RTL and UDim2.new(0, 8, 0.5, 0) or UDim2.new(1, -8, 0.5, 0)
             chk.Size = UDim2.fromOffset(11, 11)
             chk.Visible = false
+            chk.Rotation = -80
             rec.Check = chk
         end
 
@@ -6086,90 +6103,6 @@ Bundle["Elements/ColorPicker/Init"] = function(ctx)
 end
 
 
--- [[Elements/ProgressBar]]
-Bundle["Elements/ProgressBar"] = function(ctx)
-    local I = ctx.Internal
-    local Elements = I.Elements
-    local Setting = I.Setting
-
-    Elements.ProgressBar = I.MakeElementClass()
-
-    function Elements.ProgressBar.new(tab, opts)
-        opts = opts or {}
-        local self = setmetatable({}, Elements.ProgressBar)
-        local barW = 150
-        local showText = opts.ShowText ~= false
-        local rightW = barW + (showText and 36 or 0)
-        local maxValue = tonumber(opts.Max) or 1
-        if maxValue <= 0 then maxValue = 1 end
-
-        local _, _, right = I.MkRow(self, tab, opts, "Progress", rightW)
-        self.Callback = opts.Callback or nil
-
-        local track = I.Create("Frame", {
-            Size = UDim2.fromOffset(barW, 8),
-            BackgroundColor3 = I.CurrentTheme.SurfaceLight,
-            BorderSizePixel = 0,
-            LayoutOrder = 1,
-            Parent = right,
-            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-        })
-        I.Bind(track, "BackgroundColor3", "SurfaceLight")
-        local fill = I.Create("Frame", {
-            Size = UDim2.fromScale(0, 1),
-            BackgroundColor3 = I.CurrentTheme.Accent,
-            BorderSizePixel = 0,
-            Parent = track,
-            Children = { I.Create("UICorner", { CornerRadius = UDim.new(1, 0) }) },
-        })
-        I.Bind(fill, "BackgroundColor3", "Accent")
-        local textLabel
-        if showText then
-            textLabel = I.Create("TextLabel", {
-                Size = UDim2.fromOffset(32, 1),
-                BackgroundTransparency = 1,
-                Font = Enum.Font.GothamBold,
-                TextSize = 11,
-                TextColor3 = I.CurrentTheme.SubText,
-                TextXAlignment = Setting.RTL and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right,
-                Text = "0%",
-                LayoutOrder = 2,
-                Parent = right,
-            })
-            I.Bind(textLabel, "TextColor3", "SubText")
-        end
-
-        local _value = 0
-
-        function self:Set(val)
-            if self._destroyed then return end
-            local n = tonumber(val)
-            if n == nil then return end
-            _value = math.clamp(n, 0, maxValue)
-            local frac = math.clamp(n / maxValue, 0, 1)
-            I.Tween(fill, "Normal", { Size = UDim2.fromScale(frac, 1) })
-            if textLabel then
-                if type(opts.Format) == "function" then
-                    textLabel.Text = tostring(opts.Format(n))
-                else
-                    textLabel.Text = tostring(math.floor(frac * 100 + 0.5)) .. "%"
-                end
-            end
-            if self.Callback then I.RunCallback(self.Callback, self.Title, n) end
-        end
-        function self:Get() return _value end
-        function self:CopyValue() return tostring(math.floor(self:Get() + 0.5)) end
-
-        if opts.Value ~= nil then
-            self:Set(opts.Value)
-        end
-
-        self:RecalcWidth()
-        return self
-    end
-end
-
-
 -- [[Elements/Stepper]]
 Bundle["Elements/Stepper"] = function(ctx)
     local I = ctx.Internal
@@ -6244,7 +6177,7 @@ Bundle["Elements/Stepper"] = function(ctx)
             if self._destroyed then return end
             local n = tonumber(v)
             if n == nil then return end
-            n = math.clamp(n, min, max)
+            n = snap(n)
             if n == value then return end
             value = n
             refreshLabel()
@@ -6415,7 +6348,8 @@ Bundle["Elements/Segmented"] = function(ctx)
 
         do
             local sv = I.SaveManager:Get(saveKey, nil)
-            selected = findOpt((sv ~= nil) and sv or opts.Default)
+            if sv == nil then sv = opts.Default end
+            selected = findOpt(sv)
         end
 
         paint(true)
@@ -6579,15 +6513,23 @@ Bundle["Elements/DataTable"] = function(ctx)
         end
 
         local bodyH = tonumber(opts.Height) or 200
-        local _, _, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
+        local _, title, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
+        if opts.Description then
+            title.Position = UDim2.new(0, 0, 0, 2)
+            title.Size = UDim2.new(1, -4, 0, 15)
+        else
+            title.Position = UDim2.new(0, 0, 0, 5)
+            title.Size = UDim2.new(1, -4, 0, 16)
+        end
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
+        local topOffset = opts.Description and 34 or 26
         local rows = {}
         local sortCol, sortAsc = nil, true
 
         local header = I.Create("Frame", {
-            Position = UDim2.new(0, 0, 0, 4),
+            Position = UDim2.new(0, 0, 0, topOffset),
             Size = UDim2.new(1, 0, 0, rowH),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
@@ -6597,8 +6539,8 @@ Bundle["Elements/DataTable"] = function(ctx)
         I.Bind(header, "BackgroundColor3", "SurfaceLight")
 
         local canvas = I.Create("ScrollingFrame", {
-            Position = UDim2.new(0, 0, 0, rowH + 8),
-            Size = UDim2.new(1, 0, 1, -(rowH + 14)),
+            Position = UDim2.new(0, 0, 0, topOffset + rowH + 4),
+            Size = UDim2.new(1, 0, 1, -(topOffset + rowH + 10)),
             BackgroundTransparency = 1,
             CanvasSize = UDim2.new(),
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -7777,7 +7719,7 @@ Bundle["Window/Tab"] = function(ctx)
         Button = Elements.Button, Toggle = Elements.Toggle, Slider = Elements.Slider,
         Dropdown = Elements.Dropdown, Keybind = Elements.Keybind,
         TextInput = Elements.TextInput, ColorPicker = Elements.ColorPicker,
-        ProgressBar = Elements.ProgressBar, Stepper = Elements.Stepper,
+        Stepper = Elements.Stepper,
         Segmented = Elements.Segmented, Vector3Input = Elements.Vector3Input,
         DataTable = Elements.DataTable, Label = Elements.Label,
         Paragraph = Elements.Paragraph, Divider = Elements.Divider,
@@ -8405,7 +8347,7 @@ Bundle["App/KeySystem/View"] = function(ctx)
     function View.build(K)
         local opts = K.options
         K.h = I.ModalCard.OpenCenter({
-            Size = UDim2.fromOffset(360, 246),
+            Size = K.cardSize or UDim2.fromOffset(360, 246),
             Closer = K.declineNow,
         })
         K.maid = K.h.Maid
@@ -8434,8 +8376,11 @@ Bundle["App/KeySystem/View"] = function(ctx)
         })
         I.Bind(descLabel, "TextColor3", "SubText")
 
+        local descShown = K._descSpace or 30
+        descLabel.Size = UDim2.new(1, -36, 0, descShown)
+
         K.statusLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(18, 122),
+            Position = UDim2.fromOffset(18, 38 + 12 + descShown + 38 + 6),
             Size = UDim2.new(1, -36, 0, 15),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham, TextSize = 11,
@@ -8445,11 +8390,12 @@ Bundle["App/KeySystem/View"] = function(ctx)
             Text = "",
             ZIndex = 42, Parent = K.card,
         })
+        I.Bind(K.statusLabel, "TextColor3", "SubText")
 
         local hasPaste = I.ReadClipboard ~= nil
 
         K.inputBox = I.Create("TextBox", {
-            Position = UDim2.fromOffset(18, 76),
+            Position = UDim2.fromOffset(18, 38 + 12 + descShown),
             Size = UDim2.new(1, -36, 0, 38),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
@@ -8496,9 +8442,10 @@ Bundle["App/KeySystem/View"] = function(ctx)
             end))
         end
 
+        local btnY = 38 + 12 + descShown + 38 + 6 + 15 + 14
         local function mkBtn(text, accent, xPos, w)
             return I.MkButton(K.card, {
-                Position = UDim2.fromOffset(xPos, 176),
+                Position = UDim2.fromOffset(xPos, btnY),
                 Size = UDim2.fromOffset(w, 40),
                 Text = text,
                 Font = Enum.Font.GothamBold,
@@ -8582,6 +8529,13 @@ Bundle["App/KeySystem/Init"] = function(ctx)
         end
         K.declineNow = declineNow
 
+        local descH = 15
+        do
+            local measured = I.TextService:GetTextSize(K.desc, I.TS(12), Enum.Font.Gotham, Vector2.new(324, 60))
+            descH = math.clamp(measured.Y, 15, 60)
+        end
+        K._descSpace = descH
+        K.cardSize = UDim2.fromOffset(360, descH + 179)
         View.build(K)
 
         local function grantAccess(key)
@@ -8949,16 +8903,23 @@ Bundle["App/SettingsTab/Init"] = function(ctx)
 
         tab:AddSection("Behavior")
         for _, t in ipairs(TOGGLES) do
-            tab:AddToggle({
-                Name = t.Name, Description = t.Desc,
+            local el = tab:AddToggle({
+                Name = t.Name,
+                Description = t.Desc,
                 Default = Setting[t.Key] == true,
                 Callback = function(v)
                     Setting[t.Key] = v
                     I.SaveManager:Set(t.Save, v)
                 end,
             })
+
+            el.Changed:Connect(function(v)
+                Setting[t.Key] = v
+                I.SaveManager:Set(t.Save, v)
+            end)
         end
-        tab:AddToggle({
+
+        local autoSaveEl = tab:AddToggle({
             Name = "Auto-Save",
             Description = "Write settings to disk automatically",
             Default = Setting.AutoSave ~= false,
@@ -8967,6 +8928,11 @@ Bundle["App/SettingsTab/Init"] = function(ctx)
                 I.SaveManager:Flush()
             end,
         })
+
+        autoSaveEl.Changed:Connect(function(v)
+            Setting.AutoSave = v
+        end)
+
         tab:AddSlider({
             Name = "Sound Volume",
             Min = 0, Max = 1, Increment = 0.05,
@@ -9095,6 +9061,8 @@ Bundle["App/Boot"] = function(ctx)
 
     local bootHook = I.AddInputHook(function() return true end, function(input, gp)
         if input.KeyCode == Enum.KeyCode.Escape then
+            if gp then return end
+            if UserInputService:GetFocusedTextBox() ~= nil then return end
             if I.ActiveKeybindListener == nil and I.ModalManager.CloseTop() then
                 return
             end

@@ -374,27 +374,6 @@ vecInput = tEl:AddVector3Input({
 
 tEl:AddSection("Progress and tables")
 
-pbarMain = tEl:AddProgressBar({
-    Name = "ProgressBar",
-    Max = 100,
-    Value = 30,
-    Format = function(v)
-        return string.format("%.0f / 100", v)
-    end,
-    Callback = CB("ProgressBar"),
-})
-
-tEl:AddButton({ Name = "Set(75)", Width = 0.33, Callback = function() pbarMain:Set(75) end })
-tEl:AddButton({ Name = "Set(0)", Width = 0.33, Callback = function() pbarMain:Set(0) end })
-tEl:AddButton({ Name = "Animate", Width = 0.33, Callback = function()
-    task.spawn(function()
-        for i = 0, 20 do
-            pbarMain:Set(i * 5)
-            task.wait(0.05)
-        end
-    end)
-end })
-
 dtabDemo = tEl:AddDataTable({
     Name = "DataTable",
     Description = "Click a column header to sort - click a row to fire the Callback",
@@ -485,7 +464,6 @@ track("Keybind/hold", function() return kbHold:GetState() end, "GetState")
 track("TextInput/Validator", function() return textValid:Get() end, "")
 track("TextInput/plain", function() return textPlain:Get() end, "")
 track("Vector3", function() return vecInput:Get() end, "")
-track("ProgressBar", function() return pbarMain:Get() end, "")
 track("#Kailex.Windows", function() return #Kailex.Windows end, "open windows")
 track("Kailex:IsVisible()", function() return Kailex:IsVisible() end, "global visibility")
 
@@ -946,23 +924,6 @@ d:SetOptions({ "Fresh" })]],
     Default = "#ff0055",
     Callback = function(color) print(color) end,
 })]],
-    },
-    {
-        title = "ProgressBar",
-        rows = {
-            { "Max", "number", "o", "1", "" },
-            { "Value", "number", "o", "0", "" },
-            { "ShowText", "bool", "o", "true", "" },
-            { "Format", "function", "o", "none", "(v) -> string" },
-            { "Callback", "function", "o", "none", "(v)" },
-        },
-        note = "Set accepts numbers only",
-        example = [[local p = tab:AddProgressBar({
-    Name = "Loading",
-    Max = 100, Value = 0,
-    Format = function(v) return v .. "%" end,
-})
-p:Set(50)]],
     },
     {
         title = "Stepper",

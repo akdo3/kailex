@@ -21,7 +21,7 @@ return function(ctx)
     function View.build(K)
         local opts = K.options
         K.h = I.ModalCard.OpenCenter({
-            Size = UDim2.fromOffset(360, 246),
+            Size = K.cardSize or UDim2.fromOffset(360, 246),
             Closer = K.declineNow,
         })
         K.maid = K.h.Maid
@@ -50,8 +50,11 @@ return function(ctx)
         })
         I.Bind(descLabel, "TextColor3", "SubText")
 
+        local descShown = K._descSpace or 30
+        descLabel.Size = UDim2.new(1, -36, 0, descShown)
+
         K.statusLabel = I.Create("TextLabel", {
-            Position = UDim2.fromOffset(18, 122),
+            Position = UDim2.fromOffset(18, 38 + 12 + descShown + 38 + 6),
             Size = UDim2.new(1, -36, 0, 15),
             BackgroundTransparency = 1,
             Font = Enum.Font.Gotham, TextSize = 11,
@@ -61,11 +64,12 @@ return function(ctx)
             Text = "",
             ZIndex = 42, Parent = K.card,
         })
+        I.Bind(K.statusLabel, "TextColor3", "SubText")
 
         local hasPaste = I.ReadClipboard ~= nil
 
         K.inputBox = I.Create("TextBox", {
-            Position = UDim2.fromOffset(18, 76),
+            Position = UDim2.fromOffset(18, 38 + 12 + descShown),
             Size = UDim2.new(1, -36, 0, 38),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
@@ -112,9 +116,10 @@ return function(ctx)
             end))
         end
 
+        local btnY = 38 + 12 + descShown + 38 + 6 + 15 + 14
         local function mkBtn(text, accent, xPos, w)
             return I.MkButton(K.card, {
-                Position = UDim2.fromOffset(xPos, 176),
+                Position = UDim2.fromOffset(xPos, btnY),
                 Size = UDim2.fromOffset(w, 40),
                 Text = text,
                 Font = Enum.Font.GothamBold,

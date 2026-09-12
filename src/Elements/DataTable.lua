@@ -17,15 +17,23 @@ return function(ctx)
         end
 
         local bodyH = tonumber(opts.Height) or 200
-        local _, _, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
+        local _, title, _, left = I.MkRow(self, tab, opts, "Table", 0, bodyH, 0)
+        if opts.Description then
+            title.Position = UDim2.new(0, 0, 0, 2)
+            title.Size = UDim2.new(1, -4, 0, 15)
+        else
+            title.Position = UDim2.new(0, 0, 0, 5)
+            title.Size = UDim2.new(1, -4, 0, 16)
+        end
         self.Callback = opts.Callback or nil
 
         local rowH = I.Device.IsTouch and 34 or 26
+        local topOffset = opts.Description and 34 or 26
         local rows = {}
         local sortCol, sortAsc = nil, true
 
         local header = I.Create("Frame", {
-            Position = UDim2.new(0, 0, 0, 4),
+            Position = UDim2.new(0, 0, 0, topOffset),
             Size = UDim2.new(1, 0, 0, rowH),
             BackgroundColor3 = I.CurrentTheme.SurfaceLight,
             BorderSizePixel = 0,
@@ -35,8 +43,8 @@ return function(ctx)
         I.Bind(header, "BackgroundColor3", "SurfaceLight")
 
         local canvas = I.Create("ScrollingFrame", {
-            Position = UDim2.new(0, 0, 0, rowH + 8),
-            Size = UDim2.new(1, 0, 1, -(rowH + 14)),
+            Position = UDim2.new(0, 0, 0, topOffset + rowH + 4),
+            Size = UDim2.new(1, 0, 1, -(topOffset + rowH + 10)),
             BackgroundTransparency = 1,
             CanvasSize = UDim2.new(),
             AutomaticCanvasSize = Enum.AutomaticSize.Y,

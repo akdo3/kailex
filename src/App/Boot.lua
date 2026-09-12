@@ -34,6 +34,8 @@ return function(ctx)
 
     local bootHook = I.AddInputHook(function() return true end, function(input, gp)
         if input.KeyCode == Enum.KeyCode.Escape then
+            if gp then return end
+            if UserInputService:GetFocusedTextBox() ~= nil then return end
             if I.ActiveKeybindListener == nil and I.ModalManager.CloseTop() then
                 return
             end

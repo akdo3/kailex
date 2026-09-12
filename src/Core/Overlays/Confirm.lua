@@ -46,7 +46,13 @@ return function(ctx)
             closed = true
             if h then h.Close() end
 
-            I.RunCallback(accepted and data.OnAccept or data.OnDecline, data.Title or "Confirm", accepted)
+            local cb
+            if accepted then
+                cb = data.OnAccept
+            else
+                cb = data.OnDecline
+            end
+            I.RunCallback(cb, data.Title or "Confirm", accepted)
         end
 
         local ok
@@ -148,14 +154,14 @@ return function(ctx)
         local accept = mkBtn(data.AcceptText or data.ConfirmText or "Confirm", true, 2)
 
         h.Maid:Give(accept.MouseButton1Click:Connect(function()
-            close(true)
             I.ApplyRipple(accept)
             I.PlaySound("Click")
+            close(true)
         end))
         h.Maid:Give(decline.MouseButton1Click:Connect(function()
-            close(false)
             I.ApplyRipple(decline)
             I.PlaySound("Click")
+            close(false)
         end))
 
         local hook = I.AddInputHook(function() return not closed end, function(input, gp)

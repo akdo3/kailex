@@ -25,7 +25,7 @@ return function(ctx)
         TextSize = 12,
         TextColor3 = I.CurrentTheme.Text,
         TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
+        TextXAlignment = I.XAlign(),
         Parent = frame,
     })
     I.Bind(label, "TextColor3", "Text")

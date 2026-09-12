@@ -21,7 +21,7 @@ return function(ctx)
         h.Card = I.Create("CanvasGroup", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.fromScale(0.5, 0.5),
-            Size = cfg.Size or UDim2.fromOffset(360, 200),
+            Size = cfg.Size or UDim2.fromOffset(360, 246),
             BackgroundColor3 = I.CurrentTheme.Surface,
             BorderSizePixel = 0,
             GroupTransparency = 1,

@@ -18,7 +18,10 @@ return function(ctx)
             rec.Fill.Size = isSel and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 0)
         elseif rec.Check then
             rec.Check.Visible = isSel
-            if isSel and rec.Check.Rotation < -10 then rec.Check.Rotation = -80 end
+            if isSel and rec.Check.Rotation < -10 then
+                rec.Check.Rotation = -80
+                I.Tween(rec.Check, "Spring", { Rotation = 0 })
+            end
         end
     end
 
@@ -169,6 +172,7 @@ return function(ctx)
             chk.Position = Setting.RTL and UDim2.new(0, 8, 0.5, 0) or UDim2.new(1, -8, 0.5, 0)
             chk.Size = UDim2.fromOffset(11, 11)
             chk.Visible = false
+            chk.Rotation = -80
             rec.Check = chk
         end
 

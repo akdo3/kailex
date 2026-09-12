@@ -92,6 +92,8 @@ return function(ctx)
 
     function ContextMenu.Show(items, x, y)
         if not items or #items == 0 then return end
+        x = tonumber(x) or 0
+        y = tonumber(y) or 0
         if not frame then build() end
         hideToken += 1
         for _, ch in ipairs(frame:GetChildren()) do

@@ -106,7 +106,7 @@ return function(ctx)
         I.Tween(meta.Body, "Fast", { TextTransparency = 1 })
         I.Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
         for _, b in ipairs(meta.Actions:GetChildren()) do
-            if b:IsA("TextButton") then b:Destroy() end
+            if b:IsA("TextButton") then I.Tween(b, "Fast", { TextTransparency = 1 }) end
         end
         if meta.CardScale then I.Tween(meta.CardScale, "Vanish", { Scale = 0.88 }) end
         I.Tween(meta.Card, "Snappy", { Size = UDim2.new(1, 0, 0, 0) }, function()

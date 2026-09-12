@@ -101,7 +101,8 @@ return function(ctx)
 
         do
             local sv = I.SaveManager:Get(saveKey, nil)
-            selected = findOpt((sv ~= nil) and sv or opts.Default)
+            if sv == nil then sv = opts.Default end
+            selected = findOpt(sv)
         end
 
         paint(true)
