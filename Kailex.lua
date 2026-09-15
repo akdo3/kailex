@@ -42,9 +42,7 @@ local floor = math.floor
 local Device = {}
 
 do
-	local touch = UIS.TouchEnabled
-	local mouse = UIS.MouseEnabled
-	Device.IsTouch = touch and not mouse
+	Device.IsTouch = UIS.TouchEnabled and not UIS.MouseEnabled
 	Device.IsConsole = false
 	pcall(function()
 		Device.IsConsole = GuiService:IsTenFootInterface()
@@ -309,7 +307,7 @@ function Maid:Destroy()
 end
 
 Kailex.Setting = {
-	Theme = "Nocturne",
+	Theme = "Dark-Blue",
 	Sounds = false,
 	AutoSave = true,
 	UIScale = 1,
@@ -318,19 +316,12 @@ Kailex.Setting = {
 	SaveFolder = "KailexUI",
 	Effects = true,
 	MotionScale = 1,
-	RTL = false,
 }
 
 Kailex.ThemeChanged = Signal.new()
 
 local Setting = Kailex.Setting
 local LibMaid = Maid.new()
-
-local RTL = Setting.RTL == true
-local TXS = RTL and ETA.Right or ETA.Left
-local TXE = RTL and ETA.Left or ETA.Right
-local HStart = RTL and Enum.HorizontalAlignment.Right or Enum.HorizontalAlignment.Left
-local HEdge = RTL and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right
 
 local function IsInputDown(inputType)
 	if inputType == EUT.Touch then
@@ -513,165 +504,172 @@ local function TI(t, s, d)
 	return TweenInfo.new(t, s, d)
 end
 
-local Tweens = {
-	Instant = TI(0.05, E.Quad, ED.Out),
-	Fast = TI(0.12, E.Quint, ED.Out),
-	Snappy = TI(0.16, E.Quart, ED.Out),
-	Normal = TI(0.24, E.Quint, ED.Out),
-	Smooth = TI(0.35, E.Quart, ED.Out),
-	Reveal = TI(0.30, E.Quint, ED.Out),
-	HoverIn = TI(0.14, E.Quint, ED.Out),
-	HoverOut = TI(0.20, E.Sine, ED.Out),
-	Spring = TI(0.34, E.Back, ED.Out),
-	SpringBig = TI(0.45, E.Back, ED.Out),
-	Collapse = TI(0.28, E.Back, ED.In),
-	Ripple = TI(0.45, E.Quint, ED.Out),
-	Pop = TI(0.26, E.Back, ED.Out),
-	PopSoft = TI(0.20, E.Back, ED.Out),
-	Vanish = TI(0.15, E.Quad, ED.In),
-}
-setmetatable(Tweens, { __index = function()
-	return Tweens.Normal
-end })
+local Tween
 
-local ActiveTweens = setmetatable({}, { __mode = "k" })
+do
+	local Tweens = {
+		Instant = TI(0.05, E.Quad, ED.Out),
+		Fast = TI(0.12, E.Quint, ED.Out),
+		Snappy = TI(0.16, E.Quart, ED.Out),
+		Normal = TI(0.24, E.Quint, ED.Out),
+		Smooth = TI(0.35, E.Quart, ED.Out),
+		Reveal = TI(0.30, E.Quint, ED.Out),
+		HoverIn = TI(0.14, E.Quint, ED.Out),
+		HoverOut = TI(0.20, E.Sine, ED.Out),
+		Spring = TI(0.34, E.Back, ED.Out),
+		SpringBig = TI(0.45, E.Back, ED.Out),
+		Collapse = TI(0.28, E.Back, ED.In),
+		Ripple = TI(0.45, E.Quint, ED.Out),
+		Pop = TI(0.26, E.Back, ED.Out),
+		PopSoft = TI(0.20, E.Back, ED.Out),
+		Vanish = TI(0.15, E.Quad, ED.In),
+	}
+	setmetatable(Tweens, { __index = function()
+		return Tweens.Normal
+	end })
 
-local function Tween(inst, preset, props, done)
-	if not inst or not inst.Parent then return nil end
-	if type(props) ~= "table" then return nil end
+	local ActiveTweens = setmetatable({}, { __mode = "k" })
 
-	local info = typeof(preset) == "TweenInfo" and preset or Tweens[preset]
-	local m = tonumber(Setting.MotionScale) or 1
-	if m ~= 1 then
-		local t = math.max(info.Time * m, 0.02)
-		info = TweenInfo.new(t, info.EasingStyle, info.EasingDirection, info.RepeatCount, info.Reverses, info.DelayTime)
-	end
+	function Tween(inst, preset, props, done, delay)
+		if not inst or not inst.Parent then return nil end
+		if type(props) ~= "table" then return nil end
 
-	local book = ActiveTweens[inst]
-	if not book then
-		book = {}
-		ActiveTweens[inst] = book
-	end
-	for prop in pairs(props) do
-		local prev = book[prop]
-		if prev then
-			pcall(prev.Cancel, prev)
-			book[prop] = nil
+		local info = typeof(preset) == "TweenInfo" and preset or Tweens[preset]
+		local m = tonumber(Setting.MotionScale) or 1
+		local dl = (tonumber(delay) or 0) * m
+		if m ~= 1 or dl > 0 then
+			local t = math.max(info.Time * m, 0.02)
+			info = TweenInfo.new(t, info.EasingStyle, info.EasingDirection, info.RepeatCount, info.Reverses, dl)
 		end
-	end
 
-	local ok, tween = pcall(TweenService.Create, TweenService, inst, info, props)
-	if not ok then
-		warn("[Kailex] tween failed: " .. tostring(inst))
-		return nil
-	end
-	for prop in pairs(props) do
-		book[prop] = tween
-	end
-
-	Once(tween.Completed, function(state)
-		local b = ActiveTweens[inst]
-		if b then
-			for prop in pairs(props) do
-				if b[prop] == tween then
-					b[prop] = nil
-				end
+		local book = ActiveTweens[inst]
+		if not book then
+			book = {}
+			ActiveTweens[inst] = book
+		end
+		for prop in pairs(props) do
+			local prev = book[prop]
+			if prev then
+				pcall(prev.Cancel, prev)
+				book[prop] = nil
 			end
 		end
-		if done and state == Enum.PlaybackState.Completed then
-			SafeCall(done)
-		end
-	end)
 
-	tween:Play()
-	return tween
+		local ok, tween = pcall(TweenService.Create, TweenService, inst, info, props)
+		if not ok then
+			warn("[Kailex] tween failed: " .. tostring(inst))
+			return nil
+		end
+		for prop in pairs(props) do
+			book[prop] = tween
+		end
+
+		Once(tween.Completed, function(state)
+			local b = ActiveTweens[inst]
+			if b then
+				for prop in pairs(props) do
+					if b[prop] == tween then
+						b[prop] = nil
+					end
+				end
+			end
+			if done and state == Enum.PlaybackState.Completed then
+				SafeCall(done)
+			end
+		end)
+
+		tween:Play()
+		return tween
+	end
 end
 
-local ThemeKeys = {
-	"Background", "Surface", "SurfaceLight", "Element", "ElementHover", "Stroke", "StrokeBright",
-	"Text", "SubText", "Accent", "AccentHover", "OnAccent", "Success", "Warning", "Error", "TabBar",
-}
+local WHITE, BLACK = CN(1, 1, 1), CN(0, 0, 0)
+local CurrentTheme = nil
+
+local function Mix(a, b, t)
+	return CN(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
+end
+
+local function Luma(c)
+	return c.R * 0.299 + c.G * 0.587 + c.B * 0.114
+end
+
+local function ToColor(v, fallback)
+	if typeof(v) == "Color3" then
+		return v
+	end
+	if type(v) == "string" then
+		return HexToColor(v) or fallback
+	end
+	return fallback
+end
+
+local function DeriveTheme(base)
+	local cur = CurrentTheme
+	base = type(base) == "table" and base or {}
+	local cb = cur and cur.Base
+	local bg = ToColor(base.Background, cb and cb.Background or RGB(13, 15, 20))
+	local surface = ToColor(base.Surface, cb and cb.Surface or Mix(bg, WHITE, 0.03))
+	local text = ToColor(base.Text, cb and cb.Text or RGB(232, 236, 246))
+	local accent = ToColor(base.Accent, cb and cb.Accent or RGB(122, 162, 247))
+	local light = Luma(bg) > 0.5
+	local dir = light and BLACK or WHITE
+	local element = Mix(surface, dir, 0.05)
+
+	return {
+		Base = { Background = bg, Surface = surface, Text = text, Accent = accent },
+		Background = bg,
+		Surface = surface,
+		Text = text,
+		Accent = accent,
+		SurfaceLight = Mix(surface, dir, light and 0.07 or 0.035),
+		Element = element,
+		ElementHover = Mix(element, dir, 0.05),
+		Stroke = Mix(surface, dir, light and 0.17 or 0.11),
+		StrokeBright = Mix(surface, dir, light and 0.32 or 0.23),
+		TabBar = Mix(bg, dir, 0.015),
+		SubText = Mix(text, bg, 0.4),
+		AccentHover = Mix(accent, dir, 0.1),
+		OnAccent = Luma(accent) > 0.55 and Mix(accent, BLACK, 0.88) or Mix(accent, WHITE, 0.94),
+		Knob = light and Mix(text, bg, 0.1) or WHITE,
+		KnobStroke = light and Mix(bg, text, 0.35) or BLACK,
+		Ripple = light and BLACK or WHITE,
+		Success = light and RGB(72, 163, 87) or RGB(158, 206, 106),
+		Warning = light and RGB(196, 142, 30) or RGB(224, 175, 104),
+		Error = light and RGB(219, 68, 94) or RGB(247, 118, 142),
+	}
+end
 
 local Themes = {}
-local ThemeSlots = {
-	"Background", "Surface", "SurfaceLight", "Element", "ElementHover", "Stroke", "StrokeBright",
-	"Text", "SubText", "Accent", "AccentHover", "OnAccent", "TabBar",
-}
 
-local function mkTheme(name, c, extra)
-	local t = {
-		Success = RGB(158, 206, 106),
-		Warning = RGB(224, 175, 104),
-		Error = RGB(247, 118, 142),
-	}
-	for i, k in ipairs(ThemeSlots) do
-		t[k] = c[i]
+Themes["Dark-Blue"] = DeriveTheme({
+	Background = RGB(13, 15, 20), Surface = RGB(19, 22, 30),
+	Text = RGB(232, 236, 246), Accent = RGB(122, 162, 247),
+})
+Themes["Light"] = DeriveTheme({
+	Background = RGB(244, 246, 250), Surface = RGB(255, 255, 255),
+	Text = RGB(28, 34, 48), Accent = RGB(66, 113, 244),
+})
+
+CurrentTheme = Themes["Dark-Blue"]
+
+local CustomBase = nil
+
+local function BaseColors()
+	if CustomBase then
+		return CustomBase
 	end
-	if extra then
-		for k, v in pairs(extra) do
-			t[k] = v
-		end
-	end
-	Themes[name] = t
+	return (Themes[Setting.Theme] or Themes["Dark-Blue"]).Base
 end
 
-mkTheme("Nocturne", {
-	RGB(15, 16, 21), RGB(21, 22, 29), RGB(28, 30, 38),
-	RGB(30, 32, 41), RGB(38, 40, 51), RGB(45, 48, 61),
-	RGB(68, 72, 92), RGB(236, 239, 246), RGB(143, 149, 165),
-	RGB(96, 205, 200), RGB(120, 218, 213), RGB(12, 24, 24),
-	RGB(18, 19, 25),
-})
+local function SameTheme(a, b)
+	if a == b then return true end
+	local x, y = a and a.Base, b and b.Base
+	if not (x and y) then return false end
+	return x.Background == y.Background and x.Surface == y.Surface
+		and x.Text == y.Text and x.Accent == y.Accent
+end
 
-mkTheme("Aurora", {
-	RGB(13, 18, 16), RGB(18, 24, 22), RGB(25, 32, 29),
-	RGB(27, 34, 31), RGB(34, 43, 39), RGB(40, 50, 45),
-	RGB(60, 74, 67), RGB(232, 240, 236), RGB(138, 152, 145),
-	RGB(88, 195, 142), RGB(110, 210, 158), RGB(10, 22, 16),
-	RGB(16, 21, 19),
-})
-
-mkTheme("Sakura", {
-	RGB(20, 16, 19), RGB(27, 21, 25), RGB(35, 28, 33),
-	RGB(37, 30, 35), RGB(47, 38, 44), RGB(55, 44, 51),
-	RGB(82, 66, 76), RGB(243, 236, 240), RGB(156, 143, 151),
-	RGB(240, 139, 178), RGB(246, 161, 195), RGB(30, 12, 20),
-	RGB(23, 18, 22),
-})
-
-mkTheme("Daylight", {
-	RGB(244, 246, 250), RGB(255, 255, 255), RGB(236, 240, 247),
-	RGB(239, 243, 249), RGB(226, 233, 244), RGB(210, 218, 232),
-	RGB(178, 190, 212), RGB(28, 34, 48), RGB(106, 116, 138),
-	RGB(13, 148, 136), RGB(38, 168, 156), RGB(255, 255, 255),
-	RGB(240, 242, 247),
-}, {
-	Success = RGB(72, 163, 87),
-	Warning = RGB(196, 142, 30),
-	Error = RGB(219, 68, 94),
-})
-
-mkTheme("Dark-Blue", {
-	RGB(13, 15, 20), RGB(19, 22, 30), RGB(26, 30, 40),
-	RGB(28, 32, 43), RGB(36, 41, 55), RGB(43, 49, 66),
-	RGB(64, 73, 97), RGB(232, 236, 246), RGB(142, 152, 175),
-	RGB(122, 162, 247), RGB(150, 183, 250), RGB(10, 14, 24),
-	RGB(17, 19, 26),
-})
-
-mkTheme("Light", {
-	RGB(244, 246, 250), RGB(255, 255, 255), RGB(236, 240, 247),
-	RGB(239, 243, 249), RGB(226, 233, 244), RGB(210, 218, 232),
-	RGB(178, 190, 212), RGB(28, 34, 48), RGB(106, 116, 138),
-	RGB(66, 113, 244), RGB(90, 132, 247), RGB(255, 255, 255),
-	RGB(240, 242, 247),
-}, {
-	Success = RGB(72, 163, 87),
-	Warning = RGB(196, 142, 30),
-	Error = RGB(219, 68, 94),
-})
-
-local CurrentTheme = Themes.Nocturne
 local ThemeBindings = setmetatable({}, { __mode = "k" })
 
 local function Bind(inst, prop, key)
@@ -725,36 +723,6 @@ function Kailex:GetThemes()
 	return t
 end
 
-function Kailex:SetTheme(theme)
-	ApplyTheme(theme)
-end
-
-local function BuildTheme(name, colors)
-	local base = CurrentTheme
-	if name ~= nil and name ~= "" then
-		name = tostring(name)
-		base = Themes[name] or CurrentTheme
-	end
-	local t = table.clone(base)
-	for k, v in pairs(colors or {}) do
-		if k ~= "Name" then
-			if typeof(v) == "Color3" then
-				t[k] = v
-			elseif type(v) == "string" then
-				local c = HexToColor(v)
-				if c then
-					t[k] = c
-				end
-			end
-		end
-	end
-	if name then
-		Themes[name] = t
-		Setting.Theme = name
-	end
-	return t
-end
-
 local TextRegistry = setmetatable({}, { __mode = "k" })
 local TextBaseSize = setmetatable({}, { __mode = "k" })
 
@@ -780,63 +748,67 @@ local function ApplyTextScale()
 	end)
 end
 
-local ColorProps = {
-	BackgroundColor3 = true,
-	TextColor3 = true,
-	ImageColor3 = true,
-	PlaceholderColor3 = true,
-	ScrollBarImageColor3 = true,
-	Color = true,
-}
+local Create
 
-local function SetProps(inst, props)
-	for prop, value in pairs(props) do
-		if ColorProps[prop] and type(value) == "string" then
-			Bind(inst, prop, value)
-		else
-			inst[prop] = value
-		end
-	end
-end
+do
+	local ColorProps = {
+		BackgroundColor3 = true,
+		TextColor3 = true,
+		ImageColor3 = true,
+		PlaceholderColor3 = true,
+		ScrollBarImageColor3 = true,
+		Color = true,
+	}
 
-local function Create(className, props)
-	props = props or {}
-	local inst = Instance.new(className)
-	local parent = props.Parent
-	local children = props.Children
-	if parent then props.Parent = nil end
-	if children then props.Children = nil end
-
-	if (className == "TextLabel" or className == "TextButton" or className == "TextBox")
-		and type(props.TextSize) == "number" then
-		TextBaseSize[inst] = props.TextSize
-		TextRegistry[inst] = true
-		props.TextSize = TS(props.TextSize)
-	end
-
-	local ok, err = pcall(SetProps, inst, props)
-	if not ok then
-		warn("[Kailex] property error (" .. className .. "): " .. tostring(err))
+	local function SetProps(inst, props)
 		for prop, value in pairs(props) do
-			pcall(function()
-				if ColorProps[prop] and type(value) == "string" then
-					inst[prop] = CurrentTheme[value]
-				else
-					inst[prop] = value
-				end
-			end)
+			if ColorProps[prop] and type(value) == "string" then
+				Bind(inst, prop, value)
+			else
+				inst[prop] = value
+			end
 		end
 	end
 
-	if children then
-		for _, child in ipairs(children) do
-			child.Parent = inst
+	function Create(className, props)
+		props = props or {}
+		local inst = Instance.new(className)
+		local parent = props.Parent
+		local children = props.Children
+		if parent then props.Parent = nil end
+		if children then props.Children = nil end
+
+		if (className == "TextLabel" or className == "TextButton" or className == "TextBox")
+			and type(props.TextSize) == "number" then
+			TextBaseSize[inst] = props.TextSize
+			TextRegistry[inst] = true
+			props.TextSize = TS(props.TextSize)
 		end
+
+		local ok, err = pcall(SetProps, inst, props)
+		if not ok then
+			warn("[Kailex] property error (" .. className .. "): " .. tostring(err))
+			for prop, value in pairs(props) do
+				pcall(function()
+					if ColorProps[prop] and type(value) == "string" then
+						inst[prop] = CurrentTheme[value]
+					else
+						inst[prop] = value
+					end
+				end)
+			end
+		end
+
+		if children then
+			for _, child in ipairs(children) do
+				child.Parent = inst
+			end
+		end
+		if parent then
+			inst.Parent = parent
+		end
+		return inst
 	end
-	if parent then
-		inst.Parent = parent
-	end
-	return inst
 end
 
 local function Mk(class, base)
@@ -870,29 +842,31 @@ local function UISC(parent, scale)
 	return Create("UIScale", { Scale = scale or 1, Parent = parent })
 end
 
-local function Corner(radius)
-	if radius == nil then radius = 8 end
+local function Corner(radius, parent)
 	return Create("UICorner", {
-		CornerRadius = typeof(radius) == "UDim" and radius or UD(0, radius),
+		CornerRadius = typeof(radius) == "UDim" and radius or UD(0, radius or 8),
+		Parent = parent,
 	})
 end
 
-local function StrokeBind(thickness, key, transparency)
+local function StrokeBind(thickness, key, transparency, parent)
 	local s = Create("UIStroke", {
 		Thickness = thickness or 1,
 		Transparency = transparency or 0.6,
 		ApplyStrokeMode = SB,
+		Parent = parent,
 	})
 	Bind(s, "Color", key or "Stroke")
 	return s
 end
 
-local function Pad(l, r, t, b)
+local function Pad(l, r, t, b, parent)
 	return Create("UIPadding", {
 		PaddingLeft = UD(0, l or 0),
 		PaddingRight = UD(0, r or 0),
 		PaddingTop = UD(0, t or 0),
 		PaddingBottom = UD(0, b or 0),
+		Parent = parent,
 	})
 end
 
@@ -906,71 +880,88 @@ local function List(pad, extra)
 	return Create("UIListLayout", p)
 end
 
-local IconDefs = {
-	Minimize = { { "b", 10, 2, .5, .5, 0 } },
-	Close = { { "b", 11, 2, .5, .5, 45 }, { "b", 11, 2, .5, .5, -45 } },
-	Chevron = { { "b", 7, 2, .32, .55, 45 }, { "b", 7, 2, .68, .55, -45 } },
-	Search = { { "R", 8, 8, 1, 1, 1.6 }, { "b", 6, 2, .72, .72, 45 } },
-	Grip = { { "b", 2, 5, .30, .72, 45 }, { "b", 2, 7, .52, .52, 45 }, { "b", 2, 9, .74, .32, 45 } },
-	Gear = { { "r", 6, 6, .5, .5, 1.6 }, { "g" } },
-	Check = { { "b", 6, 2, .34, .60, 45 }, { "b", 9, 2, .64, .42, -45 } },
-	Reset = { { "r", 9, 9, .5, .5, 1.6 }, { "b", 4, 2, .82, .16, 0 }, { "b", 3, 2, .68, .22, 90 } },
-	Pin = { { "f", 7, 7, .5, .34 }, { "b", 2, 6, .5, .76, 0 } },
-}
+local U = {}
 
-local function Icon(parent, kind, colorKey, size)
-	colorKey = colorKey or "SubText"
-	local holder = Frm({
-		BackgroundTransparency = 1,
-		Size = UO(14, 14),
-		Parent = parent,
-	})
-	for _, op in ipairs(IconDefs[kind] or {}) do
-		local t = op[1]
-		if t == "b" or t == "f" then
-			Frm({
-				AnchorPoint = V2(0.5, 0.5),
-				Size = UO(op[2], op[3]),
-				Position = US(op[4], op[5]),
-				Rotation = op[6] or 0,
-				BackgroundColor3 = colorKey,
-				Parent = holder,
-				Children = t == "f" and { Corner(PILL) } or nil,
-			})
-		elseif t == "r" or t == "R" then
-			local ring = Frm({
-				BackgroundTransparency = 1,
-				Size = UO(op[2], op[3]),
-				Parent = holder,
-				Children = { Corner(PILL) },
-			})
-			if t == "r" then
-				ring.AnchorPoint = V2(0.5, 0.5)
-				ring.Position = US(op[4], op[5])
-			else
-				ring.Position = UO(op[4], op[5])
-			end
-			Bind(Create("UIStroke", { Thickness = op[6] or 1.6, Parent = ring }), "Color", colorKey)
-		elseif t == "g" then
-			for i = 0, 7 do
-				local ang = i * 45
+function U.HL(pad, ha, va)
+	local ex = { FillDirection = EFd.Horizontal }
+	if ha then
+		ex.HorizontalAlignment = ha
+	end
+	if va then
+		ex.VerticalAlignment = va
+	end
+	return List(pad, ex)
+end
+
+local Icon
+
+do
+	local IconDefs = {
+		Minimize = { { "b", 10, 2, .5, .5, 0 } },
+		Close = { { "b", 11, 2, .5, .5, 45 }, { "b", 11, 2, .5, .5, -45 } },
+		Chevron = { { "b", 7, 2, .32, .55, 45 }, { "b", 7, 2, .68, .55, -45 } },
+		Search = { { "R", 8, 8, 1, 1, 1.6 }, { "b", 6, 2, .72, .72, 45 } },
+		Grip = { { "b", 2, 5, .30, .72, 45 }, { "b", 2, 7, .52, .52, 45 }, { "b", 2, 9, .74, .32, 45 } },
+		Gear = { { "r", 6, 6, .5, .5, 1.6 }, { "g" } },
+		Check = { { "b", 6, 2, .34, .60, 45 }, { "b", 9, 2, .64, .42, -45 } },
+		Reset = { { "r", 9, 9, .5, .5, 1.6 }, { "b", 4, 2, .82, .16, 0 }, { "b", 3, 2, .68, .22, 90 } },
+		Pin = { { "f", 7, 7, .5, .34 }, { "b", 2, 6, .5, .76, 0 } },
+	}
+
+	function Icon(parent, kind, colorKey, size)
+		colorKey = colorKey or "SubText"
+		local holder = Frm({
+			BackgroundTransparency = 1,
+			Size = UO(14, 14),
+			Parent = parent,
+		})
+		for _, op in ipairs(IconDefs[kind] or {}) do
+			local t = op[1]
+			if t == "b" or t == "f" then
 				Frm({
 					AnchorPoint = V2(0.5, 0.5),
-					Position = UN(0.5, math.cos(math.rad(ang)) * 5, 0.5, math.sin(math.rad(ang)) * 5),
-					Size = UO(3, 2),
-					Rotation = ang,
+					Size = UO(op[2], op[3]),
+					Position = US(op[4], op[5]),
+					Rotation = op[6] or 0,
 					BackgroundColor3 = colorKey,
 					Parent = holder,
+					Children = t == "f" and { Corner(PILL) } or nil,
 				})
+			elseif t == "r" or t == "R" then
+				local ring = Frm({
+					BackgroundTransparency = 1,
+					Size = UO(op[2], op[3]),
+					Parent = holder,
+					Children = { Corner(PILL) },
+				})
+				if t == "r" then
+					ring.AnchorPoint = V2(0.5, 0.5)
+					ring.Position = US(op[4], op[5])
+				else
+					ring.Position = UO(op[4], op[5])
+				end
+				Bind(Create("UIStroke", { Thickness = op[6] or 1.6, Parent = ring }), "Color", colorKey)
+			elseif t == "g" then
+				for i = 0, 7 do
+					local ang = i * 45
+					Frm({
+						AnchorPoint = V2(0.5, 0.5),
+						Position = UN(0.5, math.cos(math.rad(ang)) * 5, 0.5, math.sin(math.rad(ang)) * 5),
+						Size = UO(3, 2),
+						Rotation = ang,
+						BackgroundColor3 = colorKey,
+						Parent = holder,
+					})
+				end
 			end
 		end
+		if size then
+			holder.AnchorPoint = V2(0.5, 0.5)
+			holder.Position = US(0.5, 0.5)
+			holder.Size = UO(size, size)
+		end
+		return holder
 	end
-	if size then
-		holder.AnchorPoint = V2(0.5, 0.5)
-		holder.Position = US(0.5, 0.5)
-		holder.Size = UO(size, size)
-	end
-	return holder
 end
 
 local Audio = {
@@ -1032,8 +1023,6 @@ local function PlaySound(kind, scale)
 	end)
 end
 
-local GHOST = { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true }
-
 local function AddHover(obj, opts)
 	if Device.IsTouch then return end
 	opts = opts or {}
@@ -1064,6 +1053,99 @@ local function AddHover(obj, opts)
 			Tween(stroke, "HoverOut", { Color = CurrentTheme.Stroke, Transparency = opts.StrokeTransparency or 0.6 })
 		end
 	end)
+end
+
+function U.MkBtn(parent, p)
+	local b = Btn({
+		Position = p.Pos,
+		AnchorPoint = p.Ap,
+		Size = p.Size,
+		BackgroundColor3 = p.BgC or (p.Accent and "Accent" or "Element"),
+		BackgroundTransparency = p.Trans,
+		Text = p.Text,
+		Font = p.Font or EF.GothamBold,
+		TextSize = p.Ts,
+		TextColor3 = p.Color or (p.Accent and "OnAccent" or "Text"),
+		TextTruncate = p.Trunc and TTA or nil,
+		TextXAlignment = p.Align,
+		LayoutOrder = p.Order,
+		ZIndex = p.Z,
+		Parent = parent,
+		Children = { Corner(p.R or 6) },
+	})
+	if p.Hover ~= false then
+		AddHover(b, p.Accent and { HoverKey = "AccentHover", BaseKey = "Accent" } or p.Hover)
+	end
+	return b
+end
+
+function U.Txt(parent, p)
+	return Lbl({
+		Position = p.Pos,
+		AnchorPoint = p.Ap,
+		Size = p.Size,
+		AutomaticSize = p.Auto,
+		BackgroundTransparency = p.Bg,
+		BackgroundColor3 = p.BgC,
+		Font = p.Font or EF.Gotham,
+		TextSize = p.Ts,
+		TextColor3 = p.Color or "Text",
+		TextTransparency = p.Trans,
+		TextWrapped = p.Wrap,
+		TextXAlignment = p.Align,
+		TextYAlignment = p.Val,
+		TextTruncate = p.Trunc and TTA or nil,
+		Text = p.Text,
+		LayoutOrder = p.Order,
+		ZIndex = p.Z,
+		Visible = p.Visible,
+		Parent = parent,
+		Children = p.Kids,
+	})
+end
+
+function U.TxB(parent, p)
+	return TBox({
+		Position = p.Pos,
+		AnchorPoint = p.Ap,
+		Size = p.Size,
+		BackgroundColor3 = p.BgC or "SurfaceLight",
+		BackgroundTransparency = p.Trans,
+		Visible = p.Visible,
+		Text = p.Text or "",
+		PlaceholderText = p.Ph,
+		Font = p.Font or EF.Gotham,
+		TextSize = p.Ts,
+		TextColor3 = "Text",
+		TextXAlignment = p.Align,
+		LayoutOrder = p.Order,
+		ZIndex = p.Z,
+		Parent = parent,
+		Children = p.Kids,
+	})
+end
+
+function U.Overlay(parent, z, vis, bg)
+	return Hit({
+		Size = US(1, 1),
+		ZIndex = z,
+		Visible = vis,
+		BackgroundColor3 = bg,
+		Parent = parent,
+	})
+end
+
+function U.ModalCard(parent, z, w, h, radius, strokeT)
+	return Grp({
+		AnchorPoint = V2(0.5, 0.5),
+		Position = US(0.5, 0.5),
+		Size = UO(w, h),
+		BackgroundColor3 = "Surface",
+		GroupTransparency = 1,
+		ZIndex = z,
+		Parent = parent,
+		Children = { Corner(radius), StrokeBind(1, "Stroke", strokeT) },
+	})
 end
 
 local SaveManager = {
@@ -1101,6 +1183,7 @@ local function IsInternalKey(key)
 end
 
 function SaveManager:Set(key, value)
+	if key == nil then return end
 	if self.Data[key] == value then return end
 	self.Data[key] = value
 	if not Setting.AutoSave then return end
@@ -1129,6 +1212,7 @@ function SaveManager:Flush()
 end
 
 function SaveManager:Get(key, default)
+	if key == nil then return default end
 	local v = self.Data[key]
 	if v == nil then return default end
 	if default ~= nil and typeof(v) ~= typeof(default) then return default end
@@ -1145,6 +1229,14 @@ local function SaveValue(key, value)
 	if key then
 		SaveManager:Set(key, value)
 	end
+end
+
+function U.LoadNum(saveKey, default)
+	local v = SaveManager:Get(saveKey, default)
+	if type(v) == "number" then
+		return v
+	end
+	return default
 end
 
 local Configs = { Folder = SaveManager.Folder .. "/Profiles" }
@@ -1479,7 +1571,7 @@ local RipplePool = {}
 
 local function newRipple()
 	local r = Frm({
-		BackgroundColor3 = CN(1, 1, 1),
+		BackgroundColor3 = WHITE,
 		Visible = false,
 		AnchorPoint = V2(0.5, 0.5),
 		ZIndex = 50,
@@ -1529,6 +1621,7 @@ local function ApplyRipple(target, inputPos)
 
 	rpl.Position = UO(relX, relY)
 	rpl.Size = UO(0, 0)
+	rpl.BackgroundColor3 = CurrentTheme.Ripple
 	rpl.BackgroundTransparency = 0.68
 	rpl.Visible = true
 
@@ -1588,15 +1681,12 @@ do
 		Parent = LayerTooltip,
 		Children = { Corner(6), StrokeBind(1, "Stroke", 0.35) },
 	})
-	local label = Lbl({
+	local label = U.Txt(frame, {
 		Size = UN(1, -16, 1, 0),
-		Position = UO(8, 0),
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "Text",
-		TextWrapped = true,
-		TextXAlignment = ETA.Left,
-		Parent = frame,
+		Pos = UO(8, 0),
+		Ts = 12,
+		Wrap = true,
+		Align = ETA.Left,
 	})
 	local tipScale = UISC(frame)
 	local maid = Maid.new()
@@ -1710,14 +1800,22 @@ local pool = {}
 
 local container = Frm({
 	BackgroundTransparency = 1,
-	AnchorPoint = V2(RTL and 0 or 1, 1),
-	Position = RTL and UN(0, 14, 1, -14) or UN(1, -14, 1, -14),
+	AnchorPoint = V2(1, 1),
+	Position = UN(1, -14, 1, -14),
 	Size = UN(0, 320, 1, -28),
 	Parent = LayerNotify,
-	Children = { List(8, { VerticalAlignment = EVA.Bottom, HorizontalAlignment = HEdge }) },
+	Children = { List(8, { VerticalAlignment = EVA.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) },
 })
 
 local process
+
+function U.ClearActions(actionsFrame)
+	for _, b in ipairs(actionsFrame:GetChildren()) do
+		if b:IsA("TextButton") then
+			b:Destroy()
+		end
+	end
+end
 
 local function newCard()
 	local card = Frm({
@@ -1728,8 +1826,7 @@ local function newCard()
 		Parent = container,
 		Children = { Corner(10) },
 	})
-	local stroke = StrokeBind(1, "Stroke", 0.5)
-	stroke.Parent = card
+	local stroke = StrokeBind(1, "Stroke", 0.5, card)
 	local dot = Frm({
 		Size = UO(7, 7),
 		Position = UO(12, 11),
@@ -1738,28 +1835,24 @@ local function newCard()
 		Parent = card,
 		Children = { Corner(PILL) },
 	})
-	local title = Lbl({
-		Position = UO(26, 8),
+	local title = U.Txt(card, {
+		Pos = UO(26, 8),
 		Size = UN(1, -38, 0, 16),
 		Font = EF.GothamBold,
-		TextSize = 13,
-		TextColor3 = "Text",
-		TextXAlignment = TXS,
-		TextTruncate = TTA,
-		ZIndex = 2,
-		Parent = card,
+		Ts = 13,
+		Align = ETA.Left,
+		Trunc = true,
+		Z = 2,
 	})
-	local body = Lbl({
-		Position = UO(12, 26),
+	local body = U.Txt(card, {
+		Pos = UO(12, 26),
 		Size = UN(1, -24, 0, 0),
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextWrapped = true,
-		TextXAlignment = TXS,
-		TextYAlignment = ETY.Top,
-		ZIndex = 2,
-		Parent = card,
+		Ts = 12,
+		Color = "SubText",
+		Wrap = true,
+		Align = ETA.Left,
+		Val = ETY.Top,
+		Z = 2,
 	})
 	local actions = Frm({
 		BackgroundTransparency = 1,
@@ -1767,7 +1860,7 @@ local function newCard()
 		Size = UN(1, -24, 0, 26),
 		ZIndex = 2,
 		Parent = card,
-		Children = { List(6, { FillDirection = EFd.Horizontal, HorizontalAlignment = HEdge }) },
+		Children = { U.HL(6, Enum.HorizontalAlignment.Right) },
 	})
 	local progress = Frm({
 		AnchorPoint = V2(0, 1),
@@ -1778,13 +1871,13 @@ local function newCard()
 		Parent = card,
 		Children = { Corner(PILL) },
 	})
-	local hit = Hit({ Size = US(1, 1), ZIndex = 3, Parent = card })
+	local hit = U.Overlay(card, 3)
 	local cardScale = UISC(card)
 	local dotScale = UISC(dot)
 	local meta = {
 		Card = card, Stroke = stroke, Dot = dot, Title = title,
 		Body = body, Actions = actions, Progress = progress, Hit = hit, InUse = false,
-		CardScale = cardScale, DotScale = dotScale,
+		CardScale = cardScale, DotScale = dotScale, ThemeKey = "Accent",
 	}
 	table.insert(pool, meta)
 	return meta
@@ -1826,11 +1919,7 @@ local function dismiss(meta)
 	Tween(meta.Title, "Fast", { TextTransparency = 1 })
 	Tween(meta.Body, "Fast", { TextTransparency = 1 })
 	Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
-	for _, b in ipairs(meta.Actions:GetChildren()) do
-		if b:IsA("TextButton") then
-			b:Destroy()
-		end
-	end
+	U.ClearActions(meta.Actions)
 	if meta.CardScale then
 		Tween(meta.CardScale, "Vanish", { Scale = 0.88 })
 	end
@@ -1855,6 +1944,7 @@ process = function()
 		meta.InUse = true
 
 		local themeKey = TypeColors[item.Type] or "Accent"
+		meta.ThemeKey = themeKey
 		meta.Card.Visible = true
 		meta.Card.BackgroundColor3 = CurrentTheme.Surface
 		meta.Stroke.Color = CurrentTheme.Stroke
@@ -1876,29 +1966,19 @@ process = function()
 		end
 
 		local actCount = 0
-		for _, b in ipairs(meta.Actions:GetChildren()) do
-			if b:IsA("TextButton") then
-				b:Destroy()
-			end
-		end
+		U.ClearActions(meta.Actions)
 		if type(item.Actions) == "table" then
 			local cardMaid = Maid.new()
 			meta.Maid = cardMaid
 			for i = 1, math.min(#item.Actions, 3) do
 				local a = item.Actions[i]
-				local b = Btn({
+				local b = U.MkBtn(meta.Actions, {
 					Size = UO(64, 24),
-					BackgroundColor3 = "Element",
 					Text = tostring(a.Text or "OK"),
-					Font = EF.GothamBold,
-					TextSize = 11,
-					TextColor3 = "Text",
-					LayoutOrder = i,
-					ZIndex = 3,
-					Parent = meta.Actions,
-					Children = { Corner(6) },
+					Ts = 11,
+					Order = i,
+					Z = 3,
 				})
-				AddHover(b)
 				actCount += 1
 				cardMaid:Give(b.MouseButton1Click:Connect(function()
 					if not meta.InUse then return end
@@ -1982,6 +2062,20 @@ process = function()
 		end))
 	end
 end
+
+LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+	for _, m in ipairs(pool) do
+		if m.InUse then
+			local c = CurrentTheme[m.ThemeKey or "Accent"]
+			m.Dot.BackgroundColor3 = c
+			m.Progress.BackgroundColor3 = c
+			m.Card.BackgroundColor3 = CurrentTheme.Surface
+			m.Stroke.Color = CurrentTheme.Stroke
+			m.Title.TextColor3 = CurrentTheme.Text
+			m.Body.TextColor3 = CurrentTheme.SubText
+		end
+	end
+end))
 
 function Kailex:Notify(data)
 	if type(data) == "string" then
@@ -2069,53 +2163,35 @@ function Kailex:Confirm(data, onAccept)
 		ModalActive = false
 	end)
 
-	local dimmer = Hit({
-		Size = US(1, 1),
-		BackgroundColor3 = CN(0, 0, 0),
-		BackgroundTransparency = 1,
-		ZIndex = 300,
-		Parent = LayerOverlay,
-	})
+	local dimmer = U.Overlay(LayerOverlay, 300, nil, CN(0, 0, 0))
 	maid:Give(dimmer)
 	maid:Link(dimmer)
 
-	local card = Grp({
-		AnchorPoint = V2(0.5, 0.5),
-		Position = US(0.5, 0.5),
-		Size = UO(360, 200),
-		BackgroundColor3 = "Surface",
-		GroupTransparency = 1,
-		ZIndex = 301,
-		Parent = LayerOverlay,
-		Children = { Corner(12), StrokeBind(1, "Stroke", 0.4), Pad(18, 18, 16, 16) },
-	})
+	local card = U.ModalCard(LayerOverlay, 301, 360, 200, 12, 0.4)
+	Pad(18, 18, 16, 16, card)
 	maid:Give(card)
 
-	Lbl({
+	U.Txt(card, {
 		Size = UN(1, 0, 0, 18),
 		Font = EF.GothamBold,
-		TextSize = 15,
-		TextColor3 = "Text",
-		TextXAlignment = TXS,
-		TextTruncate = TTA,
+		Ts = 15,
+		Align = ETA.Left,
+		Trunc = true,
 		Text = data.Title or "Are you sure?",
-		Parent = card,
 	})
 
 	local bodyText = tostring(data.Text or data.Description or "")
 	local b = TextService:GetTextSize(bodyText, TS(13), EF.Gotham, V2(324, 300))
 	local bodyH = math.min(b.Y, 140)
-	Lbl({
-		Position = UO(0, 24),
+	U.Txt(card, {
+		Pos = UO(0, 24),
 		Size = UN(1, 0, 0, bodyH),
-		Font = EF.Gotham,
-		TextSize = 13,
-		TextColor3 = "SubText",
-		TextWrapped = true,
-		TextXAlignment = TXS,
-		TextYAlignment = ETY.Top,
+		Ts = 13,
+		Color = "SubText",
+		Wrap = true,
+		Align = ETA.Left,
+		Val = ETY.Top,
 		Text = bodyText,
-		Parent = card,
 	})
 
 	local btnRow = Frm({
@@ -2126,24 +2202,19 @@ function Kailex:Confirm(data, onAccept)
 		Parent = card,
 	})
 
-	local function mkBtn(text, accent, pos)
-		local btn = Btn({
-			Position = pos,
-			Size = UN(0.48, -4, 1, 0),
-			BackgroundColor3 = accent and "Accent" or "Element",
-			Text = text,
-			Font = EF.GothamBold,
-			TextSize = 13,
-			TextColor3 = accent and "OnAccent" or "Text",
-			Parent = btnRow,
-			Children = { Corner(8) },
-		})
-		AddHover(btn, accent and { HoverKey = "AccentHover", BaseKey = "Accent" } or nil)
-		return btn
-	end
-
-	local decline = mkBtn(data.DeclineText or data.CancelText or "Cancel", false, UN(0, 0, 0, 0))
-	local accept = mkBtn(data.AcceptText or data.ConfirmText or "Confirm", true, UN(0.52, 0, 0, 0))
+	local decline = U.MkBtn(btnRow, {
+		Pos = UN(0, 0, 0, 0),
+		Size = UN(0.48, -4, 1, 0),
+		Text = data.DeclineText or data.CancelText or "Cancel",
+		Ts = 13,
+	})
+	local accept = U.MkBtn(btnRow, {
+		Pos = UN(0.52, 0, 0, 0),
+		Size = UN(0.48, -4, 1, 0),
+		Text = data.AcceptText or data.ConfirmText or "Confirm",
+		Ts = 13,
+		Accent = true,
+	})
 
 	card.Size = UO(360, 16 + 18 + 6 + bodyH + 14 + 34 + 16)
 	local scale = UISC(card, 0.88)
@@ -2243,16 +2314,14 @@ function QuickWidgets.Toggle(element)
 	QuickWidgets.Active[element] = { Frame = widget, Maid = wMaid }
 
 	local state = element:Get() == true
-	local hit = Hit({ Size = US(1, 1), Parent = widget })
-	local letter = Lbl({
-		AnchorPoint = V2(0.5, 0.5),
-		Position = US(0.5, 0.42),
+	local hit = U.Overlay(widget)
+	local letter = U.Txt(widget, {
+		Ap = V2(0.5, 0.5),
+		Pos = US(0.5, 0.42),
 		Size = UO(20, 20),
 		Font = EF.GothamBold,
-		TextSize = 14,
-		TextColor3 = "Text",
+		Ts = 14,
 		Text = name:sub(1, 1):upper(),
-		Parent = widget,
 	})
 	local dot = Frm({
 		AnchorPoint = V2(0.5, 1),
@@ -2325,12 +2394,7 @@ local function buildCtx()
 			Corner(10), StrokeBind(1, "Stroke", 0.25), List(2), Pad(6, 6, 6, 6),
 		},
 	})
-	ctxCatcher = Hit({
-		Size = US(1, 1),
-		Visible = false,
-		ZIndex = 310,
-		Parent = LayerOverlay,
-	})
+	ctxCatcher = U.Overlay(LayerOverlay, 310, false)
 	ctxCatcher.MouseButton1Click:Connect(function()
 		ContextMenu.Hide()
 	end)
@@ -2366,20 +2430,16 @@ function ContextMenu.Show(items, x, y)
 			if b.X + 26 > width then
 				width = b.X + 26
 			end
-			local btn = Btn({
+			local btn = U.MkBtn(ctxFrame, {
 				Size = UN(1, 0, 0, 26),
-				BackgroundColor3 = "Element",
-				BackgroundTransparency = 1,
+				Trans = 1,
 				Text = text,
 				Font = EF.Gotham,
-				TextSize = 12,
-				TextColor3 = item.Danger and "Error" or "Text",
-				TextXAlignment = TXS,
-				LayoutOrder = i,
-				Parent = ctxFrame,
-				Children = { Corner(6) },
+				Ts = 12,
+				Color = item.Danger and "Error" or "Text",
+				Align = ETA.Left,
+				Order = i,
 			})
-			AddHover(btn)
 			btn.MouseButton1Click:Connect(function()
 				ContextMenu.Hide()
 				if type(item.Callback) == "function" then
@@ -2389,24 +2449,24 @@ function ContextMenu.Show(items, x, y)
 				end
 			end)
 			totalH += 28
-			end
-			end
-
-			ctxFrame.Size = UO(width, totalH)
-local s = GetScale()
-local px = ClampEdge(x, width * s, Viewport.X, 8) / s
-local py = ClampEdge(y, totalH * s, Viewport.Y, 8) / s
-ctxFrame.Position = UO(px, py)
-ctxFrame.Visible = true
-ctxCatcher.Visible = true
-
-ModalManager.Remove(ctxEntry)
-local tk = ctxToken
-ctxEntry = ModalManager.Push(nil, function()
-	if ctxToken == tk then
-		ContextMenu.Hide()
+		end
 	end
-end)
+
+	ctxFrame.Size = UO(width, totalH)
+	local s = GetScale()
+	local px = ClampEdge(x, width * s, Viewport.X, 8) / s
+	local py = ClampEdge(y, totalH * s, Viewport.Y, 8) / s
+	ctxFrame.Position = UO(px, py)
+	ctxFrame.Visible = true
+	ctxCatcher.Visible = true
+
+	ModalManager.Remove(ctxEntry)
+	local tk = ctxToken
+	ctxEntry = ModalManager.Push(nil, function()
+		if ctxToken == tk then
+			ContextMenu.Hide()
+		end
+	end)
 end
 
 function ContextMenu.Hide()
@@ -2425,6 +2485,23 @@ end)
 
 local ActiveKeybindListener = nil
 local HotElement = nil
+
+function U.TrackHot(self, row)
+	if Device.IsTouch then return end
+	row.MouseEnter:Connect(function()
+		HotElement = self
+	end)
+	row.MouseLeave:Connect(function()
+		if HotElement == self then
+			HotElement = nil
+		end
+	end)
+	self.Maid:Give(function()
+		if HotElement == self then
+			HotElement = nil
+		end
+	end)
+end
 
 local function CreateRow(parent, opts)
 	opts = opts or {}
@@ -2448,45 +2525,37 @@ local function CreateRow(parent, opts)
 		Size = UN(1, -rightW, 1, 0),
 		Parent = row,
 	})
-	local title = Lbl({
+	local title = U.Txt(leftFrame, {
 		Size = desc and UN(1, -4, 0, 15) or UN(1, -4, 1, 0),
-		Position = desc and UN(0, 0, 0, 4) or UO(0, 0),
+		Pos = desc and UN(0, 0, 0, 4) or UO(0, 0),
 		Font = EF.GothamMedium,
-		TextSize = 13,
-		TextColor3 = "Text",
-		TextXAlignment = TXS,
-		TextTruncate = TTA,
+		Ts = 13,
+		Align = ETA.Left,
+		Trunc = true,
 		Text = opts.Name or "",
-		Parent = leftFrame,
 	})
 
 	local descLabel
 	if desc then
-		descLabel = Lbl({
+		descLabel = U.Txt(leftFrame, {
 			Size = UN(1, -4, 0, 13),
-			Position = UN(0, 0, 0, 22),
-			Font = EF.Gotham,
-			TextSize = 11,
-			TextColor3 = "SubText",
-			TextTransparency = 0.35,
-			TextXAlignment = TXS,
-			TextTruncate = TTA,
+			Pos = UN(0, 0, 0, 22),
+			Ts = 11,
+			Color = "SubText",
+			Trans = 0.35,
+			Align = ETA.Left,
+			Trunc = true,
 			Text = desc,
-			Parent = leftFrame,
 		})
 	end
 
 	local right = Frm({
 		BackgroundTransparency = 1,
-		AnchorPoint = V2(RTL and 0 or 1, 0.5),
-		Position = RTL and UN(0, 0, 0.5, 0) or UN(1, 0, 0.5, 0),
+		AnchorPoint = V2(1, 0.5),
+		Position = UN(1, 0, 0.5, 0),
 		Size = UN(0, rightW, 1, -4),
 		Parent = row,
-		Children = { List(8, {
-			FillDirection = EFd.Horizontal,
-			HorizontalAlignment = HEdge,
-			VerticalAlignment = EVA.Center,
-		}) },
+		Children = { U.HL(8, Enum.HorizontalAlignment.Right, EVA.Center) },
 	})
 
 	if not opts.NoHover then
@@ -2671,6 +2740,8 @@ function Element:Extra(className, opts)
 		el.Section = nil
 	end
 
+	self.Tab.Window:_introElement(el)
+
 	table.insert(self._extras, el)
 	self._extraW = (self._extraW or 0) + (el._width or 0)
 	self:RecalcWidth()
@@ -2791,8 +2862,11 @@ local function MakeElementClass()
 end
 
 local function ENew(cls, tab, opts, rowOpts)
+	opts = opts or {}
+	rowOpts.Width = rowOpts.Width or opts.Width
+	rowOpts.Description = rowOpts.Description or opts.Description
 	local self = setmetatable({}, cls)
-	self:_row(tab, opts or {}, rowOpts)
+	self:_row(tab, opts, rowOpts)
 	return self
 end
 
@@ -2810,16 +2884,16 @@ function Elements.Label.new(tab, opts)
 		BackgroundTransparency = 1,
 		Size = UN((opts.Width or 1), -3, 0, 20),
 		Parent = tab.Content,
+		Children = { Pad(0, 0, 0, 0) },
 	})
-	local label = Lbl({
+	local label = U.Txt(row, {
 		Size = UN(1, 0, 1, 0),
 		Font = EF.GothamMedium,
-		TextSize = 13,
-		TextColor3 = "SubText",
-		TextXAlignment = ETA.Left,
-		TextTruncate = TTA,
+		Ts = 13,
+		Color = "SubText",
+		Align = ETA.Left,
+		Trunc = true,
 		Text = opts.Text or opts.Name or "Label",
-		Parent = row,
 	})
 	local self = INew(Elements.Label, row, { Name = opts.Text or opts.Name, Width = opts.Width }, tab)
 	self.TextLabel = label
@@ -2846,26 +2920,22 @@ function Elements.Paragraph.new(tab, opts)
 			Corner(8), StrokeBind(1, "Stroke", 0.65), Pad(12, 12, 8, 8), List(6),
 		},
 	})
-	local title = Lbl({
+	local title = U.Txt(row, {
 		Size = UN(1, 0, 0, 16),
 		Font = EF.GothamBold,
-		TextSize = 13,
-		TextColor3 = "Text",
-		TextXAlignment = TXS,
-		TextTruncate = TTA,
+		Ts = 13,
+		Align = ETA.Left,
+		Trunc = true,
 		Text = opts.Title or opts.Name or "",
-		Parent = row,
 	})
-	local body = Lbl({
+	local body = U.Txt(row, {
 		Size = UN(1, 0, 0, 0),
-		AutomaticSize = AS.Y,
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextWrapped = true,
-		TextXAlignment = TXS,
+		Auto = AS.Y,
+		Ts = 12,
+		Color = "SubText",
+		Wrap = true,
+		Align = ETA.Left,
 		Text = tostring(opts.Text or ""),
-		Parent = row,
 	})
 	local self = INew(Elements.Paragraph, row, {
 		Name = opts.Title or opts.Name,
@@ -2890,6 +2960,7 @@ function Elements.Divider.new(tab, opts)
 		BackgroundTransparency = 1,
 		Size = UN((opts.Width or 1), -3, 0, 13),
 		Parent = tab.Content,
+		Children = { Pad(0, 0, 0, 0) },
 	})
 	Frm({
 		AnchorPoint = V2(0.5, 0.5),
@@ -2900,17 +2971,15 @@ function Elements.Divider.new(tab, opts)
 		Parent = row,
 	})
 	if opts.Text then
-		Lbl({
-			AnchorPoint = V2(0.5, 0.5),
-			Position = US(0.5, 0.5),
-			AutomaticSize = AS.X,
-			BackgroundTransparency = 0,
-			BackgroundColor3 = "Background",
-			Font = EF.Gotham,
-			TextSize = 11,
-			TextColor3 = "SubText",
+		U.Txt(row, {
+			Ap = V2(0.5, 0.5),
+			Pos = US(0.5, 0.5),
+			Auto = AS.X,
+			Bg = 0,
+			BgC = "Background",
+			Ts = 11,
+			Color = "SubText",
 			Text = " " .. tostring(opts.Text) .. " ",
-			Parent = row,
 		})
 	end
 	return INew(Elements.Divider, row, { Name = opts.Text, Width = opts.Width }, tab)
@@ -2924,9 +2993,10 @@ function Elements.Section.new(tab, opts)
 		BackgroundTransparency = 1,
 		Size = UN((opts.Width or 1), -3, 0, 26),
 		Parent = tab.Content,
+		Children = { Pad(0, 0, 0, 0) },
 	})
 
-	local hit = Hit({ Size = US(1, 1), Parent = row })
+	local hit = U.Overlay(row)
 
 	Frm({
 		AnchorPoint = V2(0, 0.5),
@@ -2942,16 +3012,15 @@ function Elements.Section.new(tab, opts)
 	chevron.Position = UN(1, -2, 0.5, 0)
 	chevron.Size = UO(10, 10)
 
-	local label = Lbl({
-		Position = UO(12, 0),
+	local label = U.Txt(row, {
+		Pos = UO(12, 0),
 		Size = UN(1, -24, 1, 0),
 		Font = EF.GothamBold,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextXAlignment = ETA.Left,
-		TextTruncate = TTA,
+		Ts = 12,
+		Color = "SubText",
+		Align = ETA.Left,
+		Trunc = true,
 		Text = string.upper(tostring(opts.Name or "Section")),
-		Parent = row,
 	})
 
 	local self = INew(Elements.Section, row, { Name = opts.Name, Width = opts.Width }, nil)
@@ -3005,14 +3074,12 @@ function Elements.Button.new(tab, opts)
 	local self = ENew(Elements.Button, tab, opts, {
 		Name = opts.Name or "Button",
 		RightWidth = opts.Icon ~= nil and 26 or 0,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 	self._width = 0
 	self._busy = false
 
 	local title, row = self.TitleLabel, self.Row
-	local overlay = Hit({ Size = US(1, 1), ZIndex = 0, Parent = row })
+	local overlay = U.Overlay(row, 0)
 
 	local spinner, spinTween
 	local function setSpinner(on)
@@ -3118,8 +3185,6 @@ function Elements.Toggle.new(tab, opts)
 	local self = ENew(Elements.Toggle, tab, opts, {
 		Name = opts.Name or "Toggle",
 		RightWidth = rightW,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 	self._extraH = switchH
 	self.State = default
@@ -3139,11 +3204,11 @@ function Elements.Toggle.new(tab, opts)
 	local knob = Frm({
 		AnchorPoint = V2(0, 0.5),
 		Size = UO(16, 16),
-		BackgroundColor3 = CN(1, 1, 1),
+		BackgroundColor3 = "Knob",
 		Parent = switch,
 		Children = {
 			Corner(PILL),
-			Create("UIStroke", { Thickness = 1, Color = CN(0, 0, 0), Transparency = 0.75, ApplyStrokeMode = SB }),
+			Create("UIStroke", { Thickness = 1, Color = "KnobStroke", Transparency = 0.5, ApplyStrokeMode = SB }),
 		},
 	})
 
@@ -3182,7 +3247,7 @@ function Elements.Toggle.new(tab, opts)
 	end))
 	applyVisuals(false)
 
-	local overlay = Hit({ Size = US(1, 1), ZIndex = 0, Parent = row })
+	local overlay = U.Overlay(row, 0)
 	Click(self.Maid, overlay, function()
 		if self._disabled then return end
 		if overlay:GetAttribute("Dragging") then return end
@@ -3243,11 +3308,7 @@ function Elements.Slider.new(tab, opts)
 	end
 	local increment = tonumber(opts.Increment)
 	local default = tonumber(opts.Default or opts.Value or min) or min
-	local value = SaveManager:Get(saveKey, default)
-	if type(value) ~= "number" then
-		value = default
-	end
-	value = clamp(value, min, max)
+	local value = clamp(U.LoadNum(saveKey, default), min, max)
 
 	local prefix = opts.Prefix and tostring(opts.Prefix) or nil
 	local suffix = opts.Suffix and tostring(opts.Suffix) or nil
@@ -3259,25 +3320,20 @@ function Elements.Slider.new(tab, opts)
 		Name = opts.Name or "Slider",
 		Height = fullH,
 		RightWidth = 0,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 
 	local row, left, title = self.Row, self.LeftFrame, self.TitleLabel
 	title.Size = UN(1, -84, 0, 15)
 	title.Position = UN(0, 0, 0, 4)
 
-	local box = TBox({
-		AnchorPoint = V2(RTL and 0 or 1, 0),
-		Position = RTL and UN(0, 0, 0, 3) or UN(1, 0, 0, 3),
+	local box = U.TxB(left, {
+		Ap = V2(1, 0),
+		Pos = UN(1, 0, 0, 3),
 		Size = UO(52, 18),
-		BackgroundTransparency = 1,
+		Trans = 1,
 		Font = EF.GothamBold,
-		TextSize = 12,
-		TextColor3 = "Text",
-		TextXAlignment = TXE,
-		Text = "",
-		Parent = left,
+		Ts = 12,
+		Align = ETA.Right,
 	})
 
 	local track = Frm({
@@ -3298,31 +3354,28 @@ function Elements.Slider.new(tab, opts)
 		AnchorPoint = V2(0.5, 0.5),
 		Size = UO(14, 14),
 		Position = US(0, 0.5),
-		BackgroundColor3 = CN(1, 1, 1),
+		BackgroundColor3 = "Knob",
 		ZIndex = 2,
 		Parent = track,
 		Children = {
 			Corner(PILL),
-			Create("UIStroke", { Thickness = 2, Color = CurrentTheme.Accent, Transparency = 0.35, ApplyStrokeMode = SB }),
+			Create("UIStroke", { Thickness = 2, Color = "Accent", Transparency = 0.35, ApplyStrokeMode = SB }),
 		},
 	})
 	local knobStroke = knob:FindFirstChildOfClass("UIStroke")
-	Bind(knobStroke, "Color", "Accent")
 
-	local bubble = Lbl({
-		AnchorPoint = V2(0.5, 1),
-		Position = UN(0.5, 0, 0, fullH - 26),
+	local bubble = U.Txt(left, {
+		Ap = V2(0.5, 1),
+		Pos = UN(0.5, 0, 0, fullH - 26),
 		Size = UO(44, 16),
-		BackgroundTransparency = 0,
-		BackgroundColor3 = "SurfaceLight",
+		Bg = 0,
+		BgC = "SurfaceLight",
 		Visible = false,
-		ZIndex = 20,
+		Z = 20,
 		Font = EF.GothamBold,
-		TextSize = 11,
-		TextColor3 = "Text",
+		Ts = 11,
 		Text = "",
-		Parent = left,
-		Children = { Corner(6), StrokeBind(1, "Stroke", 0.3) },
+		Kids = { Corner(6), StrokeBind(1, "Stroke", 0.3) },
 	})
 	local bubbleScale = UISC(bubble)
 
@@ -3390,8 +3443,8 @@ function Elements.Slider.new(tab, opts)
 	})
 
 	local resetBtn = Hit({
-		AnchorPoint = V2(RTL and 0 or 1, 0),
-		Position = RTL and UN(0, 58, 0, 4) or UN(1, -72, 0, 4),
+		AnchorPoint = V2(1, 0),
+		Position = UN(1, -72, 0, 4),
 		Size = UO(16, 16),
 		Visible = false,
 		Parent = left,
@@ -3540,22 +3593,7 @@ function Elements.Slider.new(tab, opts)
 		self:Set(value + step * (fine and 0.2 or 1) * dir)
 	end
 
-	self.Maid:Give(function()
-		if HotElement == self then
-			HotElement = nil
-		end
-	end)
-	if not Device.IsTouch then
-		row.MouseEnter:Connect(function()
-			HotElement = self
-		end)
-		row.MouseLeave:Connect(function()
-			if HotElement == self then
-				HotElement = nil
-			end
-		end)
-	end
-
+	U.TrackHot(self, row)
 	self:_saveAs(saveKey, "number")
 	apply(value, true)
 	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, value)
@@ -3570,8 +3608,6 @@ function Elements.Keybind.new(tab, opts)
 	local self = ENew(Elements.Keybind, tab, opts, {
 		Name = opts.Name or "Keybind",
 		RightWidth = 96,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 
 	local binding = ToBinding(SaveManager:Get(saveKey, nil)) or ToBinding(opts.Default)
@@ -3588,16 +3624,14 @@ function Elements.Keybind.new(tab, opts)
 		end
 	end)
 
-	local bindBtn = Btn({
+	local bindBtn = U.MkBtn(self.RightContainer, {
 		Size = UN(1, 0, 1, 0),
-		BackgroundColor3 = "SurfaceLight",
+		BgC = "SurfaceLight",
 		Text = "None",
-		Font = EF.GothamBold,
-		TextSize = 11,
-		TextColor3 = "Text",
-		Parent = self.RightContainer,
-		Children = { Corner(6), StrokeBind(1, "Stroke", 0.5) },
+		Ts = 11,
+		Hover = false,
 	})
+	StrokeBind(1, "Stroke", 0.5, bindBtn)
 
 	local function refresh()
 		if listening then
@@ -3863,20 +3897,16 @@ function Elements.Dropdown.new(tab, opts)
 		Name = opts.Name or "Dropdown",
 		RightWidth = rightW,
 		Height = baseH,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 	local right, row = self.RightContainer, self.Row
 
-	local valueLabel = Lbl({
+	local valueLabel = U.Txt(right, {
 		Size = UN(0, rightW - 26, 1, 0),
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextXAlignment = TXE,
-		TextTruncate = TTA,
-		LayoutOrder = 1,
-		Parent = right,
+		Ts = 12,
+		Color = "SubText",
+		Align = ETA.Right,
+		Trunc = true,
+		Order = 1,
 	})
 	local chevHolder = Icon(right, "Chevron", "SubText")
 	chevHolder.LayoutOrder = 2
@@ -3896,7 +3926,7 @@ function Elements.Dropdown.new(tab, opts)
 		BackgroundTransparency = 1,
 		Size = UN(1, 0, 0, 0),
 		Parent = list,
-		Children = { List(4, { FillDirection = EFd.Horizontal, HorizontalAlignment = HStart }) },
+		Children = { U.HL(4, Enum.HorizontalAlignment.Left) },
 	})
 
 	local listCanvas = Scr({
@@ -3905,47 +3935,33 @@ function Elements.Dropdown.new(tab, opts)
 	})
 	Bind(listCanvas, "ScrollBarImageColor3", "Stroke")
 
-	local catcher = Hit({
-		Size = US(1, 1),
-		Visible = false,
-		ZIndex = 99,
-		Parent = LayerOverlay,
-	})
+	local catcher = U.Overlay(LayerOverlay, 99, false)
 
 	local searchShown = (#options > DROP_SEARCH_AT) or opts.Searchable == true
 	local searchBox
 	if searchShown then
-		searchBox = TBox({
+		searchBox = U.TxB(header, {
 			Size = UN(1, multi and -60 or -8, 1, -6),
-			BackgroundColor3 = "Surface",
-			Font = EF.Gotham,
-			TextSize = 11,
-			TextColor3 = "Text",
-			PlaceholderText = "Search...",
-			TextXAlignment = TXS,
-			Text = "",
-			LayoutOrder = 1,
-			Parent = header,
-			Children = { Corner(6), Pad(6, 6), StrokeBind(1, "Stroke", 0.5) },
+			BgC = "Surface",
+			Ts = 11,
+			Ph = "Search...",
+			Align = ETA.Left,
+			Order = 1,
+			Kids = { Corner(6), Pad(6, 6), StrokeBind(1, "Stroke", 0.5) },
 		})
 	end
 
 	local allBtn, noneBtn
 	if multi then
 		local function mkMini(text, order)
-			local b = Btn({
+			return U.MkBtn(header, {
 				Size = UO(26, 20),
-				BackgroundColor3 = "Element",
 				Text = text,
-				Font = EF.GothamBold,
-				TextSize = 9,
-				TextColor3 = "SubText",
-				LayoutOrder = order,
-				Parent = header,
-				Children = { Corner(5) },
+				Ts = 9,
+				Color = "SubText",
+				Order = order,
+				R = 5,
 			})
-			AddHover(b)
-			return b
 		end
 		allBtn = mkMini("All", 2)
 		noneBtn = mkMini("None", 3)
@@ -3953,14 +3969,12 @@ function Elements.Dropdown.new(tab, opts)
 
 	local headerH = (searchShown or multi) and 28 or 0
 
-	local emptyLabel = Lbl({
+	local emptyLabel = U.Txt(listCanvas, {
 		Size = UN(1, 0, 0, 20),
-		Font = EF.Gotham,
-		TextSize = 11,
-		TextColor3 = "SubText",
+		Ts = 11,
+		Color = "SubText",
 		Text = "No options",
 		Visible = false,
-		Parent = listCanvas,
 	})
 
 	local display = options
@@ -4040,23 +4054,20 @@ function Elements.Dropdown.new(tab, opts)
 	end
 
 	local function newRec()
-		local btn = Btn({
+		local btn = U.MkBtn(listCanvas, {
 			Size = UN(1, 0, 0, optH),
-			BackgroundColor3 = "Element",
-			BackgroundTransparency = 1,
-			TextXAlignment = TXS,
+			Trans = 1,
 			Font = EF.Gotham,
-			TextSize = 12,
-			TextColor3 = "Text",
-			TextTruncate = TTA,
-			Parent = listCanvas,
-			Children = { Corner(6) },
+			Ts = 12,
+			Align = ETA.Left,
+			Trunc = true,
+			Hover = false,
 		})
 		local rec = { Button = btn, _idx = nil }
 		if multi then
 			local box = Frm({
-				AnchorPoint = V2(RTL and 1 or 0, 0.5),
-				Position = RTL and UN(1, -8, 0.5, 0) or UN(0, 8, 0.5, 0),
+				AnchorPoint = V2(0, 0.5),
+				Position = UN(0, 8, 0.5, 0),
 				Size = UO(16, 16),
 				BackgroundColor3 = "SurfaceLight",
 				Parent = btn,
@@ -4079,8 +4090,8 @@ function Elements.Dropdown.new(tab, opts)
 			Bind(rec.Fill, "BackgroundColor3", "Accent")
 		else
 			local chk = Icon(btn, "Check", "Accent")
-			chk.AnchorPoint = V2(RTL and 0 or 1, 0.5)
-			chk.Position = RTL and UN(0, 8, 0.5, 0) or UN(1, -8, 0.5, 0)
+			chk.AnchorPoint = V2(1, 0.5)
+			chk.Position = UN(1, -8, 0.5, 0)
 			chk.Size = UO(11, 11)
 			chk.Visible = false
 			rec.Check = chk
@@ -4499,8 +4510,6 @@ function Elements.TextInput.new(tab, opts)
 	local self = ENew(Elements.TextInput, tab, opts, {
 		Name = opts.Name or "Input",
 		RightWidth = 170,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 
 	local value = SaveManager:Get(saveKey, opts.Default or "")
@@ -4510,17 +4519,13 @@ function Elements.TextInput.new(tab, opts)
 	local lastFired = value
 	local validator = type(opts.Validator) == "function" and opts.Validator or nil
 
-	local box = TBox({
+	local box = U.TxB(self.RightContainer, {
 		Size = UN(1, 0, 1, 0),
-		BackgroundColor3 = "SurfaceLight",
 		Text = value,
-		PlaceholderText = opts.Placeholder or "",
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "Text",
-		TextXAlignment = TXS,
-		Parent = self.RightContainer,
-		Children = { Corner(6), Pad(8, 8), StrokeBind(1, "Stroke", 0.5) },
+		Ph = opts.Placeholder or "",
+		Ts = 12,
+		Align = ETA.Left,
+		Kids = { Corner(6), Pad(8, 8), StrokeBind(1, "Stroke", 0.5) },
 	})
 	local boxStroke = box:FindFirstChildOfClass("UIStroke")
 	local row = self.Row
@@ -4554,6 +4559,11 @@ function Elements.TextInput.new(tab, opts)
 		if value ~= lastFired or enter then
 			lastFired = value
 			RunCallback(self.Callback, self.Title, value)
+		end
+	end))
+	self.Maid:Give(Kailex.ThemeChanged:Connect(function()
+		if box:IsFocused() then
+			boxStroke.Color = CurrentTheme.Accent
 		end
 	end))
 
@@ -4604,20 +4614,15 @@ function Elements.ColorPicker.new(tab, opts)
 	local self = ENew(Elements.ColorPicker, tab, opts, {
 		Name = opts.Name or "Color",
 		RightWidth = 44,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 
-	local swatchBtn = Btn({
+	local swatchBtn = U.MkBtn(self.RightContainer, {
 		Size = UO(38, 22),
-		BackgroundColor3 = color,
-		LayoutOrder = 1,
-		Parent = self.RightContainer,
-		Children = {
-			Corner(6),
-			Create("UIStroke", { Thickness = 1, Color = CN(1, 1, 1), Transparency = 0.55, ApplyStrokeMode = SB }),
-		},
+		BgC = color,
+		Hover = false,
+		Order = 1,
 	})
+	StrokeBind(1, "Knob", 0.55, swatchBtn)
 
 	local popup, catcher, square, svKnob, hueBar, hueKnob, hexBox
 	local pickerScale
@@ -4654,27 +4659,20 @@ function Elements.ColorPicker.new(tab, opts)
 		})
 		pickerScale = UISC(popup)
 
-		catcher = Hit({
-			Size = US(1, 1),
-			ZIndex = 29,
-			Visible = false,
-			Parent = LayerOverlay,
-		})
+		catcher = U.Overlay(LayerOverlay, 29, false)
 		catcher.MouseButton1Click:Connect(function()
 			closePopup()
 		end)
 
-		Lbl({
-			Position = UO(12, 10),
+		U.Txt(popup, {
+			Pos = UO(12, 10),
 			Size = UN(1, -56, 0, 16),
 			Font = EF.GothamBold,
-			TextSize = 12,
-			TextColor3 = "Text",
-			TextXAlignment = ETA.Left,
-			TextTruncate = TTA,
+			Ts = 12,
+			Align = ETA.Left,
+			Trunc = true,
 			Text = self.Title,
-			ZIndex = 31,
-			Parent = popup,
+			Z = 31,
 		})
 
 		local resetBtn = Hit({
@@ -4694,272 +4692,270 @@ function Elements.ColorPicker.new(tab, opts)
 		end)
 
 		square = Frm({
-	Position = UO(12, 32),
-	Size = UO(216, 120),
-	BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-	ZIndex = 31,
-	Parent = popup,
-	Children = { Corner(8) },
-})
-Frm({
-	Size = US(1, 1),
-	BackgroundColor3 = CN(1, 1, 1),
-	ZIndex = 31,
-	Parent = square,
-	Children = {
-		Corner(8),
-		Create("UIGradient", {
-			Color = ColorSequence.new(CN(1, 1, 1), CN(1, 1, 1)),
-			Transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0, 0),
-				NumberSequenceKeypoint.new(1, 1),
-			}),
-		}),
-	},
-})
-Frm({
-	Size = US(1, 1),
-	BackgroundColor3 = CN(0, 0, 0),
-	ZIndex = 32,
-	Parent = square,
-	Children = {
-		Corner(8),
-		Create("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new(CN(0, 0, 0), CN(0, 0, 0)),
-			Transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0, 1),
-				NumberSequenceKeypoint.new(1, 0),
-			}),
-		}),
-	},
-})
-svKnob = Frm({
-	AnchorPoint = V2(0.5, 0.5),
-	Size = UO(12, 12),
-	BackgroundColor3 = CN(1, 1, 1),
-	ZIndex = 33,
-	Parent = square,
-	Children = {
-		Corner(PILL),
-		Create("UIStroke", { Thickness = 2, Color = CN(0, 0, 0), Transparency = 0.5 }),
-	},
-})
+			Position = UO(12, 32),
+			Size = UO(216, 120),
+			BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+			ZIndex = 31,
+			Parent = popup,
+			Children = { Corner(8) },
+		})
+		Frm({
+			Size = US(1, 1),
+			BackgroundColor3 = CN(1, 1, 1),
+			ZIndex = 31,
+			Parent = square,
+			Children = {
+				Corner(8),
+				Create("UIGradient", {
+					Color = ColorSequence.new(CN(1, 1, 1), CN(1, 1, 1)),
+					Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0),
+						NumberSequenceKeypoint.new(1, 1),
+					}),
+				}),
+			},
+		})
+		Frm({
+			Size = US(1, 1),
+			BackgroundColor3 = CN(0, 0, 0),
+			ZIndex = 32,
+			Parent = square,
+			Children = {
+				Corner(8),
+				Create("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new(CN(0, 0, 0), CN(0, 0, 0)),
+					Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 1),
+						NumberSequenceKeypoint.new(1, 0),
+					}),
+				}),
+			},
+		})
+		svKnob = Frm({
+			AnchorPoint = V2(0.5, 0.5),
+			Size = UO(12, 12),
+			BackgroundColor3 = CN(1, 1, 1),
+			ZIndex = 33,
+			Parent = square,
+			Children = {
+				Corner(PILL),
+				Create("UIStroke", { Thickness = 2, Color = CN(0, 0, 0), Transparency = 0.5 }),
+			},
+		})
 
-hueBar = Frm({
-	Position = UO(12, 158),
-	Size = UO(216, 12),
-	BackgroundColor3 = CN(1, 1, 1),
-	ZIndex = 31,
-	Parent = popup,
-	Children = {
-		Corner(6),
-		Create("UIGradient", {
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0.00, RGB(255, 0, 0)),
-				ColorSequenceKeypoint.new(1 / 6, RGB(255, 255, 0)),
-				ColorSequenceKeypoint.new(2 / 6, RGB(0, 255, 0)),
-				ColorSequenceKeypoint.new(3 / 6, RGB(0, 255, 255)),
-				ColorSequenceKeypoint.new(4 / 6, RGB(0, 0, 255)),
-				ColorSequenceKeypoint.new(5 / 6, RGB(255, 0, 255)),
-				ColorSequenceKeypoint.new(1.00, RGB(255, 0, 0)),
-			}),
-		}),
-	},
-})
-hueKnob = Frm({
-	AnchorPoint = V2(0.5, 0.5),
-	Size = UO(14, 14),
-	Position = UN(h, 0, 0.5, 0),
-	BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-	ZIndex = 32,
-	Parent = hueBar,
-	Children = {
-		Corner(PILL),
-		Create("UIStroke", { Thickness = 2, Color = CN(1, 1, 1), Transparency = 0.2 }),
-	},
-})
+		hueBar = Frm({
+			Position = UO(12, 158),
+			Size = UO(216, 12),
+			BackgroundColor3 = CN(1, 1, 1),
+			ZIndex = 31,
+			Parent = popup,
+			Children = {
+				Corner(6),
+				Create("UIGradient", {
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0.00, RGB(255, 0, 0)),
+						ColorSequenceKeypoint.new(1 / 6, RGB(255, 255, 0)),
+						ColorSequenceKeypoint.new(2 / 6, RGB(0, 255, 0)),
+						ColorSequenceKeypoint.new(3 / 6, RGB(0, 255, 255)),
+						ColorSequenceKeypoint.new(4 / 6, RGB(0, 0, 255)),
+						ColorSequenceKeypoint.new(5 / 6, RGB(255, 0, 255)),
+						ColorSequenceKeypoint.new(1.00, RGB(255, 0, 0)),
+					}),
+				}),
+			},
+		})
+		hueKnob = Frm({
+			AnchorPoint = V2(0.5, 0.5),
+			Size = UO(14, 14),
+			Position = UN(h, 0, 0.5, 0),
+			BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+			ZIndex = 32,
+			Parent = hueBar,
+			Children = {
+				Corner(PILL),
+				Create("UIStroke", { Thickness = 2, Color = CN(1, 1, 1), Transparency = 0.2 }),
+			},
+		})
 
-hexBox = TBox({
-	Position = UO(12, 182),
-	Size = UO(70, 24),
-	BackgroundColor3 = "SurfaceLight",
-	Font = EF.GothamBold,
-	TextSize = 11,
-	TextColor3 = "Text",
-	PlaceholderText = "#RRGGBB",
-	TextXAlignment = ETA.Center,
-	Text = ColorToHex(color),
-	ZIndex = 31,
-	Parent = popup,
-	Children = { Corner(6), Pad(6, 6), StrokeBind(1, "Stroke", 0.5) },
-})
+		hexBox = U.TxB(popup, {
+			Pos = UO(12, 182),
+			Size = UO(70, 24),
+			Font = EF.GothamBold,
+			Ts = 11,
+			Ph = "#RRGGBB",
+			Align = ETA.Center,
+			Text = ColorToHex(color),
+			Z = 31,
+			Kids = { Corner(6), Pad(6, 6), StrokeBind(1, "Stroke", 0.5) },
+		})
 
-local hexCopy = Btn({
-	Position = UO(88, 182),
-	Size = UO(50, 24),
-	BackgroundColor3 = "Element",
-	Text = "Copy",
-	Font = EF.GothamBold,
-	TextSize = 10,
-	TextColor3 = "SubText",
-	ZIndex = 31,
-	Parent = popup,
-	Children = { Corner(6) },
-})
-AddHover(hexCopy)
-hexCopy.MouseButton1Click:Connect(function()
-	CopyToClipboard(ColorToHex(color))
-end)
+		local hexCopy = U.MkBtn(popup, {
+			Pos = UO(88, 182),
+			Size = UO(50, 24),
+			Text = "Copy",
+			Ts = 10,
+			Color = "SubText",
+			Z = 31,
+		})
+		hexCopy.MouseButton1Click:Connect(function()
+			CopyToClipboard(ColorToHex(color))
+		end)
 
-hexBox.FocusLost:Connect(function()
-	local c = HexToColor(hexBox.Text)
-	if c then
-		local rh, rs, rv = RGBtoHSV(c)
-		apply(rh, rs, rv, true)
+		hexBox.FocusLost:Connect(function()
+			local c = HexToColor(hexBox.Text)
+			if c then
+				local rh, rs, rv = RGBtoHSV(c)
+				apply(rh, rs, rv, true)
+				SaveValue(saveKey, ColorToHex(color))
+			else
+				hexBox.Text = ColorToHex(color)
+			end
+		end)
+
+		local function dragTracker(handle, onMove)
+			TrackInput(handle, {
+				Active = handle,
+				MoveNow = true,
+				Move = function(pos)
+					onMove(pos)
+				end,
+				End = function()
+					SaveValue(saveKey, ColorToHex(color))
+				end,
+			})
+		end
+
+		dragTracker(square, function(pos)
+			local ap, as = square.AbsolutePosition, square.AbsoluteSize
+			s = clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
+			v = 1 - clamp((pos.Y - ap.Y) / math.max(1, as.Y), 0, 1)
+			apply(h, s, v, true)
+		end)
+		dragTracker(hueBar, function(pos)
+			local ap, as = hueBar.AbsolutePosition, hueBar.AbsoluteSize
+			h = clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
+			apply(h, s, v, true)
+		end)
+	end
+
+	local function openPopup()
+		if not popup then build() end
+		if open then return end
+		open = true
+		local sc = GetScale()
+		local ap = swatchBtn.AbsolutePosition
+		local asz = swatchBtn.AbsoluteSize
+		local pw, ph = 240 * sc, 216 * sc
+		local px = ap.X + asz.X + 10
+		if px + pw > Viewport.X - 8 then
+			px = ap.X - pw - 10
+		end
+		px = ClampEdge(px, pw, Viewport.X, 8)
+		local py = ClampEdge(ap.Y + asz.Y / 2 - ph / 2, ph, Viewport.Y, 8)
+		popup.Position = UO(px / sc, py / sc)
+		catcher.Visible = true
+		popup.Visible = true
+		pickerScale.Scale = 0.94
+		Tween(pickerScale, "Pop", { Scale = 1 })
+		popup.GroupTransparency = 1
+		Tween(popup, "Snappy", { GroupTransparency = 0 })
+		ModalManager.Remove(modalEntry)
+		modalEntry = ModalManager.Push(tab.Window, closePopup)
+		apply(h, s, v, false)
+	end
+
+	function closePopup()
+		if not open then return end
+		open = false
+		ModalManager.Remove(modalEntry)
+		modalEntry = nil
 		SaveValue(saveKey, ColorToHex(color))
-	else
-		hexBox.Text = ColorToHex(color)
+		Tween(pickerScale, "Vanish", { Scale = 0.95 })
+		Tween(popup, "Fast", { GroupTransparency = 1 }, function()
+			if not open then
+				popup.Visible = false
+				catcher.Visible = false
+			end
+		end)
 	end
-end)
 
-local function dragTracker(handle, onMove)
-	TrackInput(handle, {
-		Active = handle,
-		MoveNow = true,
-		Move = function(pos)
-			onMove(pos)
-		end,
-		End = function()
-			SaveValue(saveKey, ColorToHex(color))
-		end,
-	})
-end
-
-dragTracker(square, function(pos)
-	local ap, as = square.AbsolutePosition, square.AbsoluteSize
-	s = clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
-	v = 1 - clamp((pos.Y - ap.Y) / math.max(1, as.Y), 0, 1)
-	apply(h, s, v, true)
-end)
-dragTracker(hueBar, function(pos)
-	local ap, as = hueBar.AbsolutePosition, hueBar.AbsoluteSize
-	h = clamp((pos.X - ap.X) / math.max(1, as.X), 0, 1)
-	apply(h, s, v, true)
-end)
-end
-
-local function openPopup()
-	if not popup then build() end
-	if open then return end
-	open = true
-	local sc = GetScale()
-	local ap = swatchBtn.AbsolutePosition
-	local asz = swatchBtn.AbsoluteSize
-	local pw, ph = 240 * sc, 216 * sc
-	local px = ap.X + asz.X + 10
-	if px + pw > Viewport.X - 8 then
-		px = ap.X - pw - 10
-	end
-	px = ClampEdge(px, pw, Viewport.X, 8)
-	local py = ClampEdge(ap.Y + asz.Y / 2 - ph / 2, ph, Viewport.Y, 8)
-	popup.Position = UO(px / sc, py / sc)
-	catcher.Visible = true
-	popup.Visible = true
-	pickerScale.Scale = 0.94
-	Tween(pickerScale, "Pop", { Scale = 1 })
-	popup.GroupTransparency = 1
-	Tween(popup, "Snappy", { GroupTransparency = 0 })
-	ModalManager.Remove(modalEntry)
-	modalEntry = ModalManager.Push(tab.Window, closePopup)
-	apply(h, s, v, false)
-end
-
-function closePopup()
-	if not open then return end
-	open = false
-	ModalManager.Remove(modalEntry)
-	modalEntry = nil
-	SaveValue(saveKey, ColorToHex(color))
-	Tween(pickerScale, "Vanish", { Scale = 0.95 })
-	Tween(popup, "Fast", { GroupTransparency = 1 }, function()
-		if not open then
-			popup.Visible = false
-			catcher.Visible = false
+	Click(self.Maid, swatchBtn, function()
+		if self._disabled then return end
+		Tap(swatchBtn, "Click", 0.6)
+		if open then
+			closePopup()
+		else
+			openPopup()
 		end
 	end)
-end
 
-Click(self.Maid, swatchBtn, function()
-	if self._disabled then return end
-	Tap(swatchBtn, "Click", 0.6)
-	if open then
-		closePopup()
-	else
-		openPopup()
-	end
-end)
-
-local escHook = AddInputHook(function()
-	return not self._destroyed
-end, function(input, gp)
-	if open ~= true then return end
-	if input.KeyCode ~= EKC.Escape then return end
-	if gp then
-		local focused = UIS:GetFocusedTextBox()
-		if hexBox and focused == hexBox then
-			closePopup()
+	local escHook = AddInputHook(function()
+		return not self._destroyed
+	end, function(input, gp)
+		if open ~= true then return end
+		if input.KeyCode ~= EKC.Escape then return end
+		if gp then
+			local focused = UIS:GetFocusedTextBox()
+			if hexBox and focused == hexBox then
+				closePopup()
+			end
+			return
 		end
-		return
-	end
-	closePopup()
-end)
-self.Maid:Give(function()
-	RemoveInputHook(escHook)
-end)
-self.Maid:Give(function()
-	ModalManager.Remove(modalEntry)
-end)
-self.Maid:Give(tab.Page:GetPropertyChangedSignal("Visible"):Connect(function()
-	if not tab.Page.Visible then
 		closePopup()
-	end
-end))
-if tab.Window and tab.Window.MinimizedChanged then
-	self.Maid:Give(tab.Window.MinimizedChanged:Connect(function(min)
-		if min then
+	end)
+	self.Maid:Give(function()
+		RemoveInputHook(escHook)
+	end)
+	self.Maid:Give(function()
+		ModalManager.Remove(modalEntry)
+	end)
+	self.Maid:Give(tab.Page:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not tab.Page.Visible then
 			closePopup()
 		end
 	end))
-end
-
-function self:Set(c, silent)
-	if self._destroyed then return end
-	if typeof(c) ~= "Color3" then return end
-	local rh, rs, rv = RGBtoHSV(c)
-	apply(rh, rs, rv, false)
-	SaveValue(saveKey, ColorToHex(color))
-	if not silent then
-		RunCallback(self.Callback, self.Title, color)
+	if tab.Window and tab.Window.MinimizedChanged then
+		self.Maid:Give(tab.Window.MinimizedChanged:Connect(function(min)
+			if min then
+				closePopup()
+			end
+		end))
 	end
-end
 
-function self:Get() return color end
-function self:CopyValue() return ColorToHex(color) end
-
-self:_bindSave(saveKey, function(v)
-	if type(v) == "string" then
-		local c = HexToColor(v)
-		if c then
-			local rh, rs, rv = RGBtoHSV(c)
-			apply(rh, rs, rv, false)
-			SaveValue(saveKey, ColorToHex(color))
+	function self:Set(c, silent)
+		if self._destroyed then return end
+		if typeof(c) ~= "Color3" then return end
+		local rh, rs, rv = RGBtoHSV(c)
+		apply(rh, rs, rv, false)
+		SaveValue(saveKey, ColorToHex(color))
+		if not silent then
+			RunCallback(self.Callback, self.Title, color)
 		end
 	end
-end)
-self:_deferInit(hadSaved or opts.Default ~= nil, color)
 
-return self
+	function self:SetDefault(c)
+		if self._destroyed then return end
+		if typeof(c) ~= "Color3" then return end
+		default = c
+	end
+
+	function self:Get() return color end
+	function self:CopyValue() return ColorToHex(color) end
+
+	self:_bindSave(saveKey, function(v)
+		if type(v) == "string" then
+			local c = HexToColor(v)
+			if c then
+				local rh, rs, rv = RGBtoHSV(c)
+				apply(rh, rs, rv, false)
+				SaveValue(saveKey, ColorToHex(color))
+			end
+		end
+	end)
+	self:_deferInit(hadSaved or opts.Default ~= nil, color)
+
+	return self
 end
 
 Elements.Stepper = MakeElementClass()
@@ -4977,11 +4973,7 @@ function Elements.Stepper.new(tab, opts)
 		step = 1
 	end
 	local default = tonumber(opts.Default or min) or min
-	local value = SaveManager:Get(saveKey, default)
-	if type(value) ~= "number" then
-		value = default
-	end
-	value = clamp(value, min, max)
+	local value = clamp(U.LoadNum(saveKey, default), min, max)
 
 	local decimals = DecimalsOf(step)
 	local fmt = opts.Format
@@ -4995,37 +4987,27 @@ function Elements.Stepper.new(tab, opts)
 	local self = ENew(Elements.Stepper, tab, opts, {
 		Name = opts.Name or "Stepper",
 		RightWidth = 118,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 	local right, row = self.RightContainer, self.Row
 
 	local function mkStepBtn(text, order)
-		local b = Btn({
+		return U.MkBtn(right, {
 			Size = UO(26, 26),
-			BackgroundColor3 = "Element",
 			Text = text,
-			Font = EF.GothamBold,
-			TextSize = 14,
-			TextColor3 = "Text",
-			LayoutOrder = order,
-			Parent = right,
-			Children = { Corner(8) },
+			Ts = 14,
+			Order = order,
+			R = 8,
 		})
-		AddHover(b)
-		return b
 	end
 
 	local minus = mkStepBtn("-", 1)
-	local valLabel = Lbl({
+	local valLabel = U.Txt(right, {
 		Size = UO(56, 26),
 		Font = EF.GothamBold,
-		TextSize = 12,
-		TextColor3 = "Text",
-		TextXAlignment = ETA.Center,
-		TextTruncate = TTA,
-		LayoutOrder = 2,
-		Parent = right,
+		Ts = 12,
+		Align = ETA.Center,
+		Trunc = true,
+		Order = 2,
 	})
 	local plus = mkStepBtn("+", 3)
 
@@ -5084,22 +5066,7 @@ function Elements.Stepper.new(tab, opts)
 		self:Set(value + dir * step)
 	end
 
-	if not Device.IsTouch then
-		row.MouseEnter:Connect(function()
-			HotElement = self
-		end)
-		row.MouseLeave:Connect(function()
-			if HotElement == self then
-				HotElement = nil
-			end
-		end)
-		self.Maid:Give(function()
-			if HotElement == self then
-				HotElement = nil
-			end
-		end)
-	end
-
+	U.TrackHot(self, row)
 	self:_saveAs(saveKey, "number")
 	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, value)
 
@@ -5127,15 +5094,13 @@ function Elements.Segmented.new(tab, opts)
 	local self = ENew(Elements.Segmented, tab, opts, {
 		Name = opts.Name or "Segmented",
 		RightWidth = rightW,
-		Width = opts.Width,
-		Description = opts.Description,
 	})
 
 	local holder = Frm({
 		BackgroundTransparency = 1,
 		Size = UN(1, 0, 1, -4),
 		Parent = self.RightContainer,
-		Children = { List(4, { FillDirection = EFd.Horizontal }) },
+		Children = { U.HL(4) },
 	})
 
 	local buttons = {}
@@ -5148,19 +5113,15 @@ function Elements.Segmented.new(tab, opts)
 	end
 
 	for i, opt in ipairs(options) do
-		local b = Btn({
+		local b = U.MkBtn(holder, {
 			Size = UO(itemW, 26),
-			BackgroundColor3 = "Element",
 			Text = opt.Text,
-			Font = EF.GothamBold,
-			TextSize = 11,
-			TextColor3 = "SubText",
-			TextTruncate = TTA,
-			LayoutOrder = i,
-			Parent = holder,
-			Children = { Corner(8) },
+			Ts = 11,
+			Color = "SubText",
+			Trunc = true,
+			Order = i,
+			R = 8,
 		})
-		AddHover(b)
 		buttons[i] = b
 		b.MouseButton1Click:Connect(function()
 			if self._disabled then return end
@@ -5230,9 +5191,7 @@ function Elements.Vector3Input.new(tab, opts)
 	local self = ENew(Elements.Vector3Input, tab, opts, {
 		Name = opts.Name or "Vector3",
 		RightWidth = 196,
-		Width = opts.Width,
 		Height = 60,
-		Description = opts.Description,
 	})
 
 	local function load()
@@ -5250,18 +5209,15 @@ function Elements.Vector3Input.new(tab, opts)
 	local boxes = {}
 	local names = { "X", "Y", "Z" }
 	for i = 1, 3 do
-		local b = TBox({
+		local b = U.TxB(self.RightContainer, {
 			Size = UO(60, 24),
-			BackgroundColor3 = "SurfaceLight",
 			Font = EF.GothamBold,
-			TextSize = 11,
-			TextColor3 = "Text",
-			PlaceholderText = names[i],
-			TextXAlignment = ETA.Center,
+			Ts = 11,
+			Ph = names[i],
+			Align = ETA.Center,
 			Text = string.format("%.2f", ({ value.X, value.Y, value.Z })[i]),
-			LayoutOrder = i,
-			Parent = self.RightContainer,
-			Children = { Corner(6), StrokeBind(1, "Stroke", 0.5) },
+			Order = i,
+			Kids = { Corner(6), StrokeBind(1, "Stroke", 0.5) },
 		})
 		boxes[i] = b
 		b.FocusLost:Connect(function()
@@ -5314,11 +5270,7 @@ function GridRow:_newFrame()
 		BackgroundTransparency = 1,
 		LayoutOrder = self.Tab:_nextOrder(),
 		Parent = self.Tab.Content,
-		Children = { List(6, {
-			FillDirection = EFd.Horizontal,
-			HorizontalAlignment = HStart,
-			VerticalAlignment = EVA.Center,
-		}) },
+		Children = { U.HL(6, Enum.HorizontalAlignment.Left, EVA.Center) },
 	})
 	self.Frame:SetAttribute("__grid", true)
 	if self.Tab._gridFrames then
@@ -5413,30 +5365,29 @@ function TabClass.new(window, opts)
 		Size = UN(1, 0, 0, 30),
 		Parent = window.TabList,
 	})
-	Corner(7).Parent = self.TabButton
-	Pad(0, 8).Parent = self.TabButton
+	Corner(7, self.TabButton)
+	Pad(0, 8, 0, 0, self.TabButton)
 
 	self.Bar = Frm({
-		AnchorPoint = V2(RTL and 1 or 0, 0.5),
-		Position = RTL and UN(1, 0, 0.5, 0) or UN(0, 0, 0.5, 0),
+		AnchorPoint = V2(0, 0.5),
+		Position = UN(0, 0, 0.5, 0),
 		Size = UO(3, 8),
 		BackgroundColor3 = "Accent",
 		BackgroundTransparency = 1,
 		Parent = self.TabButton,
 	})
-	Corner(PILL).Parent = self.Bar
+	Corner(PILL, self.Bar)
 
-	self.Badge = Lbl({
-		AnchorPoint = V2(RTL and 0 or 1, 0.5),
-		Position = RTL and UN(0, 6, 0.5, 0) or UN(1, -6, 0.5, 0),
+	self.Badge = U.Txt(self.TabButton, {
+		Ap = V2(1, 0.5),
+		Pos = UN(1, -6, 0.5, 0),
 		Size = UO(0, 14),
-		AutomaticSize = AS.X,
+		Auto = AS.X,
 		Font = EF.GothamBold,
-		TextSize = 10,
-		TextColor3 = "SubText",
+		Ts = 10,
+		Color = "SubText",
 		Text = "",
 		Visible = false,
-		Parent = self.TabButton,
 	})
 
 	local iconOffset = 12
@@ -5447,8 +5398,8 @@ function TabClass.new(window, opts)
 			or raw:sub(1, 11) == "rbxassetid" or raw:sub(1, 9) == "rbxasset://"
 		if isAsset then
 			self.IconImg = Create("ImageLabel", {
-				AnchorPoint = V2(RTL and 1 or 0, 0.5),
-				Position = RTL and UN(1, -10, 0.5, 0) or UN(0, 10, 0.5, 0),
+				AnchorPoint = V2(0, 0.5),
+				Position = UN(0, 10, 0.5, 0),
 				Size = UO(16, 16),
 				BackgroundTransparency = 1,
 				Image = tonumber(opts.Icon) and ("rbxassetid://" .. opts.Icon) or opts.Icon,
@@ -5457,23 +5408,22 @@ function TabClass.new(window, opts)
 			})
 		else
 			self.IconImg = Icon(self.TabButton, raw, "SubText")
-			self.IconImg.AnchorPoint = V2(RTL and 1 or 0, 0.5)
-			self.IconImg.Position = RTL and UN(1, -10, 0.5, 0) or UN(0, 10, 0.5, 0)
+			self.IconImg.AnchorPoint = V2(0, 0.5)
+			self.IconImg.Position = UN(0, 10, 0.5, 0)
 			self.IconImg.Size = UO(16, 16)
 		end
 	end
 	self._iconOffset = iconOffset
 
-	self.TabLabel = Lbl({
-		Position = RTL and UN(1, -iconOffset, 0, 0) or UO(iconOffset, 0),
+	self.TabLabel = U.Txt(self.TabButton, {
+		Pos = UO(iconOffset, 0),
 		Size = UN(1, -iconOffset - 6, 1, 0),
 		Font = EF.GothamMedium,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextXAlignment = TXS,
-		TextTruncate = TTA,
+		Ts = 12,
+		Color = "SubText",
+		Align = ETA.Left,
+		Trunc = true,
 		Text = self.Title,
-		Parent = self.TabButton,
 	})
 
 	self.Maid = Maid.new()
@@ -5485,12 +5435,22 @@ function TabClass.new(window, opts)
 	self.Maid:Give(Kailex.ThemeChanged:Connect(function()
 		self:_setSelected(self._selected)
 	end))
-	self:_setSelected(false)
 	return self
 end
 
-function TabClass:_setSelected(on)
+function TabClass:_setSelected(on, instant)
 	self._selected = on
+	if instant then
+		local t = on and 0 or 1
+		self.TabButton.BackgroundTransparency = t
+		self.Bar.BackgroundTransparency = t
+		self.Bar.Size = on and UO(3, 16) or UO(3, 8)
+		self.TabLabel.TextColor3 = on and CurrentTheme.Text or CurrentTheme.SubText
+		if self.IconImg and self.IconImg:IsA("ImageLabel") then
+			self.IconImg.ImageColor3 = on and CurrentTheme.Text or CurrentTheme.SubText
+		end
+		return
+	end
 	Tween(self.TabButton, "Fast", { BackgroundTransparency = on and 0 or 1 })
 	Tween(self.Bar, "PopSoft", {
 		BackgroundTransparency = on and 0 or 1,
@@ -5520,7 +5480,7 @@ function TabClass:_setHorizontal(on)
 	end
 end
 
-function TabClass:Select()
+function TabClass:Select(instant)
 	local win = self.Window
 	if win.CurrentTab == self then return end
 	local prev = win.CurrentTab
@@ -5536,9 +5496,13 @@ function TabClass:Select()
 		prev:_setSelected(false)
 	end
 	self.Page.Visible = true
-	self:_setSelected(true)
-	self.Page.GroupTransparency = 1
-	Tween(self.Page, "Fast", { GroupTransparency = 0 })
+	self:_setSelected(true, instant)
+	if instant then
+		self.Page.GroupTransparency = 0
+	else
+		self.Page.GroupTransparency = 1
+		Tween(self.Page, "Fast", { GroupTransparency = 0 })
+	end
 	self.Content.CanvasPosition = V2(0, 0)
 	win:ApplyFilter(win._filterQuery)
 end
@@ -5615,6 +5579,8 @@ function TabClass:_track(el)
 		el.Row.LayoutOrder = self:_nextOrder()
 	end
 
+	self.Window:_introElement(el)
+
 	local win, tab = self.Window, self
 	el.Maid:Give(function()
 		if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
@@ -5643,6 +5609,8 @@ function TabClass:Section(opts)
 	section.Row.LayoutOrder = self:_nextOrder()
 	table.insert(self.Sections, section)
 	self.CurrentSection = section
+
+	self.Window:_introElement(section)
 
 	local tab = self
 	section.Maid:Give(function()
@@ -5755,6 +5723,9 @@ end
 
 function TabClass:GetSaveKey(opts)
 	opts = opts or {}
+	if opts.SaveKey == false then
+		return nil
+	end
 	local el = tostring(opts.SaveKey or opts.Name or opts.Title or "Element")
 	local base = self.Window.SavePrefix .. "/" .. self.Title .. "/" .. el
 	local seen = self._saveKeys
@@ -5766,48 +5737,6 @@ function TabClass:GetSaveKey(opts)
 	return base
 end
 
-local function SerializeTheme(t)
-	local out = {}
-	for _, k in ipairs(ThemeKeys) do
-		out[k] = ColorToHex(t[k])
-	end
-	return out
-end
-
-function Kailex:RemoveTheme(name)
-	name = tostring(name)
-	if Themes[name] then
-		Themes[name] = nil
-		if Setting.Theme == name then
-			Setting.Theme = "Nocturne"
-			ApplyTheme(Themes.Nocturne)
-		end
-	end
-end
-
-function Kailex:SaveCustomThemes()
-	local store = {}
-	local Builtin = { Nocturne = true, Aurora = true, Sakura = true, Daylight = true, ["Dark-Blue"] = true, Light = true }
-	for name, t in pairs(Themes) do
-		if not Builtin[name] then
-			store[name] = SerializeTheme(t)
-		end
-	end
-	SaveManager:Set("__customThemes", store)
-end
-
-local function LoadCustomThemes()
-	local store = SaveManager:Get("__customThemes", nil)
-	if type(store) ~= "table" then return end
-	local keep = Setting.Theme
-	for name, cols in pairs(store) do
-		if type(cols) == "table" then
-			BuildTheme(name, cols)
-		end
-	end
-	Setting.Theme = keep
-end
-
 local function BuildSettingsTab(win)
 	local tab = win:Tab({ Title = "Settings", Icon = "Gear" })
 
@@ -5815,17 +5744,58 @@ local function BuildSettingsTab(win)
 		Kailex:Notify({ Title = t, Text = x, Type = ty, Duration = d })
 	end
 
+	local pickers = {}
+	local editing = table.clone(CurrentTheme.Base)
+
+	local function syncPickers()
+		for k, cp in pairs(pickers) do
+			cp:Set(editing[k], true)
+		end
+	end
+
+	local function resetDefaults(b)
+		for k, cp in pairs(pickers) do
+			cp:SetDefault(b[k])
+		end
+	end
+
+	local function applyColors(persist)
+		ApplyTheme(DeriveTheme(editing))
+		if not persist then return end
+		local b = BaseColors()
+		if editing.Background == b.Background and editing.Surface == b.Surface
+			and editing.Text == b.Text and editing.Accent == b.Accent then
+			SaveManager:Set("__customColors", nil)
+		else
+			SaveManager:Set("__customColors", {
+				Background = ColorToHex(editing.Background),
+				Surface = ColorToHex(editing.Surface),
+				Text = ColorToHex(editing.Text),
+				Accent = ColorToHex(editing.Accent),
+			})
+		end
+	end
+
 	tab:Section("Appearance")
 	local themeDrop = tab:Dropdown({
 		Name = "Theme",
+		SaveKey = false,
 		Options = Kailex:GetThemes(),
-		Default = Setting.Theme,
 		Callback = function(name)
+			local th = Themes[tostring(name)]
+			if not th then return end
 			Setting.Theme = tostring(name)
-			Kailex:SetTheme(Setting.Theme)
+			CustomBase = nil
 			SaveManager:Set("__theme", Setting.Theme)
+			SaveManager:Set("__customColors", nil)
+			ApplyTheme(th)
+			editing = table.clone(th.Base)
+			resetDefaults(th.Base)
+			syncPickers()
 		end,
 	})
+	themeDrop:Set(Themes[Setting.Theme] and Setting.Theme or "Dark-Blue", true)
+
 	tab:Slider({
 		Name = "UI Scale",
 		Min = 0.8, Max = 1.3,
@@ -5860,6 +5830,34 @@ local function BuildSettingsTab(win)
 		end,
 	})
 
+	tab:Section({ Name = "Colors", Columns = 2 })
+	local baseNow = BaseColors()
+	for _, key in ipairs({ "Background", "Surface", "Text", "Accent" }) do
+		local cp = tab:ColorPicker({
+			Name = key,
+			SaveKey = false,
+			Callback = function(c)
+				editing[key] = c
+				applyColors(true)
+			end,
+		})
+		cp:SetDefault(baseNow[key])
+		pickers[key] = cp
+	end
+	syncPickers()
+	tab:Button({
+		Name = "Reset Colors",
+		Span = 2,
+		Callback = function()
+			local b = BaseColors()
+			editing = table.clone(b)
+			resetDefaults(b)
+			syncPickers()
+			applyColors(true)
+			Note("Colors", "Colors reset to default.", "Success")
+		end,
+	})
+
 	tab:Section("Behavior")
 	tab:Toggle({
 		Name = "Interface Sounds",
@@ -5885,59 +5883,6 @@ local function BuildSettingsTab(win)
 		Callback = function(code)
 			Setting.ToggleUIKey = code
 			SaveManager:Set("__toggleKey", code and ("Key:" .. code.Name) or "__none")
-		end,
-	})
-
-	tab:Section({ Name = "Theme Editor", Columns = 2 })
-	local editing = { colors = table.clone(Themes[Setting.Theme] or Themes.Nocturne) }
-	local pickers = {}
-
-	for _, key in ipairs(ThemeKeys) do
-		local cp = tab:ColorPicker({
-			Name = key,
-			Default = editing.colors[key],
-			Callback = function(c)
-				editing.colors[key] = c
-				ApplyTheme(editing.colors)
-			end,
-		})
-		cp.ThemeKey = key
-		table.insert(pickers, cp)
-	end
-
-	local themeNameInput = tab:TextInput({
-		Name = "Theme name",
-		Placeholder = "e.g. Midnight Ocean",
-		Span = 2,
-	})
-
-	tab:Button({
-		Name = "Save Theme",
-		Callback = function()
-			local n = themeNameInput:Get()
-			if n == "" then
-				Note("Theme Editor", "Enter a theme name first.", "Warning")
-				return
-			end
-			BuildTheme(n, editing.colors)
-			Kailex:SaveCustomThemes()
-			Setting.Theme = n
-			SaveManager:Set("__theme", n)
-			ApplyTheme(Themes[n])
-			themeDrop:SetOptions(Kailex:GetThemes())
-			themeDrop:Set(n, true)
-			Note("Theme Editor", "Theme \"" .. n .. "\" saved & applied.", "Success")
-		end,
-	})
-	tab:Button({
-		Name = "Discard Edits",
-		Callback = function()
-			editing.colors = table.clone(Themes[Setting.Theme] or Themes.Nocturne)
-			for _, cp in ipairs(pickers) do
-				cp:Set(editing.colors[cp.ThemeKey], true)
-			end
-			ApplyTheme(editing.colors)
-			Note("Theme Editor", "Edits reverted to \"" .. Setting.Theme .. "\".")
 		end,
 	})
 
@@ -6031,6 +5976,141 @@ local function BuildSettingsTab(win)
 	return tab
 end
 
+local IntroReveal
+
+do
+	local function Scan(inst, list)
+		if inst:IsA("GuiObject") then
+			if inst.BackgroundTransparency < 0.995 then
+				list[#list + 1] = { inst, "BackgroundTransparency", inst.BackgroundTransparency, 0 }
+				inst.BackgroundTransparency = 1
+			end
+			if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+				if inst.TextTransparency < 0.995 then
+					list[#list + 1] = { inst, "TextTransparency", inst.TextTransparency, 0 }
+					inst.TextTransparency = 1
+				end
+			elseif inst:IsA("ImageLabel") then
+				if inst.ImageTransparency < 0.995 then
+					list[#list + 1] = { inst, "ImageTransparency", inst.ImageTransparency, 0 }
+					inst.ImageTransparency = 1
+				end
+			end
+		elseif inst:IsA("UIStroke") then
+			if inst.Transparency < 0.995 then
+				list[#list + 1] = { inst, "Transparency", inst.Transparency, 0 }
+				inst.Transparency = 1
+			end
+		end
+	end
+
+	function IntroReveal(target, delay, cfg)
+		if not target or not target.Parent then return end
+		cfg = cfg or {}
+		local list = {}
+		Scan(target, list)
+		for _, d in ipairs(target:GetDescendants()) do
+			Scan(d, list)
+		end
+
+		local slides = {}
+		if cfg.SelfX or cfg.SelfY then
+			slides[#slides + 1] = { target, target.Position }
+			target.Position = target.Position + UO(cfg.SelfX or 0, cfg.SelfY or 0)
+		end
+
+		local pad, padBase
+		if cfg.Rise then
+			pad = target:FindFirstChildOfClass("UIPadding")
+			if pad then
+				padBase = pad.PaddingTop
+				pad.PaddingTop = UD(padBase.Scale, padBase.Offset + cfg.Rise)
+			end
+		end
+
+		if cfg.Cascade then
+			local slots = {}
+			local idx = 0
+			for _, ch in ipairs(target:GetChildren()) do
+				if ch:IsA("GuiObject")
+					and not (ch:IsA("TextButton") and ch.Text == "" and ch.BackgroundTransparency > 0.99) then
+					idx += 1
+					slots[ch] = idx * cfg.Cascade
+				end
+			end
+			for _, f in ipairs(list) do
+				local p = f[1]
+				while p and p ~= target do
+					local d = slots[p]
+					if d then
+						f[4] = d
+						break
+					end
+					p = p.Parent
+				end
+			end
+		end
+
+		local preset = cfg.Preset or "Reveal"
+		for _, f in ipairs(list) do
+			Tween(f[1], preset, { [f[2]] = f[3] }, nil, delay + f[4])
+		end
+		if pad then
+			Tween(pad, preset, { PaddingTop = padBase }, nil, delay)
+		end
+		for _, s in ipairs(slides) do
+			Tween(s[1], preset, { Position = s[2] }, nil, delay)
+		end
+	end
+end
+
+local function IntroTab(tab, delay)
+	local btn = tab.TabButton
+	local bar = tab.Bar
+	local label = tab.TabLabel
+	local icon = tab.IconImg
+	btn.BackgroundTransparency = 1
+	bar.BackgroundTransparency = 1
+	label.TextTransparency = 1
+	local extra = {}
+	if icon then
+		if icon:IsA("ImageLabel") then
+			icon.ImageTransparency = 1
+			extra[#extra + 1] = { icon, "ImageTransparency" }
+		else
+			for _, d in ipairs(icon:GetDescendants()) do
+				if d:IsA("GuiObject") and d.BackgroundTransparency < 0.995 then
+					d.BackgroundTransparency = 1
+					extra[#extra + 1] = { d, "BackgroundTransparency" }
+				elseif d:IsA("UIStroke") and d.Transparency < 0.995 then
+					d.Transparency = 1
+					extra[#extra + 1] = { d, "Transparency" }
+				end
+			end
+		end
+	end
+	local slides = {}
+	for _, ch in ipairs(btn:GetChildren()) do
+		if ch:IsA("GuiObject") then
+			slides[#slides + 1] = { ch, ch.Position }
+			ch.Position = ch.Position + UO(-12, 0)
+		end
+	end
+	task.delay(delay * (tonumber(Setting.MotionScale) or 1), function()
+		if not btn.Parent then return end
+		local sel = tab._selected == true
+		Tween(btn, "Reveal", { BackgroundTransparency = sel and 0 or 1 })
+		Tween(bar, "Reveal", { BackgroundTransparency = sel and 0 or 1 })
+		Tween(label, "Reveal", { TextTransparency = 0 })
+		for _, h in ipairs(extra) do
+			Tween(h[1], "Reveal", { [h[2]] = 0 })
+		end
+		for _, s in ipairs(slides) do
+			Tween(s[1], "Reveal", { Position = s[2] })
+		end
+	end)
+end
+
 local Window = {}
 Window.__index = Window
 
@@ -6053,14 +6133,16 @@ function Kailex:Window(cfg)
 	self._remember = cfg.RememberPosition ~= false
 
 	if type(cfg.Theme) == "table" then
-		local tname = tostring(cfg.Theme.Name or "")
-		local t
-		if tname ~= "" then
-			t = BuildTheme(tname, cfg.Theme)
-		else
-			t = BuildTheme(nil, cfg.Theme)
-		end
+		local t = DeriveTheme(cfg.Theme)
+		CustomBase = t.Base
 		ApplyTheme(t)
+	elseif type(cfg.Theme) == "string" then
+		local th = Themes[cfg.Theme]
+		if th then
+			Setting.Theme = cfg.Theme
+			CustomBase = nil
+			ApplyTheme(th)
+		end
 	end
 
 	local MIN_W, MIN_H = 380, 280
@@ -6106,17 +6188,14 @@ function Kailex:Window(cfg)
 		GroupTransparency = 1,
 		Parent = LayerWindows,
 	})
-	Corner(14).Parent = self.Root
-	Bind(Create("UIStroke", {
+	self._rootCorner = Corner(14, self.Root)
+	self._rootStroke = Bind(Create("UIStroke", {
 		Thickness = 1, Transparency = 0.35, ApplyStrokeMode = SB, Parent = self.Root,
 	}), "Color", "Stroke")
 	self._winScale = UISC(self.Root, 0.94)
 
 	self.Maid = Maid.new()
 	self.Maid:Link(self.Root)
-
-	local introMaid = Maid.new()
-	self.Maid:Give(introMaid)
 
 	local TITLE_FINAL = UN(0, 0, 0, 0)
 	local BODY_FINAL = UN(0, 0, 0, 56)
@@ -6137,13 +6216,43 @@ function Kailex:Window(cfg)
 	})
 	self.Body = body
 
+	local dim
+
+	local function killDim()
+		if dim then
+			local d = dim
+			dim = nil
+			Tween(d, "Smooth", { BackgroundTransparency = 1 }, function()
+				d:Destroy()
+			end)
+		end
+	end
+
+	local function RestoreGeom()
+		self._introActive = false
+		if self.Root.AnchorPoint ~= V2(0, 0) then
+			self.Root.AnchorPoint = V2(0, 0)
+			self.Root.Position = UO(px, py)
+		end
+	end
+
 	local function KillIntroMotion()
+		if not self._introActive then return end
+		RestoreGeom()
 		Tween(self.Root, "Instant", { GroupTransparency = 0 })
 		Tween(self._winScale, "Instant", { Scale = 1 })
+		Tween(self._rootCorner, "Instant", { CornerRadius = UD(0, 14) })
+		Tween(self._rootStroke, "Instant", { Transparency = 0.35 })
 		Tween(titleBar, "Instant", { Position = TITLE_FINAL })
-		Tween(body, "Instant", { Position = BODY_FINAL })
-		introMaid:Destroy()
+		killDim()
 	end
+
+	titleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == EUT.MouseButton1
+			or input.UserInputType == EUT.Touch then
+			KillIntroMotion()
+		end
+	end)
 
 	MakeDraggable(titleBar, self.Root, {
 		Clamp = true,
@@ -6171,40 +6280,33 @@ function Kailex:Window(cfg)
 		end,
 	})
 
-	local titleLabel = Lbl({
-		Position = UO(14, 7),
+	local titleLabel = U.Txt(titleBar, {
+		Pos = UO(14, 7),
 		Size = UN(1, -130, 0, 20),
 		Font = EF.GothamBold,
-		TextSize = 15,
-		TextColor3 = "Text",
-		TextXAlignment = ETA.Left,
-		TextTruncate = TTA,
+		Ts = 15,
+		Align = ETA.Left,
+		Trunc = true,
 		Text = self.Title,
-		Parent = titleBar,
 	})
-	local subLabel = Lbl({
-		Position = UO(14, 26),
+	local subLabel = U.Txt(titleBar, {
+		Pos = UO(14, 26),
 		Size = UN(1, -130, 0, 14),
-		Font = EF.Gotham,
-		TextSize = 11,
-		TextColor3 = "SubText",
-		TextXAlignment = ETA.Left,
-		TextTruncate = TTA,
+		Ts = 11,
+		Color = "SubText",
+		Align = ETA.Left,
+		Trunc = true,
 		Text = tostring(cfg.SubTitle or ""),
-		Parent = titleBar,
 	})
 
-	local searchBox = TBox({
-		Position = UO(14, 11),
+	local searchBox = U.TxB(titleBar, {
+		Pos = UO(14, 11),
 		Size = UN(0, 220, 0, 24),
-		BackgroundTransparency = 1,
+		Trans = 1,
 		Visible = false,
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "Text",
-		PlaceholderText = "Search ...",
-		TextXAlignment = ETA.Left,
-		Parent = titleBar,
+		Ts = 12,
+		Ph = "Search ...",
+		Align = ETA.Left,
 	})
 
 	local searchLine = Frm({
@@ -6313,14 +6415,14 @@ function Kailex:Window(cfg)
 	end)
 
 	local minB = titleButton("Minimize", -44)
-	AddHover(minB, GHOST)
+	AddHover(minB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
 	Click(self.Maid, minB, function()
 		PlaySound("Click", 0.5)
 		self:SetMinimized(true)
 	end)
 
 	local searchB = titleButton("Search", -78)
-	AddHover(searchB, GHOST)
+	AddHover(searchB, { BaseTransparency = 1, HoverTransparency = 0.85, IgnoreStroke = true })
 	Click(self.Maid, searchB, function()
 		PlaySound("Click", 0.5)
 		setSearch(not searchActive)
@@ -6335,7 +6437,7 @@ function Kailex:Window(cfg)
 		BackgroundColor3 = "TabBar",
 		Parent = body,
 	})
-	StrokeBind(1, "Stroke", 0.55).Parent = sidebar
+	StrokeBind(1, "Stroke", 0.55, sidebar)
 	self.Sidebar = sidebar
 
 	self.TabList = Scr({
@@ -6361,18 +6463,16 @@ function Kailex:Window(cfg)
 		Parent = body,
 	})
 
-	self.EmptyLabel = Lbl({
-		AnchorPoint = V2(0.5, 0.5),
-		Position = US(0.5, 0.5),
+	self.EmptyLabel = U.Txt(self.Pages, {
+		Ap = V2(0.5, 0.5),
+		Pos = US(0.5, 0.5),
 		Size = UO(240, 40),
-		Font = EF.Gotham,
-		TextSize = 12,
-		TextColor3 = "SubText",
-		TextWrapped = true,
+		Ts = 12,
+		Color = "SubText",
+		Wrap = true,
 		Text = "",
 		Visible = false,
-		ZIndex = 5,
-		Parent = self.Pages,
+		Z = 5,
 	})
 
 	local splitter = Hit({
@@ -6397,6 +6497,7 @@ function Kailex:Window(cfg)
 		end,
 		Active = splitter,
 		Start = function()
+			KillIntroMotion()
 			ModalManager.CloseAll(self)
 		end,
 		Step = function()
@@ -6425,10 +6526,10 @@ function Kailex:Window(cfg)
 		end,
 		Active = grip,
 		Start = function(state)
+			KillIntroMotion()
 			ModalManager.CloseAll(self)
 			state.StartMouse = UIS:GetMouseLocation()
-			state.StartSize = self.Root.AbsoluteSize / GetScale()
-			Tween(self.Root, "Instant", { Size = self.Root.Size, Position = self.Root.Position })
+			state.StartSize = V2(self.Root.Size.X.Offset, self.Root.Size.Y.Offset)
 		end,
 		Step = function(state)
 			local m = UIS:GetMouseLocation()
@@ -6475,12 +6576,7 @@ function Kailex:Window(cfg)
 	expandIcon.Rotation = 180
 	expandIcon.Visible = false
 
-	local pillHit = Hit({
-		Size = US(1, 1),
-		Visible = false,
-		ZIndex = 60,
-		Parent = self.Root,
-	})
+	local pillHit = U.Overlay(self.Root, 60, false)
 	MakeDraggable(pillHit, self.Root, { Clamp = true })
 	Click(self.Maid, pillHit, function()
 		if pillHit:GetAttribute("Dragging") then return end
@@ -6599,13 +6695,28 @@ function Kailex:Window(cfg)
 		end
 	end
 
+	function self:_introElement(el)
+		if self._destroyed or el._destroyed or not el.Row then return end
+		local elapsed = os.clock() - self._introT0
+		if elapsed > 2 then return end
+		local n = self._introN + 1
+		self._introN = n
+		IntroReveal(el.Row, math.max(0.02, 0.62 + math.min(n * 0.035, 0.3) - elapsed), { Rise = 10, Cascade = 0.045 })
+	end
+
 	function self:Tab(tabOpts)
 		local tab = TabClass.new(self, tabOpts)
 		table.insert(self.Tabs, tab)
 		if #self.Tabs == 1 then
-			tab:Select()
+			tab:Select(true)
 		end
 		self:UpdateLayout()
+		local elapsed = os.clock() - self._introT0
+		if elapsed < 2 then
+			IntroTab(tab, math.max(0.03, 0.5 + math.min((#self.Tabs - 1) * 0.05, 0.3) - elapsed))
+		else
+			IntroTab(tab, 0.04)
+		end
 		return tab
 	end
 
@@ -6623,13 +6734,13 @@ function Kailex:Window(cfg)
 		if self._destroyed or self.Minimized == state then return end
 		self.Minimized = state
 		self.MinimizedChanged:Fire(state)
+		KillIntroMotion()
 		Tween(self._winScale, "Snappy", { Scale = 0.97 }, function()
 			if not self._destroyed then
 				Tween(self._winScale, "PopSoft", { Scale = 1 })
 			end
 		end)
 		if state then
-			KillIntroMotion()
 			ModalManager.CloseAll(self)
 			if self.Maximized then
 				self.Maximized = false
@@ -6676,13 +6787,12 @@ function Kailex:Window(cfg)
 	function self:SetMaximized(on)
 		if self._destroyed or self.Minimized then return end
 		KillIntroMotion()
-		local sc = GetScale()
 		if on then
-			local sp = self.Root.AbsolutePosition / sc
+			local sp = V2(self.Root.Position.X.Offset, self.Root.Position.Y.Offset)
 			self._restore = { Size = self.Root.Size, X = sp.X, Y = sp.Y }
 			self.Maximized = true
 			self.ResizeGrip.Visible = false
-			local vw2, vh2 = Viewport.X / sc, Viewport.Y / sc
+			local vw2, vh2 = Viewport.X / GetScale(), Viewport.Y / GetScale()
 			Tween(self.Root, "Smooth", {
 				Size = UO(vw2 - 16, vh2 - 16),
 				Position = UO(8, 8),
@@ -6728,12 +6838,13 @@ function Kailex:Window(cfg)
 
 	function self:OnViewport()
 		if self._destroyed then return end
-		local sc = GetScale()
+		KillIntroMotion()
 		if self.Minimized then
 			ClampToScreen(self.Root)
 			return
 		end
 		ModalManager.CloseAll(self)
+		local sc = GetScale()
 		local vw2, vh2 = Viewport.X / sc, Viewport.Y / sc
 		local minW = math.min(MIN_W, math.max(200, vw2 - 12))
 		local minH = math.min(MIN_H, math.max(160, vh2 - 12))
@@ -6766,11 +6877,11 @@ function Kailex:Window(cfg)
 	function self:Destroy()
 		if self._destroyed then return end
 		self._destroyed = true
+		KillIntroMotion()
 		self:SavePlacement()
 		self.Closed:Fire()
 		RemoveValue(Kailex.Windows, self)
 		ModalManager.CloseAll(self)
-		KillIntroMotion()
 		local root = self.Root
 		local done = false
 		local function finish()
@@ -6792,9 +6903,7 @@ function Kailex:Window(cfg)
 	applySidebarGeom(#self.Tabs > 1, false)
 
 	do
-		local first = (#Kailex.Windows == 1)
-		local dim
-		if first then
+		if #Kailex.Windows == 1 then
 			dim = Frm({
 				Size = US(1, 1),
 				BackgroundColor3 = CN(0, 0, 0),
@@ -6802,24 +6911,37 @@ function Kailex:Window(cfg)
 				ZIndex = 0,
 				Parent = LayerWindows,
 			})
-			introMaid:Give(dim)
 			Tween(dim, "Smooth", { BackgroundTransparency = 0.5 })
+			task.delay(1.1 * (tonumber(Setting.MotionScale) or 1), killDim)
 		end
 
-		titleBar.Position = UN(0, 0, 0, -18)
-		body.Position = UN(0, 0, 0, 74)
-		Tween(self.Root, TI(0.32, E.Quint, ED.Out), { GroupTransparency = 0 })
-		Tween(self._winScale, TI(0.44, E.Back, ED.Out), { Scale = 1 })
-		Tween(titleBar, TI(0.46, E.Quint, ED.Out), { Position = TITLE_FINAL })
-		Tween(body, TI(0.5, E.Quint, ED.Out), { Position = BODY_FINAL })
+		self._introActive = true
+		self._introT0 = os.clock()
+		self._introN = 0
 
-		task.delay(0.55, function()
-			if not self._destroyed and dim then
-				Tween(dim, "Smooth", { BackgroundTransparency = 1 }, function()
-					dim:Destroy()
-				end)
-			end
-		end)
+		self.Root.AnchorPoint = V2(0.5, 0.5)
+		self.Root.Position = UO(px + defW / 2, py + defH / 2)
+		self._winScale.Scale = 0.5
+		self.Root.GroupTransparency = 1
+		self._rootCorner.CornerRadius = UD(0, 26)
+		self._rootStroke.Transparency = 1
+
+		Tween(self.Root, TI(0.22, E.Quint, ED.Out), { GroupTransparency = 0 })
+		Tween(self._winScale, TI(0.5, E.Back, ED.Out), { Scale = 1 }, RestoreGeom)
+		Tween(self._rootCorner, TI(0.42, E.Quint, ED.Out), { CornerRadius = UD(0, 14) }, nil, 0.05)
+		Tween(self._rootStroke, TI(0.32, E.Quint, ED.Out), { Transparency = 0.35 }, nil, 0.1)
+
+		titleBar.Position = UN(0, 0, 0, -46)
+		Tween(titleBar, TI(0.38, E.Quint, ED.Out), { Position = TITLE_FINAL }, nil, 0.3)
+
+		IntroReveal(sidebar, 0.38, { SelfX = -22 })
+		IntroReveal(titleLabel, 0.42, { SelfX = -14 })
+		IntroReveal(subLabel, 0.48, { SelfX = -14 })
+		IntroReveal(searchB, 0.5, { SelfX = 12 })
+		IntroReveal(minB, 0.55, { SelfX = 12 })
+		IntroReveal(closeB, 0.6, { SelfX = 12 })
+		IntroReveal(splitter, 0.55, {})
+		IntroReveal(grip, 0.68, { SelfY = 8 })
 	end
 
 	if cfg.Settings == true then
@@ -6866,15 +6988,13 @@ function Kailex:MobileButton()
 		ZIndex = 5,
 		Parent = LayerNotify,
 	})
-	Corner(PILL).Parent = btn
-	StrokeBind(1, "Stroke", 0.35).Parent = btn
-	Lbl({
+	Corner(PILL, btn)
+	StrokeBind(1, "Stroke", 0.35, btn)
+	U.Txt(btn, {
 		Size = US(1, 1),
 		Font = EF.GothamBlack,
-		TextSize = 18,
-		TextColor3 = "Text",
+		Ts = 18,
 		Text = "K",
-		Parent = btn,
 	})
 	local mmaid = Maid.new():Link(btn)
 	MakeDraggable(btn, btn, { Clamp = true })
@@ -7094,105 +7214,78 @@ function Kailex:KeySystem(options)
 
 		local alive = true
 		local maid = Maid.new()
-		local dimmer = Hit({
-			Size = US(1, 1),
-			BackgroundColor3 = CN(0, 0, 0),
-			BackgroundTransparency = 1,
-			ZIndex = 40,
-			Parent = LayerOverlay,
-		})
-		local card = Grp({
-			AnchorPoint = V2(0.5, 0.5),
-			Position = US(0.5, 0.5),
-			Size = UO(360, 210),
-			BackgroundColor3 = "Surface",
-			ZIndex = 41,
-			Parent = LayerOverlay,
-		})
-		Corner(14).Parent = card
-		StrokeBind(1, "Stroke", 0.35).Parent = card
+		local dimmer = U.Overlay(LayerOverlay, 40, nil, CN(0, 0, 0))
+		local card = U.ModalCard(LayerOverlay, 41, 360, 210, 14, 0.35)
 		local ksScale = UISC(card, 0.94)
 
-		Lbl({
-			Position = UO(18, 16),
+		U.Txt(card, {
+			Pos = UO(18, 16),
 			Size = UN(1, -36, 0, 20),
 			Font = EF.GothamBold,
-			TextSize = 15,
-			TextColor3 = "Text",
-			TextXAlignment = ETA.Left,
-			TextTruncate = TTA,
+			Ts = 15,
+			Align = ETA.Left,
+			Trunc = true,
 			Text = title,
-			ZIndex = 42,
-			Parent = card,
+			Z = 42,
 		})
-		Lbl({
-			Position = UO(18, 38),
+		U.Txt(card, {
+			Pos = UO(18, 38),
 			Size = UN(1, -36, 0, 30),
-			Font = EF.Gotham,
-			TextSize = 12,
-			TextColor3 = "SubText",
-			TextXAlignment = ETA.Left,
-			TextWrapped = true,
+			Ts = 12,
+			Color = "SubText",
+			Align = ETA.Left,
+			Wrap = true,
 			Text = desc,
-			ZIndex = 42,
-			Parent = card,
+			Z = 42,
 		})
 
-		local statusLabel = Lbl({
-			Position = UO(18, 122),
+		local statusLabel = U.Txt(card, {
+			Pos = UO(18, 122),
 			Size = UN(1, -36, 0, 15),
-			Font = EF.Gotham,
-			TextSize = 11,
-			TextColor3 = "SubText",
-			TextXAlignment = ETA.Left,
-			TextTruncate = TTA,
+			Ts = 11,
+			Color = "SubText",
+			Align = ETA.Left,
+			Trunc = true,
 			Text = not perKey and duration > 0 and ("Key validity: " .. fmtTime(duration)) or "",
-			ZIndex = 42,
-			Parent = card,
+			Z = 42,
 		})
+		local statusKey = "SubText"
 		local function setStatus(text, colorKey)
 			statusLabel.Text = tostring(text or "")
-			statusLabel.TextColor3 = CurrentTheme[colorKey] or CurrentTheme.SubText
+			statusKey = colorKey or "SubText"
+			statusLabel.TextColor3 = CurrentTheme[statusKey] or CurrentTheme.SubText
 		end
+		maid:Give(Kailex.ThemeChanged:Connect(function()
+			statusLabel.TextColor3 = CurrentTheme[statusKey] or CurrentTheme.SubText
+		end))
 
 		local okPaste, gc = pcall(function()
 			return getclipboard
 		end)
 		local hasPaste = okPaste and type(gc) == "function"
 
-		local inputBox = TBox({
-			Position = UO(18, 76),
+		local inputBox = U.TxB(card, {
+			Pos = UO(18, 76),
 			Size = UN(1, -36, 0, 38),
-			BackgroundColor3 = "SurfaceLight",
-			Font = EF.Gotham,
-			TextSize = 13,
-			TextColor3 = "Text",
-			PlaceholderText = "Enter your key...",
-			TextXAlignment = ETA.Left,
-			Text = "",
-			ZIndex = 42,
-			Parent = card,
-			Children = { Corner(8) },
+			Ts = 13,
+			Ph = "Enter your key...",
+			Align = ETA.Left,
+			Z = 42,
+			Kids = { Corner(8) },
 		})
-		Pad(10, hasPaste and 66 or 10).Parent = inputBox
-		local inputStroke = StrokeBind(1, "Stroke", 0.5)
-		inputStroke.Parent = inputBox
+		Pad(10, hasPaste and 66 or 10, 0, 0, inputBox)
+		local inputStroke = StrokeBind(1, "Stroke", 0.5, inputBox)
 
 		if hasPaste then
-			local pasteBtn = Btn({
-				AnchorPoint = V2(1, 0.5),
-				Position = UN(1, -6, 0.5, 0),
+			local pasteBtn = U.MkBtn(inputBox, {
+				Ap = V2(1, 0.5),
+				Pos = UN(1, -6, 0.5, 0),
 				Size = UO(56, 26),
-				BackgroundColor3 = "Element",
 				Text = "Paste",
-				Font = EF.GothamBold,
-				TextSize = 11,
-				TextColor3 = "SubText",
-				ZIndex = 43,
-				Parent = inputBox,
-				Children = { Corner(6) },
+				Ts = 11,
+				Color = "SubText",
+				Z = 43,
 			})
-			AddHover(pasteBtn)
 			maid:Give(pasteBtn.MouseButton1Click:Connect(function()
 				if not alive then return end
 				local ok, txt = pcall(gc)
@@ -7205,20 +7298,14 @@ function Kailex:KeySystem(options)
 		end
 
 		local function mkBtn(text, accent, xPos, w)
-			local b = Btn({
-				Position = UO(xPos, 152),
+			return U.MkBtn(card, {
+				Pos = UO(xPos, 152),
 				Size = UO(w, 40),
-				BackgroundColor3 = accent and "Accent" or "Element",
 				Text = text,
-				Font = EF.GothamBold,
-				TextSize = 12,
-				TextColor3 = accent and "OnAccent" or "Text",
-				ZIndex = 42,
-				Parent = card,
-				Children = { Corner(8) },
+				Ts = 12,
+				Accent = accent,
+				Z = 42,
 			})
-			AddHover(b, accent and { HoverKey = "AccentHover", BaseKey = "Accent" } or nil)
-			return b
 		end
 
 		local verifyBtn, linkBtn, declineBtn
@@ -7394,13 +7481,26 @@ function Kailex:Unload()
 end
 
 local function ApplyPersisted()
-	LoadCustomThemes()
-	local t = SaveManager:Get("__theme", nil)
-	if t and Themes[t] then
-		Setting.Theme = t
-		if CurrentTheme ~= Themes[t] then
-			ApplyTheme(Themes[t])
+	local th
+	local cc = SaveManager:Get("__customColors", nil)
+	if type(cc) == "table" then
+		local bg = HexToColor(cc.Background)
+		local sf = HexToColor(cc.Surface)
+		local tx = HexToColor(cc.Text)
+		local ac = HexToColor(cc.Accent)
+		if bg and sf and tx and ac then
+			th = DeriveTheme({ Background = bg, Surface = sf, Text = tx, Accent = ac })
 		end
+	end
+	if not th then
+		local t = SaveManager:Get("__theme", nil)
+		if t and Themes[t] then
+			Setting.Theme = t
+			th = Themes[t]
+		end
+	end
+	if th and not SameTheme(th, CurrentTheme) then
+		ApplyTheme(th)
 	end
 	local snd = SaveManager:Get("__sounds", nil)
 	if snd ~= nil then

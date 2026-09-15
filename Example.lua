@@ -1,8 +1,5 @@
 local Kailex = require(game:GetService("ReplicatedStorage"):FindFirstChild("Window"))
 
-task.wait(2)
-
-
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 
@@ -20,7 +17,6 @@ Kailex.Setting.ToggleUIKey = Enum.KeyCode.RightShift
 Kailex.Audio.Master = 0.8
 Kailex.Audio.Click.Vol = 0.5
 Kailex.Audio.Hover.Vol = 0.06
-Kailex.Audio.Slider = { Id = "rbxasset://sounds/snap.mp3", Speed = 1.5, Vol = 0.2 }
 
 Kailex.ThemeChanged:Connect(function(theme)
 	print("[Kailex] theme applied, accent:", theme.Accent)
@@ -55,25 +51,6 @@ local win = Kailex:Window({
 	ToggleKey = Enum.KeyCode.F,
 	RememberPosition = true,
 	Settings = true,
-	Theme = {
-		Name = "DemoBlue",
-		Background = Color3.fromRGB(11, 13, 18),
-		Surface = Color3.fromRGB(17, 20, 27),
-		SurfaceLight = Color3.fromRGB(24, 28, 37),
-		Element = Color3.fromRGB(27, 31, 42),
-		ElementHover = Color3.fromRGB(35, 40, 54),
-		Stroke = Color3.fromRGB(41, 47, 63),
-		StrokeBright = Color3.fromRGB(62, 70, 92),
-		Text = Color3.fromRGB(235, 239, 248),
-		SubText = Color3.fromRGB(140, 150, 172),
-		Accent = Color3.fromRGB(96, 165, 250),
-		AccentHover = Color3.fromRGB(124, 182, 255),
-		OnAccent = Color3.fromRGB(9, 13, 22),
-		Success = Color3.fromRGB(158, 206, 106),
-		Warning = Color3.fromRGB(224, 175, 104),
-		Error = Color3.fromRGB(247, 118, 142),
-		TabBar = Color3.fromRGB(15, 17, 23),
-	},
 })
 
 win.MinimizedChanged:Connect(function(minimized)
@@ -647,33 +624,6 @@ tabSys:Button({
 				Kailex:Notify({ Title = "Cancelled", Text = "Nothing was deleted." })
 			end,
 		})
-	end,
-})
-
-tabSys:Section("Themes")
-
-tabSys:Dropdown({
-	Name = "Apply theme",
-	Options = Kailex:GetThemes(),
-	Default = Kailex.Setting.Theme,
-	Callback = function(name)
-		Kailex:SetTheme(name)
-	end,
-})
-
-tabSys:Button({
-	Name = "Save custom themes to disk",
-	Callback = function()
-		Kailex:SaveCustomThemes()
-		Kailex:Notify({ Title = "Themes", Text = "Custom themes saved.", Type = "Success" })
-	end,
-})
-
-tabSys:Button({
-	Name = "Remove 'DemoBlue' theme",
-	Callback = function()
-		Kailex:RemoveTheme("DemoBlue")
-		Kailex:Notify({ Title = "Themes", Text = "DemoBlue removed, reverted to Nocturne.", Type = "Warning" })
 	end,
 })
 
