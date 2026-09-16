@@ -6137,6 +6137,14 @@ function Kailex:Window(cfg)
 			self.Root.AnchorPoint = V2(0, 0)
 			self.Root.Position = UO(px, py)
 		end
+		if self._viewportDirty then
+			self._viewportDirty = nil
+			task.defer(function()
+				if not self._destroyed and not self._introActive then
+					self:OnViewport()
+				end
+			end)
+		end
 	end
 
 	local function KillIntroMotion()
@@ -6589,7 +6597,7 @@ function Kailex:Window(cfg)
 		if elapsed > 2 then return end
 		local n = self._introN + 1
 		self._introN = n
-		IntroReveal(el.Row, math.max(0.02, 0.62 + math.min(n * 0.035, 0.3) - elapsed), { Rise = 10, Cascade = 0.045 })
+		IntroReveal(el.Row, math.max(0.02, 0.36 + math.min(n * 0.03, 0.26) - elapsed), { Rise = 10, Cascade = 0.04 })
 	end
 
 	function self:Tab(tabOpts)
@@ -6600,8 +6608,8 @@ function Kailex:Window(cfg)
 		end
 		self:UpdateLayout()
 		local elapsed = os.clock() - self._introT0
-		if elapsed < 2 then
-			IntroTab(tab, math.max(0.03, 0.5 + math.min((#self.Tabs - 1) * 0.05, 0.3) - elapsed))
+		if elapsed < 1.5 then
+			IntroTab(tab, math.max(0.04, 0.32 + math.min((#self.Tabs - 1) * 0.05, 0.25) - elapsed))
 		else
 			IntroTab(tab, 0.04)
 		end
@@ -6726,6 +6734,10 @@ function Kailex:Window(cfg)
 
 	function self:OnViewport()
 		if self._destroyed then return end
+		if self._introActive then
+			self._viewportDirty = true
+			return
+		end
 		KillIntroMotion()
 		if self.Minimized then
 			ClampToScreen(self.Root)
@@ -6809,27 +6821,27 @@ function Kailex:Window(cfg)
 
 		self.Root.AnchorPoint = V2(0.5, 0.5)
 		self.Root.Position = UO(px + defW / 2, py + defH / 2)
-		self._winScale.Scale = 0.5
+		self._winScale.Scale = 0.9
 		self.Root.GroupTransparency = 1
-		self._rootCorner.CornerRadius = UD(0, 26)
+		self._rootCorner.CornerRadius = UD(0, 22)
 		self._rootStroke.Transparency = 1
 
-		Tween(self.Root, TI(0.22, E.Quint, ED.Out), { GroupTransparency = 0 })
-		Tween(self._winScale, TI(0.5, E.Back, ED.Out), { Scale = 1 }, RestoreGeom)
-		Tween(self._rootCorner, TI(0.42, E.Quint, ED.Out), { CornerRadius = UD(0, 14) }, nil, 0.05)
-		Tween(self._rootStroke, TI(0.32, E.Quint, ED.Out), { Transparency = 0.35 }, nil, 0.1)
+		Tween(self.Root, TI(0.26, E.Quint, ED.Out), { GroupTransparency = 0 })
+		Tween(self._winScale, TI(0.42, E.Back, ED.Out), { Scale = 1 }, RestoreGeom)
+		Tween(self._rootCorner, TI(0.38, E.Quint, ED.Out), { CornerRadius = UD(0, 14) })
+		Tween(self._rootStroke, TI(0.3, E.Quint, ED.Out), { Transparency = 0.35 })
 
 		titleBar.Position = UN(0, 0, 0, -46)
-		Tween(titleBar, TI(0.38, E.Quint, ED.Out), { Position = TITLE_FINAL }, nil, 0.3)
+		Tween(titleBar, TI(0.38, E.Quint, ED.Out), { Position = TITLE_FINAL }, nil, 0.26)
 
-		IntroReveal(sidebar, 0.38, { SelfX = -22 })
-		IntroReveal(titleLabel, 0.42, { SelfX = -14 })
-		IntroReveal(subLabel, 0.48, { SelfX = -14 })
-		IntroReveal(searchB, 0.5, { SelfX = 12 })
-		IntroReveal(minB, 0.55, { SelfX = 12 })
-		IntroReveal(closeB, 0.6, { SelfX = 12 })
-		IntroReveal(splitter, 0.55, {})
-		IntroReveal(grip, 0.68, { SelfY = 8 })
+		IntroReveal(sidebar, 0.3, { SelfX = -22 })
+		IntroReveal(titleLabel, 0.34, { SelfX = -14 })
+		IntroReveal(subLabel, 0.38, { SelfX = -14 })
+		IntroReveal(searchB, 0.4, { SelfX = 12 })
+		IntroReveal(minB, 0.44, { SelfX = 12 })
+		IntroReveal(closeB, 0.48, { SelfX = 12 })
+		IntroReveal(splitter, 0.42, {})
+		IntroReveal(grip, 0.54, { SelfY = 8 })
 	end
 
 	if cfg.Settings == true then
