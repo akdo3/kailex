@@ -2456,17 +2456,23 @@ function Element:RecalcWidth()
 	end
 end
 
-function Element:Extra(className, opts)
+function Element:Extra(className, opts, size)
 	if self._destroyed then return nil end
 	local elClass = Elements[className]
 	if not elClass then return nil end
 	local el = elClass.new(self.Tab, opts or {})
+
+	if type(size) == "table" then
+		if size.Width then el._width = size.Width end
+		if size.Height then el._extraH = size.Height end
+	end
 
 	local row = el.Row
 	local pad = row:FindFirstChildOfClass("UIPadding")
 	if pad then pad:Destroy() end
 	row.BackgroundTransparency = 1
 	row:SetAttribute("NoHoverFX", true)
+	row.Visible = true
 	local rowStroke = row:FindFirstChildOfClass("UIStroke")
 	if rowStroke then rowStroke.Transparency = 1 end
 	if el.LeftFrame then
@@ -2494,13 +2500,13 @@ function Element:Extra(className, opts)
 	self.Tab.Window:_introElement(el)
 
 	table.insert(self._extras, el)
-	self._extraW = (self._extraW or 0) + (el._width or 0)
+	self._extraW = (self._extraW or 0) + (el._width or 0) + 8
 	self:RecalcWidth()
 
 	el.Maid:Give(function()
 		if self._destroyed then return end
 		RemoveValue(self._extras, el)
-		self._extraW = math.max(0, (self._extraW or 0) - (el._width or 0))
+		self._extraW = math.max(0, (self._extraW or 0) - (el._width or 0) - 8)
 		self:RecalcWidth()
 	end)
 
@@ -5497,13 +5503,34 @@ function TabClass:Section(opts)
 end
 
 for _, name in ipairs({
-	"Button", "Toggle", "Slider", "Dropdown", "Keybind", "ColorPicker",
+	"Button", "Slider", "Dropdown", "Keybind", "ColorPicker",
 	"TextInput", "Label", "Paragraph", "Divider",
 	"Stepper", "Segmented", "Vector3Input",
 	}) do
 	TabClass[name] = function(self, opts)
 		return self:_track(Elements[name].new(self, opts or {}))
 	end
+end
+
+function TabClass:Toggle(opts)
+	opts = opts or {}
+	local quick = self.Window.QuickMode == true
+	if quick and Device.IsTouch and opts.Pin ~= false then
+		opts.Pin = true
+	end
+	local el = self:_track(Elements.Toggle.new(self, opts))
+	if quick and not Device.IsTouch then
+		el.QuickKeybind = el:Extra("Keybind", {
+			Name = el.Title,
+			SaveKey = (opts.SaveKey ~= false) and (el.Title .. " Key") or false,
+			Callback = function()
+				if el._disabled then return end
+				PlaySound(el.State and "ToggleOff" or "ToggleOn")
+				el:Set(not el.State)
+			end,
+		}, { Height = 26 })
+	end
+	return el
 end
 
 function TabClass:ApplyFilter(query)
@@ -6033,6 +6060,7 @@ function Kailex:Window(cfg)
 	self.Closed = Signal.new()
 	self._hidden = false
 	self.ToggleKey = ParseKey(cfg.ToggleKey)
+	self.QuickMode = cfg.QuickMode == true
 	self._remember = cfg.RememberPosition ~= false
 
 	if type(cfg.Theme) == "table" then
