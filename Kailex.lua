@@ -2668,6 +2668,11 @@ function Element:Visible(state)
 	if self.Section and self.Section.Collapsed then
 		self.Row.Visible = false
 	end
+	if self._gridFrame and self.Tab and not self.Tab._destroyed then
+		pcall(function()
+			self.Tab:_syncGridFrames()
+		end)
+	end
 end
 
 function Element:SetDisabled(state)
@@ -2836,6 +2841,17 @@ function Element:Destroy()
 		if self.Section then
 			RemoveValue(self.Section.Elements, self)
 		end
+
+		if self._gridFrame and tab and not tab._destroyed then
+			local gf, tb = self._gridFrame, tab
+			task.defer(function()
+				if not tb._destroyed then
+					pcall(function()
+						tb:_syncGridFrames()
+					end)
+				end
+			end)
+		end
 	end
 	for _, ex in ipairs(self._extras) do
 		if not ex._destroyed then
@@ -2985,6 +3001,306 @@ function Elements.Divider.new(tab, opts)
 	return INew(Elements.Divider, row, { Name = opts.Text, Width = opts.Width }, tab)
 end
 
+local SCH = TI(0.3, E.Quart, ED.InOut)
+local SCF = TI(0.2, E.Quad, ED.Out)
+local SOH = TI(0.34, E.Back, ED.Out)
+local SOF = TI(0.26, E.Quint, ED.Out)
+
+local function sfade(root, list)
+	local function sc(i)
+		if i:IsA("GuiObject") then
+			if i.BackgroundTransparency < 0.995 then
+				list[#list + 1] = { i, "BackgroundTransparency", i.BackgroundTransparency }
+			end
+			local p = (i:IsA("TextLabel") or i:IsA("TextButton") or i:IsA("TextBox")) and "TextTransparency"
+				or ((i:IsA("ImageLabel") or i:IsA("ImageButton")) and "ImageTransparency")
+			if p and i[p] < 0.995 then
+				list[#list + 1] = { i, p, i[p] }
+			end
+		elseif i:IsA("UIStroke") and i.Transparency < 0.995 then
+			list[#list + 1] = { i, "Transparency", i.Transparency }
+		end
+	end
+	sc(root)
+	for _, d in ipairs(root:GetDescendants()) do
+		sc(d)
+	end
+end
+
+local function gfshow(f)
+	for _, ch in ipairs(f:GetChildren()) do
+		if ch:IsA("GuiObject") and ch:GetAttribute("__el") and ch.Visible then
+			return true
+		end
+	end
+	return false
+end
+
+local function secvis(sec, el)
+	if sec.Collapsed then return false end
+	local win = sec.Tab and sec.Tab.Window
+	local q = win and win._filterQuery or ""
+	if q ~= "" then
+		local ql = q:lower()
+		if sec.Title:lower():find(ql, 1, true) then return true end
+		return el.SearchText:find(ql, 1, true) ~= nil
+	end
+	return el._manualVisible ~= false
+end
+
+local function finAnim(a)
+	if not a or a.done then return end
+	a.done = true
+	local sec = a.sec
+	if sec and sec._anim == a then
+		sec._anim = nil
+	end
+	if not sec or sec._destroyed then return end
+	local tab = sec.Tab
+	local win = tab and tab.Window
+	if not win or win._filterQuery == a.q then
+		for _, r in ipairs(a.els) do
+			local el = r[1]
+			if not el._destroyed and el.Row and el.Row.Parent then
+				el.Row.Visible = r[2]
+			end
+		end
+		if tab and not tab._destroyed then
+			pcall(function() tab:_syncGridFrames() end)
+		end
+	end
+	for _, u in ipairs(a.units) do
+		local o = u.obj
+		if o and o.Parent then
+			pcall(function()
+				o.Size = u.sz
+				o.AutomaticSize = u.au
+				o.ClipsDescendants = u.cl
+			end)
+			for _, f in ipairs(u.fd) do
+				pcall(function() f[1][f[2]] = f[3] end)
+			end
+		end
+	end
+end
+
+local function secStatic(sec)
+	if sec._anim then
+		finAnim(sec._anim)
+	end
+	for _, el in ipairs(sec.Elements) do
+		if not el._destroyed and el.Row and el.Row.Parent then
+			el.Row.Visible = secvis(sec, el)
+		end
+	end
+	local tab = sec.Tab
+	if tab and not tab._destroyed then
+		pcall(function() tab:_syncGridFrames() end)
+	end
+end
+
+local function secAnimOK(sec)
+	if Setting.Effects == false or Device.IsConsole then return false end
+	local tab = sec.Tab
+	if not tab or tab._destroyed then return false end
+	local win = tab.Window
+	if not win or win._destroyed or win.Minimized or win._hidden then return false end
+	if tab.Page and not tab.Page.Visible then return false end
+	if win._introT0 and (os.clock() - win._introT0) < 1.25 then return false end
+	return #sec.Elements <= 80
+end
+
+local function secAnim(sec)
+	local tab = sec.Tab
+	if not tab or tab._destroyed then
+		secStatic(sec)
+		return
+	end
+	if sec._anim then
+		finAnim(sec._anim)
+	end
+
+	local els = {}
+	for _, el in ipairs(sec.Elements) do
+		if not el._destroyed and el.Row and el.Row.Parent then
+			els[#els + 1] = { el, secvis(sec, el) }
+		end
+	end
+
+	local units, fm = {}, {}
+	for _, r in ipairs(els) do
+		local el, vis = r[1], r[2]
+		local g = el._gridFrame
+		if g and g.Parent then
+			local u = fm[g]
+			if not u then
+				u = { obj = g, isf = true, vis = false, ord = g.LayoutOrder }
+				fm[g] = u
+				units[#units + 1] = u
+			end
+			if vis then
+				u.vis = true
+			end
+		else
+			units[#units + 1] = { obj = el.Row, isf = false, vis = vis, ord = el.Row.LayoutOrder }
+		end
+	end
+
+	local au = {}
+	for _, u in ipairs(units) do
+		local showing = u.isf and gfshow(u.obj) or u.obj.Visible
+		if u.vis ~= showing then
+			local o = u.obj
+			u.sz, u.au = o.Size, o.AutomaticSize
+			local cl = o.ClipsDescendants
+			if o:GetAttribute("__rpl") and o:GetAttribute("__rplPrev") ~= nil then
+				cl = o:GetAttribute("__rplPrev") == true
+			end
+			u.cl = cl
+			u.fd = {}
+			sfade(o, u.fd)
+			au[#au + 1] = u
+		end
+	end
+
+	if #au == 0 then
+		for _, r in ipairs(els) do
+			if r[1].Row and r[1].Row.Parent then
+				r[1].Row.Visible = r[2]
+			end
+		end
+		pcall(function() tab:_syncGridFrames() end)
+		return
+	end
+
+	table.sort(au, function(x, y) return (x.ord or 0) < (y.ord or 0) end)
+
+	local a = { sec = sec, els = els, units = au, q = (tab.Window and tab.Window._filterQuery) or "" }
+	sec._anim = a
+	local m = tonumber(Setting.MotionScale) or 1
+	local s = GetScale()
+	local n = #au
+
+	if sec.Collapsed then
+		local stag = math.min(0.02, 0.26 / math.max(1, n - 1))
+		local last
+		for i, u in ipairs(au) do
+			local d = (i - 1) * stag
+			local o = u.obj
+			local h = o.Parent and math.max(0, o.AbsoluteSize.Y / s) or 0
+			if h >= 1 then
+				o.AutomaticSize = AS.None
+				o.ClipsDescendants = true
+				o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, h)
+				local tw = Tween(o, SCH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0) }, nil, d)
+				if tw then
+					Once(tw.Completed, function()
+						if not a.done and o.Parent then
+							o.Visible = false
+						end
+					end)
+					last = tw
+				end
+			end
+			for _, f in ipairs(u.fd) do
+				Tween(f[1], SCF, { [f[2]] = 1 }, nil, d)
+			end
+		end
+		task.delay(((n - 1) * stag + 0.3) * m + 0.08, function() finAnim(a) end)
+		if last then
+			Once(last.Completed, function() finAnim(a) end)
+		end
+	else
+		local defer = false
+		for _, u in ipairs(au) do
+			if u.au == AS.Y or u.au == AS.XY or u.sz.Y.Scale ~= 0 then
+				u.m = true
+				defer = true
+			end
+		end
+		for _, u in ipairs(au) do
+			for _, f in ipairs(u.fd) do
+				f[1][f[2]] = 1
+			end
+			u.obj.Visible = true
+			if not u.m and u.obj.Parent then
+				local h = math.max(0, u.sz.Y.Offset)
+				if h >= 1 then
+					u.nh = h
+					u.obj.AutomaticSize = AS.None
+					u.obj.ClipsDescendants = true
+					u.obj.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
+				else
+					u.skip = true
+				end
+			end
+		end
+		for _, r in ipairs(els) do
+			if r[2] and r[1].Row and r[1].Row.Parent then
+				r[1].Row.Visible = true
+			end
+		end
+
+		local stag = math.min(0.028, 0.26 / math.max(1, n - 1))
+
+		local function begin()
+			if a.done or sec._anim ~= a or sec._destroyed then return end
+			local last
+			for _, u in ipairs(au) do
+				if u.m and not u.skip and u.obj.Parent then
+					local o = u.obj
+					local h = math.max(0, o.AbsoluteSize.Y / s)
+					if h < 1 then
+						h = math.max(0, u.sz.Y.Offset)
+					end
+					if h >= 1 then
+						u.nh = h
+						o.AutomaticSize = AS.None
+						o.ClipsDescendants = true
+						o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
+					else
+						u.skip = true
+					end
+				end
+			end
+			for i, u in ipairs(au) do
+				local d = (i - 1) * stag
+				if not u.skip then
+					last = Tween(u.obj, SOH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, u.nh) }, nil, d)
+				end
+				for _, f in ipairs(u.fd) do
+					Tween(f[1], SOF, { [f[2]] = f[3] }, nil, d + 0.02)
+				end
+			end
+			task.delay(((n - 1) * stag + 0.34) * m + 0.1, function() finAnim(a) end)
+			if last then
+				Once(last.Completed, function() finAnim(a) end)
+			end
+		end
+
+		if defer then
+			task.spawn(function()
+				for _ = 1, 3 do
+					task.wait()
+					local bad = false
+					for _, u in ipairs(au) do
+						if u.m and u.obj.Parent and u.obj.AbsoluteSize.Y < 1 then
+							bad = true
+							break
+						end
+					end
+					if not bad then break end
+				end
+				begin()
+			end)
+		else
+			begin()
+		end
+	end
+end
+
+Elements.Section = MakeElementClass()
+
 Elements.Section = MakeElementClass()
 
 function Elements.Section.new(tab, opts)
@@ -2995,10 +3311,8 @@ function Elements.Section.new(tab, opts)
 		Parent = tab.Content,
 		Children = { Pad(0, 0, 0, 0) },
 	})
-
 	local hit = U.Overlay(row)
-
-	Frm({
+	local bar = Frm({
 		AnchorPoint = V2(0, 0.5),
 		Position = UN(0, 2, 0.5, 0),
 		Size = UO(3, 13),
@@ -3006,12 +3320,10 @@ function Elements.Section.new(tab, opts)
 		Parent = row,
 		Children = { Corner(2) },
 	})
-
 	local chevron = Icon(row, "Chevron", "SubText")
 	chevron.AnchorPoint = V2(1, 0.5)
 	chevron.Position = UN(1, -2, 0.5, 0)
 	chevron.Size = UO(10, 10)
-
 	local label = U.Txt(row, {
 		Pos = UO(12, 0),
 		Size = UN(1, -24, 1, 0),
@@ -3022,12 +3334,11 @@ function Elements.Section.new(tab, opts)
 		Trunc = true,
 		Text = string.upper(tostring(opts.Name or "Section")),
 	})
-
 	local self = INew(Elements.Section, row, { Name = opts.Name, Width = opts.Width }, nil)
 	self.Header = row
 	self.TitleLabel = label
 	self.Chevron = chevron
-
+	self.AccentBar = bar
 	local startCollapsed = opts.Collapsed
 	if startCollapsed == nil then
 		if opts.Open ~= nil then
@@ -3038,15 +3349,20 @@ function Elements.Section.new(tab, opts)
 	end
 	self.Collapsed = startCollapsed == true
 	self.Elements = {}
-
 	if self.Collapsed then
 		chevron.Rotation = -90
+		bar.Size = UO(3, 7)
+		bar.BackgroundTransparency = 0.45
 	end
-
 	self.Maid:Give(hit.MouseButton1Click:Connect(function()
+		PlaySound("Click", 0.4)
 		self:SetCollapsed(not self.Collapsed)
 	end))
-
+	self.Maid:Give(function()
+		if self._anim then
+			finAnim(self._anim)
+		end
+	end)
 	return self
 end
 
@@ -3054,16 +3370,18 @@ function Elements.Section:SetCollapsed(collapsed)
 	if self.Collapsed == collapsed then return end
 	self.Collapsed = collapsed
 	if self.Chevron then
-		Tween(self.Chevron, "PopSoft", { Rotation = collapsed and -90 or 0 })
+		Tween(self.Chevron, "Spring", { Rotation = collapsed and -90 or 0 })
 	end
-	for _, el in ipairs(self.Elements) do
-		if not el._destroyed then
-			if collapsed then
-				el.Row.Visible = false
-			else
-				el.Row.Visible = el._manualVisible ~= false
-			end
-		end
+	if self.AccentBar then
+		Tween(self.AccentBar, "PopSoft", {
+			Size = collapsed and UO(3, 7) or UO(3, 13),
+			BackgroundTransparency = collapsed and 0.45 or 0,
+		})
+	end
+	if secAnimOK(self) then
+		secAnim(self)
+	else
+		secStatic(self)
 	end
 end
 
