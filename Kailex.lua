@@ -504,7 +504,7 @@ local function TI(t, s, d)
 	return TweenInfo.new(t, s, d)
 end
 
-local Tween
+local Tween, CancelTweenProp
 
 do
 	local Tweens = {
@@ -580,6 +580,16 @@ do
 
 		tween:Play()
 		return tween
+	end
+
+	function CancelTweenProp(inst, prop)
+		local book = ActiveTweens[inst]
+		if not book then return end
+		local t = book[prop]
+		if t then
+			pcall(t.Cancel, t)
+			book[prop] = nil
+		end
 	end
 end
 
@@ -705,6 +715,7 @@ local function ApplyTheme(theme)
 				for prop, key in pairs(binds) do
 					local v = t[key]
 					if v ~= nil then
+						pcall(CancelTweenProp, inst, prop)
 						inst[prop] = v
 					end
 				end
@@ -965,10 +976,12 @@ do
 end
 
 local Audio = {
-	Hover = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 1.85, Vol = 0.05 },
-	Click = { Id = "rbxasset://sounds/snap.mp3", Speed = 1.25, Vol = 0.45 },
-	ToggleOn = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 1.15, Vol = 0.35 },
-	Slider = { Id = "rbxasset://sounds/snap.mp3", Speed = 1.55, Vol = 0.25 },
+	Hover = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 2.6, Vol = 0.25 },
+	Click = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 1.5, Vol = 0.3 },
+	ToggleOn = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 1.05, Vol = 0.4 },
+	ToggleOff = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 0.8, Vol = 0.4 },
+	Tick = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 2, Vol = 0.13 },
+	Dropdown = { Id = "rbxasset://sounds/electronicpingshort.wav", Speed = 0.7, Vol = 0.3 },
 	Error = { Id = "rbxasset://sounds/snap.mp3", Speed = 0.55, Vol = 0.55 },
 	Master = 1,
 }
@@ -977,7 +990,7 @@ Kailex.Audio = Audio
 local SoundPool = {}
 local SoundInstances = {}
 
-local function PlaySound(kind, scale)
+local function PlaySound(kind, scale, speed)
 	if not Setting.Sounds then return end
 	local a = Audio[kind]
 	if type(a) ~= "table" or a.Id == "" then return end
@@ -1016,7 +1029,7 @@ local function PlaySound(kind, scale)
 		end
 
 		s.SoundId = a.Id
-		s.PlaybackSpeed = a.Speed or 1
+		s.PlaybackSpeed = speed or a.Speed or 1
 		s.Volume = clamp((a.Vol or 0.4) * (scale or 1) * (Audio.Master or 1), 0, 1)
 		s.TimePosition = 0
 		s:Play()
@@ -1830,7 +1843,7 @@ local function newCard()
 	local dot = Frm({
 		Size = UO(7, 7),
 		Position = UO(12, 11),
-		BackgroundColor3 = CurrentTheme.Accent,
+		BackgroundColor3 = "Accent",
 		ZIndex = 2,
 		Parent = card,
 		Children = { Corner(PILL) },
@@ -1866,7 +1879,7 @@ local function newCard()
 		AnchorPoint = V2(0, 1),
 		Position = UN(0, 12, 1, -5),
 		Size = UN(1, -24, 0, 2),
-		BackgroundColor3 = CurrentTheme.Accent,
+		BackgroundColor3 = "Accent",
 		ZIndex = 1,
 		Parent = card,
 		Children = { Corner(PILL) },
@@ -2327,7 +2340,7 @@ function QuickWidgets.Toggle(element)
 		AnchorPoint = V2(0.5, 1),
 		Position = UN(0.5, 0, 1, -8),
 		Size = UO(6, 6),
-		BackgroundColor3 = CurrentTheme.Accent,
+		BackgroundColor3 = "Accent",
 		Parent = widget,
 		Children = { Corner(PILL) },
 	})
@@ -2439,6 +2452,7 @@ function ContextMenu.Show(items, x, y)
 				Color = item.Danger and "Error" or "Text",
 				Align = ETA.Left,
 				Order = i,
+				Hover = { BaseTransparency = 1, HoverTransparency = 0.85 },
 			})
 			btn.MouseButton1Click:Connect(function()
 				ContextMenu.Hide()
@@ -3301,8 +3315,6 @@ end
 
 Elements.Section = MakeElementClass()
 
-Elements.Section = MakeElementClass()
-
 function Elements.Section.new(tab, opts)
 	opts = opts or {}
 	local row = Frm({
@@ -3517,7 +3529,7 @@ function Elements.Toggle.new(tab, opts)
 		Children = { Corner(PILL) },
 	})
 	local stroke = Create("UIStroke", {
-		Thickness = 1, Transparency = 0.5, ApplyStrokeMode = SB, Parent = switch,
+		Thickness = 1, Transparency = 0.5, ApplyStrokeMode = SB, Color = "Stroke", Parent = switch,
 	})
 	local knob = Frm({
 		AnchorPoint = V2(0, 0.5),
@@ -3570,6 +3582,7 @@ function Elements.Toggle.new(tab, opts)
 		if self._disabled then return end
 		if overlay:GetAttribute("Dragging") then return end
 		ApplyRipple(overlay)
+		PlaySound(self.State and "ToggleOff" or "ToggleOn")
 		self:Set(not self.State)
 	end)
 	HookContextMenu(self, overlay)
@@ -3744,6 +3757,14 @@ function Elements.Slider.new(tab, opts)
 	end
 
 	local dragging = false
+	local lastTick = 0
+	local function tickSound()
+		local now = os.clock()
+		if now - lastTick < 0.035 then return end
+		lastTick = now
+		PlaySound("Tick", 1, 1.1 + (value - min) / (max - min) * 2.4)
+	end
+
 	local function snap(f)
 		local v = min + (max - min) * f
 		if step > 0 then
@@ -3819,10 +3840,12 @@ function Elements.Slider.new(tab, opts)
 		Guard = function()
 			return not dragging and not self._disabled
 		end,
+
 		Active = track,
 		Start = function()
 			dragging = true
-			PlaySound("Slider")
+			lastTick = 0
+			tickSound()
 			Tween(knob, "Spring", { Size = UO(18, 18) })
 			Tween(knobStroke, "Fast", { Transparency = 0 })
 			bubble.Visible = true
@@ -3837,11 +3860,13 @@ function Elements.Slider.new(tab, opts)
 			local v = snap(frac)
 			if v ~= value then
 				apply(v)
+				tickSound()
 				if not onRelease then
 					RunCallback(self.Callback, self.Title, value)
 				end
 			end
 		end,
+
 		End = function()
 			dragging = false
 			Tween(knob, "Spring", { Size = UO(14, 14) })
@@ -3857,6 +3882,8 @@ function Elements.Slider.new(tab, opts)
 			end
 		end,
 	})
+
+
 
 	track.MouseEnter:Connect(function()
 		if not dragging then
@@ -3905,11 +3932,15 @@ function Elements.Slider.new(tab, opts)
 		return string.format("%." .. math.max(decimals, 0) .. "f", value)
 	end
 
-	function self:HandleArrow(dir)
-		if self._destroyed or self._disabled then return end
-		local fine = UIS:IsKeyDown(EKC.LeftShift) or UIS:IsKeyDown(EKC.RightShift)
-		self:Set(value + step * (fine and 0.2 or 1) * dir)
-	end
+    function self:HandleArrow(dir)
+        if self._destroyed or self._disabled then return end
+        local fine = UIS:IsKeyDown(EKC.LeftShift) or UIS:IsKeyDown(EKC.RightShift)
+        local before = value
+        self:Set(value + step * (fine and 0.2 or 1) * dir)
+        if value ~= before then
+            tickSound()
+        end
+    end
 
 	U.TrackHot(self, row)
 	self:_saveAs(saveKey, "number")
@@ -3947,7 +3978,7 @@ function Elements.Keybind.new(tab, opts)
 		BgC = "SurfaceLight",
 		Text = "None",
 		Ts = 11,
-		Hover = false,
+		Hover = { BaseKey = "SurfaceLight", HoverKey = "ElementHover" },
 	})
 	StrokeBind(1, "Stroke", 0.5, bindBtn)
 
@@ -4394,18 +4425,17 @@ function Elements.Dropdown.new(tab, opts)
 			rec.BoxStroke = Create("UIStroke", {
 				Thickness = 1, Transparency = 0.4,
 				ApplyStrokeMode = SB,
-				Color = CurrentTheme.Stroke, Parent = box,
+				Color = "Stroke", Parent = box,
 			})
 			rec.Fill = Frm({
 				AnchorPoint = V2(0.5, 0.5),
 				Position = US(0.5, 0.5),
 				Size = UO(0, 0),
-				BackgroundColor3 = CurrentTheme.Accent,
+				BackgroundColor3 = "Accent",
 				Visible = false,
 				Parent = box,
 				Children = { Corner(2) },
 			})
-			Bind(rec.Fill, "BackgroundColor3", "Accent")
 		else
 			local chk = Icon(btn, "Check", "Accent")
 			chk.AnchorPoint = V2(1, 0.5)
@@ -4716,7 +4746,8 @@ function Elements.Dropdown.new(tab, opts)
 	})
 	Click(self.Maid, overlay, function()
 		if self._disabled then return end
-		Tap(overlay, "Click", 0.7)
+		ApplyRipple(overlay)
+		PlaySound(expanded and "Click" or "Dropdown")
 		setExpanded(not expanded)
 	end)
 	HookContextMenu(self, overlay)
@@ -6167,12 +6198,17 @@ local function BuildSettingsTab(win)
 		Name = "Reset Colors",
 		Span = 2,
 		Callback = function()
-			local b = BaseColors()
-			editing = table.clone(b)
-			resetDefaults(b)
-			syncPickers()
-			applyColors(true)
-			Note("Colors", "Colors reset to default.", "Success")
+			Kailex:Confirm({
+				Title = "Reset colors?",
+				Text = "Custom colors will be reverted to the theme defaults.",
+			}, function()
+				local b = BaseColors()
+				editing = table.clone(b)
+				resetDefaults(b)
+				syncPickers()
+				applyColors(true)
+				Note("Colors", "Colors reset to default.", "Success")
+			end)
 		end,
 	})
 
@@ -6211,7 +6247,8 @@ local function BuildSettingsTab(win)
 		profDrop:SetOptions(Configs:List())
 	end
 	tab:Button({
-		Name = "Save profile",
+		Name = "Save",
+		Width = 0.5,
 		Callback = function()
 			local n = nameInput:Get()
 			if n == "" then
@@ -6229,7 +6266,8 @@ local function BuildSettingsTab(win)
 		end,
 	})
 	tab:Button({
-		Name = "Load profile",
+		Name = "Load",
+		Width = 0.5,
 		Callback = function()
 			local n = profDrop:Get()
 			if not n then return end
@@ -6241,7 +6279,77 @@ local function BuildSettingsTab(win)
 		end,
 	})
 	tab:Button({
-		Name = "Delete profile",
+		Name = "Export",
+		Width = 0.5,
+		Callback = function()
+			local payload
+			local n = profDrop:Get()
+			if n then
+				local ok, res = pcall(fs.readfile, Configs:Path(n))
+				if ok and type(res) == "string" and res:match("%S") then
+					payload = res
+				end
+			end
+			if not payload then
+				local export = {}
+				for k, v in pairs(SaveManager.Data) do
+					if not IsInternalKey(k) then
+						export[k] = v
+					end
+				end
+				payload = HttpService:JSONEncode(export)
+			end
+			local setc = GetClipboardFn()
+			if not setc then
+				Note("Profiles", "Clipboard is not supported here.", "Error")
+				return
+			end
+			pcall(setc, payload)
+			Note("Profiles", "Config copied to clipboard.", "Success")
+		end,
+	})
+	tab:Button({
+		Name = "Import",
+		Width = 0.5,
+		Callback = function()
+			local ok, gc = pcall(function()
+				return getclipboard
+			end)
+			if not (ok and type(gc) == "function") then
+				Note("Profiles", "Clipboard is not supported here.", "Error")
+				return
+			end
+			local ok2, text = pcall(gc)
+			local data
+			if ok2 and type(text) == "string" and text:match("%S") then
+				local ok3, res = pcall(function()
+					return HttpService:JSONDecode(text)
+				end)
+				if ok3 and type(res) == "table" then
+					data = res
+				end
+			end
+			if not data then
+				Note("Profiles", "Clipboard has no valid config.", "Error")
+				return
+			end
+			local merged = {}
+			for k, v in pairs(SaveManager.Data) do
+				if IsInternalKey(k) then
+					merged[k] = v
+				end
+			end
+			for k, v in pairs(data) do
+				merged[k] = v
+			end
+			SaveManager.Data = merged
+			SaveManager:Flush()
+			SaveManager.DataChanged:Fire()
+			Note("Profiles", "Config imported from clipboard.", "Success")
+		end,
+	})
+	tab:Button({
+		Name = "Delete",
 		Callback = function()
 			local n = profDrop:Get()
 			if not n then return end
