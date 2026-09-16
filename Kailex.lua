@@ -4,15 +4,10 @@ pcall(function()
 	if not game:IsLoaded() then game.Loaded:Wait() end
 end)
 
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local GuiService = game:GetService("GuiService")
-local SoundService = game:GetService("SoundService")
-local TextService = game:GetService("TextService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
-local Workspace = game:GetService("Workspace")
+local Players, GuiService = game:GetService("Players"), game:GetService("GuiService")
+local SoundService, TextService = game:GetService("SoundService"), game:GetService("TextService")
+local TweenService, RunService = game:GetService("TweenService"), game:GetService("RunService")
+local HttpService, Workspace = game:GetService("HttpService"), game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
 
@@ -39,27 +34,19 @@ local ED = Enum.EasingDirection
 local clamp = math.clamp
 local floor = math.floor
 
-local Device = {}
+local Device = { IsTouch = UIS.TouchEnabled and not UIS.MouseEnabled }
 
-do
-	Device.IsTouch = UIS.TouchEnabled and not UIS.MouseEnabled
-	Device.IsConsole = false
-	pcall(function()
-		Device.IsConsole = GuiService:IsTenFootInterface()
-	end)
-end
+pcall(function()
+	Device.IsConsole = GuiService:IsTenFootInterface()
+end)
 
 local ROW_H = Device.IsTouch and 40 or 32
 local PILL = UD(1, 0)
 
 local function RemoveValue(t, v)
 	for i, x in ipairs(t) do
-		if x == v then
-			table.remove(t, i)
-			return true
-		end
+		if x == v then return table.remove(t, i) end
 	end
-	return false
 end
 
 local function ClampEdge(v, size, view, m)
@@ -70,25 +57,24 @@ local function DecimalsOf(step)
 	return step >= 1 and 0 or clamp(math.ceil(-math.log10(step)), 1, 3)
 end
 
+local function Peek(fn)
+	local ok, v = pcall(fn)
+	if ok then return v end
+end
+
 local function Getgenv()
-	local ok, g = pcall(function()
-		return getgenv
-	end)
-	if ok and type(g) == "function" then
-		local ok2, res = pcall(g)
-		if ok2 and type(res) == "table" then
-			return res
+	return Peek(function()
+		if type(getgenv) == "function" then
+			local g = getgenv()
+			if type(g) == "table" then return g end
 		end
-	end
-	return nil
+	end)
 end
 
 local genv = Getgenv()
 
 if genv and genv.kailex then
-	pcall(function()
-		genv.kailex:Unload()
-	end)
+	pcall(function() genv.kailex:Unload() end)
 	genv.kailex = nil
 end
 
@@ -103,54 +89,22 @@ local fs = {
 	listfiles = listfiles or function() return {} end,
 }
 
-local SafeParent = (function()
-	local ok, ui = pcall(function()
-		return (gethui and gethui())
-	end)
-	if ok and ui then
-		return ui
-	end
-
-	local ok2, cg = pcall(function()
-		return CoreGui
-	end)
-	if ok2 and cg then
+local SafeParent = Peek(function() return gethui and gethui() end)
+if not SafeParent then
+	local cg = Peek(function() return game:GetService("CoreGui") end)
+	if cg then
 		local test = Instance.new("Frame")
-		local okSet = pcall(function()
-			test.Parent = cg
-		end)
+		local okSet = pcall(function() test.Parent = cg end)
 		test:Destroy()
-		if okSet then
-			return cg
-		end
-	end
-
-	if LocalPlayer then
-		local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-		if pg then
-			return pg
-		end
-	end
-	return game
-end)()
-
-local protect_gui = function() end
-
-do
-	local ok, pg = pcall(function()
-		return protectgui
-	end)
-	if ok and type(pg) == "function" then
-		protect_gui = pg
-	else
-		local ok2, syn = pcall(function()
-			return syn
-		end)
-		if ok2 and type(syn) == "table" and type(syn.protect_gui) == "function" then
-			protect_gui = syn.protect_gui
-		end
+		if okSet then SafeParent = cg end
 	end
 end
+SafeParent = SafeParent or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")) or game
+
+local protect_gui = Peek(function()
+	if type(protectgui) == "function" then return protectgui end
+	if type(syn) == "table" and type(syn.protect_gui) == "function" then return syn.protect_gui end
+end) or function() end
 
 local function Once(signal, fn)
 	local conn
@@ -163,12 +117,7 @@ end
 
 local function ReportError(title, err)
 	warn("[Kailex] " .. tostring(err))
-	Kailex:Notify({
-		Title = title,
-		Text = tostring(err),
-		Type = "Error",
-		Duration = 6,
-	})
+	Kailex:Notify({ Title = title, Text = tostring(err), Type = "Error", Duration = 6 })
 end
 
 local Signal = {}
@@ -179,9 +128,7 @@ function Signal.new()
 end
 
 function Signal:Connect(fn)
-	if type(fn) ~= "function" then
-		error("Signal:Connect expects a function", 2)
-	end
+	if type(fn) ~= "function" then error("Signal:Connect expects a function", 2) end
 	if self._dead then
 		local c = { Connected = false }
 		function c:Disconnect() end
@@ -221,9 +168,7 @@ function Signal:Fire(...)
 		local c = conns[i]
 		if c.Connected then
 			local ok, err = pcall(c._fn, ...)
-			if not ok then
-				ReportError("Callback error", err)
-			end
+			if not ok then ReportError("Callback error", err) end
 		end
 	end
 	self._lock -= 1
@@ -233,9 +178,7 @@ function Signal:Fire(...)
 		local keep = table.create(n)
 		for i = 1, #conns do
 			local c = conns[i]
-			if c.Connected then
-				keep[#keep + 1] = c
-			end
+			if c.Connected then keep[#keep + 1] = c end
 		end
 		self._conns = keep
 	end
@@ -264,9 +207,7 @@ end
 
 function Maid:Link(inst)
 	if typeof(inst) == "Instance" and not self._dead and not self._link then
-		self._link = inst.Destroying:Connect(function()
-			self:Destroy()
-		end)
+		self._link = inst.Destroying:Connect(function() self:Destroy() end)
 	end
 	return self
 end
@@ -298,9 +239,7 @@ function Maid:Destroy()
 	if self._dead then return end
 	self._dead = true
 	if self._link then
-		pcall(function()
-			self._link:Disconnect()
-		end)
+		pcall(function() self._link:Disconnect() end)
 		self._link = nil
 	end
 	self:Clean()
@@ -328,9 +267,7 @@ local function IsInputDown(inputType)
 		local ok, touches = pcall(UIS.GetTouches, UIS)
 		return ok and #touches > 0 or false
 	end
-	if inputType == EUT.MouseButton1
-		or inputType == EUT.MouseButton2
-		or inputType == EUT.MouseButton3 then
+	if inputType == EUT.MouseButton1 or inputType == EUT.MouseButton2 or inputType == EUT.MouseButton3 then
 		return UIS:IsMouseButtonPressed(inputType)
 	end
 	return true
@@ -339,28 +276,16 @@ end
 local function SafeCall(fn, ...)
 	if type(fn) ~= "function" then return end
 	local ok, err = pcall(fn, ...)
-	if not ok then
-		ReportError("Script error", err)
-	end
+	if not ok then ReportError("Script error", err) end
 end
 
 local function Sanitize(text)
-	local s = tostring(text or "")
-	s = s:gsub('[%c/\\:"<>|*?]', "")
-	s = s:gsub("^%s+", ""):gsub("%s+$", "")
-	if s == "" then
-		s = "Untitled"
-	end
-	return s
+	local s = tostring(text or ""):gsub('[%c/\\:"<>|*?]', ""):gsub("^%s+", ""):gsub("%s+$", "")
+	return s == "" and "Untitled" or s
 end
 
 local function ColorToHex(c)
-	return string.format(
-		"#%02X%02X%02X",
-		floor(c.R * 255 + 0.5),
-		floor(c.G * 255 + 0.5),
-		floor(c.B * 255 + 0.5)
-	)
+	return string.format("#%02X%02X%02X", floor(c.R * 255 + 0.5), floor(c.G * 255 + 0.5), floor(c.B * 255 + 0.5))
 end
 
 local function HexToColor(hex)
@@ -370,13 +295,8 @@ local function HexToColor(hex)
 		h = h:sub(1, 1):rep(2) .. h:sub(2, 2):rep(2) .. h:sub(3, 3):rep(2)
 	end
 	if #h ~= 6 then return nil end
-	local r = tonumber(h:sub(1, 2), 16)
-	local g = tonumber(h:sub(3, 4), 16)
-	local b = tonumber(h:sub(5, 6), 16)
-	if r and g and b then
-		return Color3.fromRGB(r, g, b)
-	end
-	return nil
+	local r, g, b = tonumber(h:sub(1, 2), 16), tonumber(h:sub(3, 4), 16), tonumber(h:sub(5, 6), 16)
+	if r and g and b then return RGB(r, g, b) end
 end
 
 local function RGBtoHSV(c)
@@ -416,18 +336,14 @@ LibMaid:Give(UIS.InputBegan:Connect(function(input, gp)
 		local h = InputHooks[i]
 		if h and h.alive() then
 			local ok, err = pcall(h.fn, input, gp)
-			if not ok then
-				ReportError("Input error", err)
-			end
+			if not ok then ReportError("Input error", err) end
 		end
 	end
 	if #InputHooks > 96 then
 		local keep = table.create(8)
 		for i = 1, #InputHooks do
 			local h = InputHooks[i]
-			if h.alive() then
-				keep[#keep + 1] = h
-			end
+			if h.alive() then keep[#keep + 1] = h end
 		end
 		InputHooks = keep
 	end
@@ -437,25 +353,21 @@ local KeybindRegistry = {}
 
 local function ParseKey(v)
 	if typeof(v) == "EnumItem" then
-		if v.EnumType == EKC then return v end
-		return nil
+		return v.EnumType == EKC and v or nil
 	end
 	if type(v) == "string" then
 		local kind, name = v:match("^(%a+):(.+)$")
-		if kind and kind:lower() ~= "key" then return nil end
-		return EKC[name or v]
+		if not kind then return EKC[v] end
+		return kind:lower() == "key" and EKC[name] or nil
 	end
-	return nil
 end
 
 local function ToBinding(v)
 	if typeof(v) == "EnumItem" then
-		local name = v.Name
 		if v.EnumType == EKC then
-			return { Kind = "Key", Code = v, Name = name }
-		end
-		if v.EnumType == Enum.UserInputType then
-			return { Kind = "Mouse", Code = v, Name = name }
+			return { Kind = "Key", Code = v, Name = v.Name }
+		elseif v.EnumType == EUT then
+			return { Kind = "Mouse", Code = v, Name = v.Name }
 		end
 	elseif type(v) == "string" then
 		local kind, name = v:match("^(%a+):(.+)$")
@@ -463,23 +375,16 @@ local function ToBinding(v)
 			local k = kind:sub(1, 1):upper() .. kind:sub(2):lower()
 			if k == "Key" then
 				local kc = EKC[name]
-				if kc then
-					return { Kind = "Key", Code = kc, Name = name }
-				end
+				if kc then return { Kind = "Key", Code = kc, Name = name } end
 			elseif k == "Mouse" then
-				local it = Enum.UserInputType[name]
-				if it then
-					return { Kind = "Mouse", Code = it, Name = name }
-				end
+				local it = EUT[name]
+				if it then return { Kind = "Mouse", Code = it, Name = name } end
 			end
 			return nil
 		end
 		local kc = EKC[v]
-		if kc then
-			return { Kind = "Key", Code = kc, Name = v }
-		end
+		if kc then return { Kind = "Key", Code = kc, Name = v } end
 	end
-	return nil
 end
 
 local function NotifyKeybindConflict(self, b)
@@ -524,9 +429,7 @@ do
 		PopSoft = TI(0.20, E.Back, ED.Out),
 		Vanish = TI(0.15, E.Quad, ED.In),
 	}
-	setmetatable(Tweens, { __index = function()
-		return Tweens.Normal
-	end })
+	setmetatable(Tweens, { __index = function() return Tweens.Normal end })
 
 	local ActiveTweens = setmetatable({}, { __mode = "k" })
 
@@ -568,9 +471,7 @@ do
 			local b = ActiveTweens[inst]
 			if b then
 				for prop in pairs(props) do
-					if b[prop] == tween then
-						b[prop] = nil
-					end
+					if b[prop] == tween then b[prop] = nil end
 				end
 			end
 			if done and state == Enum.PlaybackState.Completed then
@@ -584,8 +485,7 @@ do
 
 	function CancelTweenProp(inst, prop)
 		local book = ActiveTweens[inst]
-		if not book then return end
-		local t = book[prop]
+		local t = book and book[prop]
 		if t then
 			pcall(t.Cancel, t)
 			book[prop] = nil
@@ -605,12 +505,8 @@ local function Luma(c)
 end
 
 local function ToColor(v, fallback)
-	if typeof(v) == "Color3" then
-		return v
-	end
-	if type(v) == "string" then
-		return HexToColor(v) or fallback
-	end
+	if typeof(v) == "Color3" then return v end
+	if type(v) == "string" then return HexToColor(v) or fallback end
 	return fallback
 end
 
@@ -666,9 +562,7 @@ CurrentTheme = Themes["Dark-Blue"]
 local CustomBase = nil
 
 local function BaseColors()
-	if CustomBase then
-		return CustomBase
-	end
+	if CustomBase then return CustomBase end
 	return (Themes[Setting.Theme] or Themes["Dark-Blue"]).Base
 end
 
@@ -691,9 +585,7 @@ local function Bind(inst, prop, key)
 	end
 	b[prop] = key
 	local v = CurrentTheme[key]
-	if v ~= nil then
-		inst[prop] = v
-	end
+	if v ~= nil then inst[prop] = v end
 	return inst
 end
 
@@ -751,9 +643,7 @@ local function ApplyTextScale()
 		for inst in pairs(TextRegistry) do
 			local base = TextBaseSize[inst]
 			if base then
-				pcall(function()
-					inst.TextSize = TS(base)
-				end)
+				pcall(function() inst.TextSize = TS(base) end)
 			end
 		end
 	end)
@@ -763,12 +653,8 @@ local Create
 
 do
 	local ColorProps = {
-		BackgroundColor3 = true,
-		TextColor3 = true,
-		ImageColor3 = true,
-		PlaceholderColor3 = true,
-		ScrollBarImageColor3 = true,
-		Color = true,
+		BackgroundColor3 = true, TextColor3 = true, ImageColor3 = true,
+		PlaceholderColor3 = true, ScrollBarImageColor3 = true, Color = true,
 	}
 
 	local function SetProps(inst, props)
@@ -815,9 +701,7 @@ do
 				child.Parent = inst
 			end
 		end
-		if parent then
-			inst.Parent = parent
-		end
+		if parent then inst.Parent = parent end
 		return inst
 	end
 end
@@ -826,9 +710,7 @@ local function Mk(class, base)
 	return function(p)
 		p = p or {}
 		for k, v in pairs(base) do
-			if p[k] == nil then
-				p[k] = v
-			end
+			if p[k] == nil then p[k] = v end
 		end
 		return Create(class, p)
 	end
@@ -861,14 +743,12 @@ local function Corner(radius, parent)
 end
 
 local function StrokeBind(thickness, key, transparency, parent)
-	local s = Create("UIStroke", {
+	return Bind(Create("UIStroke", {
 		Thickness = thickness or 1,
 		Transparency = transparency or 0.6,
 		ApplyStrokeMode = SB,
 		Parent = parent,
-	})
-	Bind(s, "Color", key or "Stroke")
-	return s
+	}), "Color", key or "Stroke")
 end
 
 local function Pad(l, r, t, b, parent)
@@ -895,12 +775,8 @@ local U = {}
 
 function U.HL(pad, ha, va)
 	local ex = { FillDirection = EFd.Horizontal }
-	if ha then
-		ex.HorizontalAlignment = ha
-	end
-	if va then
-		ex.VerticalAlignment = va
-	end
+	if ha then ex.HorizontalAlignment = ha end
+	if va then ex.VerticalAlignment = va end
 	return List(pad, ex)
 end
 
@@ -1003,8 +879,7 @@ local function PlaySound(kind, scale, speed)
 
 		local s
 		for i = 1, #pool do
-			local c = pool[i]
-			if not c.IsPlaying then
+			if not pool[i].IsPlaying then
 				s = table.remove(pool, i)
 				break
 			end
@@ -1017,9 +892,7 @@ local function PlaySound(kind, scale, speed)
 				task.defer(function()
 					if s.Parent ~= SoundService then return end
 					if #pool < 8 then
-						if not table.find(pool, s) then
-							table.insert(pool, s)
-						end
+						if not table.find(pool, s) then table.insert(pool, s) end
 					else
 						s:Destroy()
 						RemoveValue(SoundInstances, s)
@@ -1040,13 +913,9 @@ local function AddHover(obj, opts)
 	if Device.IsTouch then return end
 	opts = opts or {}
 	local baseT = opts.BaseTransparency
-	if baseT == nil then
-		baseT = obj.BackgroundTransparency
-	end
+	if baseT == nil then baseT = obj.BackgroundTransparency end
 	local hoverT = opts.HoverTransparency
-	if hoverT == nil then
-		hoverT = baseT
-	end
+	if hoverT == nil then hoverT = baseT end
 	local hoverKey = opts.HoverKey or "ElementHover"
 	local baseKey = opts.BaseKey or "Element"
 
@@ -1139,13 +1008,7 @@ function U.TxB(parent, p)
 end
 
 function U.Overlay(parent, z, vis, bg)
-	return Hit({
-		Size = US(1, 1),
-		ZIndex = z,
-		Visible = vis,
-		BackgroundColor3 = bg,
-		Parent = parent,
-	})
+	return Hit({ Size = US(1, 1), ZIndex = z, Visible = vis, BackgroundColor3 = bg, Parent = parent })
 end
 
 function U.ModalCard(parent, z, w, h, radius, strokeT)
@@ -1174,18 +1037,12 @@ do
 		pcall(fs.makefolder, SaveManager.Folder)
 		local path = SaveManager.Folder .. "/" .. SaveManager.File
 		if fs.isfile(path) then
-			local ok, res = pcall(function()
-				return HttpService:JSONDecode(fs.readfile(path))
-			end)
+			local ok, res = pcall(function() return HttpService:JSONDecode(fs.readfile(path)) end)
+			if not (ok and type(res) == "table") then
+				ok, res = pcall(function() return HttpService:JSONDecode(fs.readfile(path .. ".bak")) end)
+			end
 			if ok and type(res) == "table" then
 				SaveManager.Data = res
-			else
-				local ok2, res2 = pcall(function()
-					return HttpService:JSONDecode(fs.readfile(path .. ".bak"))
-				end)
-				if ok2 and type(res2) == "table" then
-					SaveManager.Data = res2
-				end
 			end
 		end
 	end
@@ -1196,11 +1053,9 @@ local function IsInternalKey(key)
 end
 
 function SaveManager:Set(key, value)
-	if key == nil then return end
-	if self.Data[key] == value then return end
+	if key == nil or self.Data[key] == value then return end
 	self.Data[key] = value
-	if not Setting.AutoSave then return end
-	if self._pending then return end
+	if not Setting.AutoSave or self._pending then return end
 	self._pending = true
 	task.delay(self.Delay, function()
 		self._pending = false
@@ -1213,9 +1068,7 @@ function SaveManager:Flush()
 	local ok, err = pcall(function()
 		local path = self.Folder .. "/" .. self.File
 		if fs.isfile(path) then
-			pcall(function()
-				fs.writefile(path .. ".bak", fs.readfile(path))
-			end)
+			pcall(function() fs.writefile(path .. ".bak", fs.readfile(path)) end)
 		end
 		fs.writefile(path, HttpService:JSONEncode(self.Data))
 	end)
@@ -1239,16 +1092,12 @@ function SaveManager:Clear()
 end
 
 local function SaveValue(key, value)
-	if key then
-		SaveManager:Set(key, value)
-	end
+	if key then SaveManager:Set(key, value) end
 end
 
 function U.LoadNum(saveKey, default)
 	local v = SaveManager:Get(saveKey, default)
-	if type(v) == "number" then
-		return v
-	end
+	if type(v) == "number" then return v end
 	return default
 end
 
@@ -1265,9 +1114,7 @@ function Configs:List()
 	if ok and type(files) == "table" then
 		for _, f in ipairs(files) do
 			local name = tostring(f):match("([^/\\]+)%.json$")
-			if name then
-				table.insert(names, name)
-			end
+			if name then table.insert(names, name) end
 		end
 	end
 	table.sort(names)
@@ -1280,9 +1127,7 @@ function Configs:Save(name)
 	return pcall(function()
 		local export = {}
 		for k, v in pairs(SaveManager.Data) do
-			if not IsInternalKey(k) then
-				export[k] = v
-			end
+			if not IsInternalKey(k) then export[k] = v end
 		end
 		fs.writefile(self:Path(name), HttpService:JSONEncode(export))
 	end)
@@ -1290,18 +1135,12 @@ end
 
 function Configs:Load(name)
 	if not HasFileSystem or not name then return false end
-	local ok, res = pcall(function()
-		return HttpService:JSONDecode(fs.readfile(self:Path(name)))
-	end)
+	local ok, res = pcall(function() return HttpService:JSONDecode(fs.readfile(self:Path(name))) end)
 	if ok and type(res) == "table" then
 		local merged = {}
-		for k, v in pairs(res) do
-			merged[k] = v
-		end
+		for k, v in pairs(res) do merged[k] = v end
 		for k, v in pairs(SaveManager.Data) do
-			if IsInternalKey(k) then
-				merged[k] = v
-			end
+			if IsInternalKey(k) then merged[k] = v end
 		end
 		SaveManager.Data = merged
 		SaveManager:Flush()
@@ -1393,9 +1232,7 @@ local function UpdateViewport()
 	Root.Size = US(1 / s, 1 / s)
 	for _, win in ipairs(Kailex.Windows) do
 		if not win._destroyed then
-			pcall(function()
-				win:OnViewport()
-			end)
+			pcall(function() win:OnViewport() end)
 		end
 	end
 	for _, fn in ipairs(ViewportHooks) do
@@ -1438,8 +1275,7 @@ function ModalManager.Push(owner, closer)
 end
 
 function ModalManager.Remove(entry)
-	if not entry then return end
-	RemoveValue(ModalManager.Stack, entry)
+	if entry then RemoveValue(ModalManager.Stack, entry) end
 end
 
 function ModalManager.CloseAll(owner)
@@ -1457,8 +1293,7 @@ local DragManager = { Active = nil }
 local function TrackInput(handle, cfg)
 	handle.InputBegan:Connect(function(input)
 		if DragManager.Active then return end
-		if input.UserInputType ~= EUT.MouseButton1
-			and input.UserInputType ~= EUT.Touch then return end
+		if input.UserInputType ~= EUT.MouseButton1 and input.UserInputType ~= EUT.Touch then return end
 		if cfg.Guard and not cfg.Guard(input) then return end
 
 		local active = cfg.Active or handle
@@ -1469,41 +1304,31 @@ local function TrackInput(handle, cfg)
 		local function finish()
 			if not state.Alive then return end
 			state.Alive = false
-			if DragManager.Active == active then
-				DragManager.Active = nil
-			end
+			if DragManager.Active == active then DragManager.Active = nil end
 			m:Destroy()
-			if cfg.End then
-				SafeCall(cfg.End, state)
-			end
+			if cfg.End then SafeCall(cfg.End, state) end
 		end
 
 		m:Give(UIS.InputEnded:Connect(function(inp)
-			if inp.UserInputType == EUT.MouseButton1
-				or inp.UserInputType == EUT.Touch then
+			if inp.UserInputType == EUT.MouseButton1 or inp.UserInputType == EUT.Touch then
 				finish()
 			end
 		end))
 		m:Give(handle.Destroying:Connect(finish))
 		m:Give(RunService.Heartbeat:Connect(function()
-			if not IsInputDown(input.UserInputType) then
-				finish()
-			end
+			if not IsInputDown(input.UserInputType) then finish() end
 		end))
 
 		if cfg.Move then
 			m:Give(UIS.InputChanged:Connect(function(inp)
-				if state.Alive and (inp.UserInputType == EUT.MouseMovement
-					or inp.UserInputType == EUT.Touch) then
+				if state.Alive and (inp.UserInputType == EUT.MouseMovement or inp.UserInputType == EUT.Touch) then
 					SafeCall(cfg.Move, inp.Position, state)
 				end
 			end))
 		end
 		if cfg.Step then
 			m:Give(RunService.RenderStepped:Connect(function()
-				if state.Alive then
-					SafeCall(cfg.Step, state)
-				end
+				if state.Alive then SafeCall(cfg.Step, state) end
 			end))
 		end
 
@@ -1538,9 +1363,7 @@ local function MakeDraggable(handle, target, opts)
 				if math.abs(dx) + math.abs(dy) > threshold then
 					state.Moved = true
 					handle:SetAttribute("Dragging", true)
-					if opts.OnDragStart then
-						SafeCall(opts.OnDragStart, target)
-					end
+					if opts.OnDragStart then SafeCall(opts.OnDragStart, target) end
 					state.StartPos = target.Position
 					state.StartMouse = mouse
 				end
@@ -1550,23 +1373,18 @@ local function MakeDraggable(handle, target, opts)
 				local dx = mouse.X - state.StartMouse.X
 				local dy = mouse.Y - state.StartMouse.Y
 				target.Position = UO(state.StartPos.X.Offset + dx / s, state.StartPos.Y.Offset + dy / s)
-				if opts.Clamp then
-					ClampToScreen(target)
-				end
+				if opts.Clamp then ClampToScreen(target) end
 			end
 		end,
 		End = function(state)
 			handle:SetAttribute("Dragging", nil)
-			if state.Moved and opts.OnEnd then
-				SafeCall(opts.OnEnd)
-			end
+			if state.Moved and opts.OnEnd then SafeCall(opts.OnEnd) end
 		end,
 	})
 end
 
 UIS.InputEnded:Connect(function(input)
-	if input.UserInputType == EUT.MouseButton1
-		or input.UserInputType == EUT.Touch then
+	if input.UserInputType == EUT.MouseButton1 or input.UserInputType == EUT.Touch then
 		task.defer(function()
 			local anyDown = false
 			local ok, btns = pcall(UIS.GetMouseButtonsPressed, UIS)
@@ -1621,12 +1439,8 @@ local function ApplyRipple(target, inputPos)
 			break
 		end
 	end
-	if not rpl then
-		rpl = newRipple()
-	end
-	if not pcall(function()
-			rpl.Parent = target
-		end) then
+	if not rpl then rpl = newRipple() end
+	if not pcall(function() rpl.Parent = target end) then
 		RemoveValue(RipplePool, rpl)
 		rpl = newRipple()
 		rpl.Parent = target
@@ -1749,9 +1563,7 @@ do
 		Tween(frame, "Vanish", { BackgroundTransparency = 1 })
 		Tween(label, "Vanish", { TextTransparency = 1 })
 		task.delay(0.16, function()
-			if hideToken == tk then
-				frame.Visible = false
-			end
+			if hideToken == tk then frame.Visible = false end
 		end)
 		maid:Clean()
 	end
@@ -1765,9 +1577,7 @@ do
 
 		LibMaid:Give(UIS.TouchEnded:Connect(Tooltip.Hide))
 
-		LibMaid:Give(AddInputHook(function()
-			return true
-		end, function(input)
+		LibMaid:Give(AddInputHook(function() return true end, function(input)
 			if input.UserInputType ~= EUT.Touch then return end
 			task.delay(0.5, function()
 				if not IsInputDown(EUT.Touch) then return end
@@ -1776,9 +1586,7 @@ do
 					local ap, as = obj.AbsolutePosition, obj.AbsoluteSize
 					if m.X >= ap.X and m.Y >= ap.Y and m.X <= ap.X + as.X and m.Y <= ap.Y + as.Y then
 						local text = getText()
-						if text and text ~= "" then
-							Tooltip.Show(text)
-						end
+						if text and text ~= "" then Tooltip.Show(text) end
 						return
 					end
 				end
@@ -1824,9 +1632,7 @@ local process
 
 function U.ClearActions(actionsFrame)
 	for _, b in ipairs(actionsFrame:GetChildren()) do
-		if b:IsA("TextButton") then
-			b:Destroy()
-		end
+		if b:IsA("TextButton") then b:Destroy() end
 	end
 end
 
@@ -1885,12 +1691,10 @@ local function newCard()
 		Children = { Corner(PILL) },
 	})
 	local hit = U.Overlay(card, 3)
-	local cardScale = UISC(card)
-	local dotScale = UISC(dot)
 	local meta = {
 		Card = card, Stroke = stroke, Dot = dot, Title = title,
 		Body = body, Actions = actions, Progress = progress, Hit = hit, InUse = false,
-		CardScale = cardScale, DotScale = dotScale, ThemeKey = "Accent",
+		CardScale = UISC(card), DotScale = UISC(dot), ThemeKey = "Accent",
 	}
 	table.insert(pool, meta)
 	return meta
@@ -1898,14 +1702,20 @@ end
 
 local function getFreeCard()
 	for _, m in ipairs(pool) do
-		if not m.InUse and not m.Card.Visible then
-			return m
-		end
+		if not m.InUse and not m.Card.Visible then return m end
 	end
-	if #pool < POOL_CAP then
-		return newCard()
-	end
+	if #pool < POOL_CAP then return newCard() end
 	return nil
+end
+
+local function paintCard(m)
+	local c = CurrentTheme[m.ThemeKey or "Accent"]
+	m.Dot.BackgroundColor3 = c
+	m.Progress.BackgroundColor3 = c
+	m.Card.BackgroundColor3 = CurrentTheme.Surface
+	m.Stroke.Color = CurrentTheme.Stroke
+	m.Title.TextColor3 = CurrentTheme.Text
+	m.Body.TextColor3 = CurrentTheme.SubText
 end
 
 local function dismiss(meta)
@@ -1917,9 +1727,7 @@ local function dismiss(meta)
 		meta.DelayThread = nil
 	end
 	if meta.ProgressTween then
-		pcall(function()
-			meta.ProgressTween:Cancel()
-		end)
+		pcall(function() meta.ProgressTween:Cancel() end)
 		meta.ProgressTween = nil
 	end
 	if meta.Maid then
@@ -1937,9 +1745,7 @@ local function dismiss(meta)
 		Tween(meta.CardScale, "Vanish", { Scale = 0.88 })
 	end
 	Tween(meta.Card, "Snappy", { Size = UN(1, 0, 0, 0) }, function()
-		if not meta.InUse then
-			meta.Card.Visible = false
-		end
+		if not meta.InUse then meta.Card.Visible = false end
 		process()
 	end)
 	process()
@@ -1956,15 +1762,9 @@ process = function()
 		active += 1
 		meta.InUse = true
 
-		local themeKey = TypeColors[item.Type] or "Accent"
-		meta.ThemeKey = themeKey
+		meta.ThemeKey = TypeColors[item.Type] or "Accent"
 		meta.Card.Visible = true
-		meta.Card.BackgroundColor3 = CurrentTheme.Surface
-		meta.Stroke.Color = CurrentTheme.Stroke
-		meta.Dot.BackgroundColor3 = CurrentTheme[themeKey]
-		meta.Progress.BackgroundColor3 = CurrentTheme[themeKey]
-		meta.Title.TextColor3 = CurrentTheme.Text
-		meta.Body.TextColor3 = CurrentTheme.SubText
+		paintCard(meta)
 		meta.Title.Text = item.Title
 		meta.Body.Text = item.Text
 
@@ -2023,12 +1823,8 @@ process = function()
 			Tween(meta.Body, "Snappy", { TextTransparency = 0 })
 		end
 		Tween(meta.Progress, "Snappy", { BackgroundTransparency = 0 })
-		if meta.CardScale then
-			Tween(meta.CardScale, "PopSoft", { Scale = 1 })
-		end
-		if meta.DotScale then
-			Tween(meta.DotScale, "Pop", { Scale = 1 })
-		end
+		if meta.CardScale then Tween(meta.CardScale, "PopSoft", { Scale = 1 }) end
+		if meta.DotScale then Tween(meta.DotScale, "Pop", { Scale = 1 }) end
 
 		local duration = math.max(0.5, tonumber(item.Duration) or 4)
 		local remaining = duration
@@ -2037,16 +1833,12 @@ process = function()
 			meta.DelayThread = nil
 			dismiss(meta)
 		end)
-		meta.ProgressTween = Tween(meta.Progress,
-			TweenInfo.new(duration, E.Linear),
-			{ Size = UN(0, 0, 0, 2) })
+		meta.ProgressTween = Tween(meta.Progress, TweenInfo.new(duration, E.Linear), { Size = UN(0, 0, 0, 2) })
 
 		meta.Maid:Give(meta.Hit.MouseEnter:Connect(function()
 			if not meta.InUse then return end
 			if meta.ProgressTween then
-				pcall(function()
-					meta.ProgressTween:Pause()
-				end)
+				pcall(meta.ProgressTween.Pause, meta.ProgressTween)
 			end
 			if meta.DelayThread then
 				pcall(task.cancel, meta.DelayThread)
@@ -2058,9 +1850,7 @@ process = function()
 			if not meta.InUse then return end
 			startedAt = os.clock()
 			if meta.ProgressTween then
-				pcall(function()
-					meta.ProgressTween:Cancel()
-				end)
+				pcall(meta.ProgressTween.Cancel, meta.ProgressTween)
 				meta.ProgressTween = Tween(meta.Progress,
 					TweenInfo.new(math.max(0.05, remaining), E.Linear),
 					{ Size = UN(0, 0, 0, 2) })
@@ -2079,45 +1869,34 @@ end
 LibMaid:Give(Kailex.ThemeChanged:Connect(function()
 	for _, m in ipairs(pool) do
 		if m.InUse then
-			local c = CurrentTheme[m.ThemeKey or "Accent"]
-			m.Dot.BackgroundColor3 = c
-			m.Progress.BackgroundColor3 = c
-			m.Card.BackgroundColor3 = CurrentTheme.Surface
-			m.Stroke.Color = CurrentTheme.Stroke
-			m.Title.TextColor3 = CurrentTheme.Text
-			m.Body.TextColor3 = CurrentTheme.SubText
+			paintCard(m)
 		end
 	end
 end))
 
 function Kailex:Notify(data)
-	if type(data) == "string" then
-		data = { Text = data }
-	end
+	if type(data) == "string" then data = { Text = data } end
 	data = data or {}
 	local t = string.lower(tostring(data.Type or "info"))
-	if not TypeColors[t] then
-		t = "info"
-	end
+	if not TypeColors[t] then t = "info" end
 
 	local actions
 	if type(data.Actions) == "table" then
 		actions = {}
-		for i, a in ipairs(data.Actions) do
+		for _, a in ipairs(data.Actions) do
 			if type(a) == "table" and a.Text then
 				actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
 			end
 		end
 	end
 
-	local entry = {
+	table.insert(queue, {
 		Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
 		Text = tostring(data.Text or data.Description or ""),
 		Duration = data.Duration,
 		Type = t,
 		Actions = actions,
-	}
-	table.insert(queue, entry)
+	})
 	process()
 end
 
@@ -2133,13 +1912,8 @@ local function RunCallback(fn, ctxName, ...)
 end
 
 local function GetClipboardFn()
-	local ok, sc = pcall(function()
-		return setclipboard or toclipboard or setrbxclipboard
-	end)
-	if ok and type(sc) == "function" then
-		return sc
-	end
-	return nil
+	local sc = Peek(function() return setclipboard or toclipboard or setrbxclipboard end)
+	if type(sc) == "function" then return sc end
 end
 
 local function CopyToClipboard(text)
@@ -2156,9 +1930,7 @@ local ModalActive = false
 
 function Kailex:Confirm(data, onAccept)
 	if ModalActive then return nil end
-	if type(data) == "string" then
-		data = { Text = data }
-	end
+	if type(data) == "string" then data = { Text = data } end
 	data = data or {}
 	if type(onAccept) == "function" then
 		data.OnAccept = onAccept
@@ -2172,9 +1944,7 @@ function Kailex:Confirm(data, onAccept)
 
 	ModalActive = true
 	local maid = Maid.new()
-	maid:Give(function()
-		ModalActive = false
-	end)
+	maid:Give(function() ModalActive = false end)
 
 	local dimmer = U.Overlay(LayerOverlay, 300, nil, CN(0, 0, 0))
 	maid:Give(dimmer)
@@ -2242,20 +2012,12 @@ function Kailex:Confirm(data, onAccept)
 		Tween(dimmer, "Fast", { BackgroundTransparency = 1 })
 		Tween(scale, "Vanish", { Scale = 0.92 })
 		Tween(card, "Fast", { GroupTransparency = 1 })
-		if accepted and data.OnAccept then
-			SafeCall(data.OnAccept, true)
-		end
-		if not accepted and data.OnDecline then
-			SafeCall(data.OnDecline, false)
-		end
-		task.delay(0.2, function()
-			maid:Destroy()
-		end)
+		if accepted and data.OnAccept then SafeCall(data.OnAccept, true) end
+		if not accepted and data.OnDecline then SafeCall(data.OnDecline, false) end
+		task.delay(0.2, function() maid:Destroy() end)
 	end
 
-	modalEntry = ModalManager.Push(nil, function()
-		close(false)
-	end)
+	modalEntry = ModalManager.Push(nil, function() close(false) end)
 
 	Click(maid, accept, function()
 		close(true)
@@ -2265,13 +2027,9 @@ function Kailex:Confirm(data, onAccept)
 		close(false)
 		Tap(decline)
 	end)
-	Click(maid, dimmer, function()
-		close(false)
-	end)
+	Click(maid, dimmer, function() close(false) end)
 
-	local hook = AddInputHook(function()
-		return not closed
-	end, function(input, gp)
+	local hook = AddInputHook(function() return not closed end, function(input, gp)
 		if gp then return end
 		if input.KeyCode == EKC.Return or input.KeyCode == EKC.KeypadEnter then
 			close(true)
@@ -2279,9 +2037,7 @@ function Kailex:Confirm(data, onAccept)
 			close(false)
 		end
 	end)
-	maid:Give(function()
-		RemoveInputHook(hook)
-	end)
+	maid:Give(function() RemoveInputHook(hook) end)
 
 	Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
 	Tween(card, "Snappy", { GroupTransparency = 0 })
@@ -2368,9 +2124,7 @@ function QuickWidgets.Toggle(element)
 		element:Set(state)
 		refresh()
 	end)
-	Click(wMaid, closeB, function()
-		QuickWidgets.Destroy(element)
-	end)
+	Click(wMaid, closeB, function() QuickWidgets.Destroy(element) end)
 	wMaid:Give(element.Changed:Connect(function(v)
 		state = v == true
 		refresh()
@@ -2408,9 +2162,7 @@ local function buildCtx()
 		},
 	})
 	ctxCatcher = U.Overlay(LayerOverlay, 310, false)
-	ctxCatcher.MouseButton1Click:Connect(function()
-		ContextMenu.Hide()
-	end)
+	ctxCatcher.MouseButton1Click:Connect(ContextMenu.Hide)
 end
 
 function ContextMenu.Show(items, x, y)
@@ -2440,9 +2192,7 @@ function ContextMenu.Show(items, x, y)
 		else
 			local text = tostring(item.Text or "")
 			local b = TextService:GetTextSize(text, TS(12), EF.Gotham, V2(400, 20))
-			if b.X + 26 > width then
-				width = b.X + 26
-			end
+			if b.X + 26 > width then width = b.X + 26 end
 			local btn = U.MkBtn(ctxFrame, {
 				Size = UN(1, 0, 0, 26),
 				Trans = 1,
@@ -2457,9 +2207,7 @@ function ContextMenu.Show(items, x, y)
 			btn.MouseButton1Click:Connect(function()
 				ContextMenu.Hide()
 				if type(item.Callback) == "function" then
-					task.defer(function()
-						SafeCall(item.Callback)
-					end)
+					task.defer(function() SafeCall(item.Callback) end)
 				end
 			end)
 			totalH += 28
@@ -2477,9 +2225,7 @@ function ContextMenu.Show(items, x, y)
 	ModalManager.Remove(ctxEntry)
 	local tk = ctxToken
 	ctxEntry = ModalManager.Push(nil, function()
-		if ctxToken == tk then
-			ContextMenu.Hide()
-		end
+		if ctxToken == tk then ContextMenu.Hide() end
 	end)
 end
 
@@ -2493,27 +2239,19 @@ function ContextMenu.Hide()
 	ctxEntry = nil
 end
 
-LibMaid:Give(function()
-	ContextMenu.Hide()
-end)
+LibMaid:Give(ContextMenu.Hide)
 
 local ActiveKeybindListener = nil
 local HotElement = nil
 
 function U.TrackHot(self, row)
 	if Device.IsTouch then return end
-	row.MouseEnter:Connect(function()
-		HotElement = self
-	end)
+	row.MouseEnter:Connect(function() HotElement = self end)
 	row.MouseLeave:Connect(function()
-		if HotElement == self then
-			HotElement = nil
-		end
+		if HotElement == self then HotElement = nil end
 	end)
 	self.Maid:Give(function()
-		if HotElement == self then
-			HotElement = nil
-		end
+		if HotElement == self then HotElement = nil end
 	end)
 end
 
@@ -2635,16 +2373,12 @@ function Element:_bindSave(saveKey, fn)
 		SaveReloadRegistry[saveKey] = list
 	end
 	table.insert(list, fn)
-	self.Maid:Give(function()
-		RemoveValue(list, fn)
-	end)
+	self.Maid:Give(function() RemoveValue(list, fn) end)
 end
 
 function Element:_saveAs(saveKey, t)
 	self:_bindSave(saveKey, function(v)
-		if type(v) == t then
-			self:Set(v, true)
-		end
+		if type(v) == t then self:Set(v, true) end
 	end)
 end
 
@@ -2655,6 +2389,14 @@ function Element:_deferInit(cond, value)
 			RunCallback(self.Callback, self.Title, value)
 		end
 	end)
+end
+
+function Element:_initSaved(saveKey, opts, v)
+	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, v)
+end
+
+function Element:_emit(v, silent)
+	if not silent then RunCallback(self.Callback, self.Title, v) end
 end
 
 function Element:SetTitle(text)
@@ -2683,16 +2425,13 @@ function Element:Visible(state)
 		self.Row.Visible = false
 	end
 	if self._gridFrame and self.Tab and not self.Tab._destroyed then
-		pcall(function()
-			self.Tab:_syncGridFrames()
-		end)
+		pcall(self.Tab._syncGridFrames, self.Tab)
 	end
 end
 
 function Element:SetDisabled(state)
-	if self._destroyed then return end
 	local v = state == true
-	if v == self._disabled then return end
+	if self._destroyed or v == self._disabled then return end
 	self._disabled = v
 	if self.Row then
 		self.Row:SetAttribute("Disabled", v)
@@ -2706,9 +2445,7 @@ function Element:SetDisabled(state)
 	end
 end
 
-function Element:IsDisabled()
-	return self._disabled == true
-end
+function Element:IsDisabled() return self._disabled == true end
 
 function Element:RecalcWidth()
 	if not self.RightContainer then return end
@@ -2723,20 +2460,15 @@ function Element:Extra(className, opts)
 	if self._destroyed then return nil end
 	local elClass = Elements[className]
 	if not elClass then return nil end
-	opts = opts or {}
-	local el = elClass.new(self.Tab, opts)
+	local el = elClass.new(self.Tab, opts or {})
 
 	local row = el.Row
 	local pad = row:FindFirstChildOfClass("UIPadding")
-	if pad then
-		pad:Destroy()
-	end
+	if pad then pad:Destroy() end
 	row.BackgroundTransparency = 1
 	row:SetAttribute("NoHoverFX", true)
 	local rowStroke = row:FindFirstChildOfClass("UIStroke")
-	if rowStroke then
-		rowStroke.Transparency = 1
-	end
+	if rowStroke then rowStroke.Transparency = 1 end
 	if el.LeftFrame then
 		el.LeftFrame.Size = UN(0, 0, 1, 0)
 	end
@@ -2778,17 +2510,12 @@ end
 function Element:Toggle(opts)
 	if self._destroyed then return nil end
 	if self.AttachedToggle then return self.AttachedToggle end
-	opts = opts or {}
 	local tg = self:Extra("Toggle", opts)
 	if not tg then return nil end
 	self.AttachedToggle = tg
 	self.Enabled = tg.Changed
-	function self:IsEnabled()
-		return tg:Get() == true
-	end
-	function self:SetEnabled(v, silent)
-		tg:Set(v == true, silent)
-	end
+	function self:IsEnabled() return tg:Get() == true end
+	function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
 	return tg
 end
 
@@ -2799,25 +2526,16 @@ function Element:_contextItems()
 			Text = "Copy value",
 			Callback = function()
 				local v = self:CopyValue()
-				if v ~= nil then
-					CopyToClipboard(v)
-				end
+				if v ~= nil then CopyToClipboard(v) end
 			end,
 		})
 	end
 	if self.Reset then
-		table.insert(items, {
-			Text = "Reset to default",
-			Callback = function()
-				self:Reset()
-			end,
-		})
+		table.insert(items, { Text = "Reset to default", Callback = function() self:Reset() end })
 	end
 	table.insert(items, {
 		Text = self._disabled and "Enable" or "Disable",
-		Callback = function()
-			self:SetDisabled(not self._disabled)
-		end,
+		Callback = function() self:SetDisabled(not self._disabled) end,
 	})
 	return items
 end
@@ -2835,52 +2553,36 @@ end
 function Element:Destroy()
 	if self._destroyed then return end
 	self._destroyed = true
-	if HotElement == self then
-		HotElement = nil
-	end
+	if HotElement == self then HotElement = nil end
 	local tab = self.Tab
 	if tab then
 		RemoveValue(tab.Elements, self)
 		if self.IsSection then
 			RemoveValue(tab.Sections, self)
-			if tab.CurrentSection == self then
-				tab.CurrentSection = nil
-			end
+			if tab.CurrentSection == self then tab.CurrentSection = nil end
 			for _, el in ipairs(self.Elements) do
-				if not el._destroyed then
-					el.Section = nil
-				end
+				if not el._destroyed then el.Section = nil end
 			end
 		end
 		if self.Section then
 			RemoveValue(self.Section.Elements, self)
 		end
 
-		if self._gridFrame and tab and not tab._destroyed then
-			local gf, tb = self._gridFrame, tab
+		if self._gridFrame and not tab._destroyed then
+			local tb = tab
 			task.defer(function()
 				if not tb._destroyed then
-					pcall(function()
-						tb:_syncGridFrames()
-					end)
+					pcall(tb._syncGridFrames, tb)
 				end
 			end)
 		end
 	end
 	for _, ex in ipairs(self._extras) do
-		if not ex._destroyed then
-			ex:Destroy()
-		end
+		if not ex._destroyed then ex:Destroy() end
 	end
-	if self.Changed then
-		self.Changed:Destroy()
-	end
-	if self.Maid then
-		self.Maid:Destroy()
-	end
-	if self.Row then
-		self.Row:Destroy()
-	end
+	if self.Changed then self.Changed:Destroy() end
+	if self.Maid then self.Maid:Destroy() end
+	if self.Row then self.Row:Destroy() end
 	self.Row, self.Maid, self.Tab, self.Section = nil, nil, nil, nil
 end
 
@@ -3080,7 +2782,7 @@ local function finAnim(a)
 			end
 		end
 		if tab and not tab._destroyed then
-			pcall(function() tab:_syncGridFrames() end)
+			pcall(tab._syncGridFrames, tab)
 		end
 	end
 	for _, u in ipairs(a.units) do
@@ -3109,7 +2811,7 @@ local function secStatic(sec)
 	end
 	local tab = sec.Tab
 	if tab and not tab._destroyed then
-		pcall(function() tab:_syncGridFrames() end)
+		pcall(tab._syncGridFrames, tab)
 	end
 end
 
@@ -3183,7 +2885,7 @@ local function secAnim(sec)
 				r[1].Row.Visible = r[2]
 			end
 		end
-		pcall(function() tab:_syncGridFrames() end)
+		pcall(tab._syncGridFrames, tab)
 		return
 	end
 
@@ -3194,6 +2896,13 @@ local function secAnim(sec)
 	local m = tonumber(Setting.MotionScale) or 1
 	local s = GetScale()
 	local n = #au
+
+	local function finale(stag, total, extra, last)
+		task.delay(((n - 1) * stag + total) * m + extra, function() finAnim(a) end)
+		if last then
+			Once(last.Completed, function() finAnim(a) end)
+		end
+	end
 
 	if sec.Collapsed then
 		local stag = math.min(0.02, 0.26 / math.max(1, n - 1))
@@ -3220,10 +2929,7 @@ local function secAnim(sec)
 				Tween(f[1], SCF, { [f[2]] = 1 }, nil, d)
 			end
 		end
-		task.delay(((n - 1) * stag + 0.3) * m + 0.08, function() finAnim(a) end)
-		if last then
-			Once(last.Completed, function() finAnim(a) end)
-		end
+		finale(stag, 0.3, 0.08, last)
 	else
 		local defer = false
 		for _, u in ipairs(au) do
@@ -3286,10 +2992,7 @@ local function secAnim(sec)
 					Tween(f[1], SOF, { [f[2]] = f[3] }, nil, d + 0.02)
 				end
 			end
-			task.delay(((n - 1) * stag + 0.34) * m + 0.1, function() finAnim(a) end)
-			if last then
-				Once(last.Completed, function() finAnim(a) end)
-			end
+			finale(stag, 0.34, 0.1, last)
 		end
 
 		if defer then
@@ -3353,11 +3056,8 @@ function Elements.Section.new(tab, opts)
 	self.AccentBar = bar
 	local startCollapsed = opts.Collapsed
 	if startCollapsed == nil then
-		if opts.Open ~= nil then
-			startCollapsed = not (opts.Open == true)
-		elseif opts.Expanded ~= nil then
-			startCollapsed = not (opts.Expanded == true)
-		end
+		if opts.Open ~= nil then startCollapsed = not (opts.Open == true)
+		elseif opts.Expanded ~= nil then startCollapsed = not (opts.Expanded == true) end
 	end
 	self.Collapsed = startCollapsed == true
 	self.Elements = {}
@@ -3432,13 +3132,9 @@ function Elements.Button.new(tab, opts)
 				Tween(title, "Fast", { TextTransparency = 0.55 })
 			end
 		else
-			if spinner then
-				spinner.Visible = false
-			end
+			if spinner then spinner.Visible = false end
 			if spinTween then
-				pcall(function()
-					spinTween:Cancel()
-				end)
+				pcall(spinTween.Cancel, spinTween)
 				spinTween = nil
 			end
 			if title and not self._disabled then
@@ -3491,20 +3187,15 @@ function Elements.Button.new(tab, opts)
 	return self
 end
 
-function Elements.Button:SetCallback(cb)
-	self.Callback = cb or function() end
-end
+function Elements.Button:SetCallback(cb) self.Callback = cb or function() end end
 
-function Elements.Button:CopyValue()
-	return self.Title
-end
+function Elements.Button:CopyValue() return self.Title end
 
 Elements.Toggle = MakeElementClass()
 
 function Elements.Toggle.new(tab, opts)
 	opts = opts or {}
 	local saveKey = tab:GetSaveKey(opts)
-	local hadSaved = SaveManager:Get(saveKey, nil) ~= nil
 	local default = SaveManager:Get(saveKey, opts.Default or opts.defaultVal or false) == true
 
 	local switchW = Device.IsTouch and 50 or 42
@@ -3546,21 +3237,13 @@ function Elements.Toggle.new(tab, opts)
 		local on, dis = self.State, self._disabled
 		local knobX = on and (switchW - 19) or 3
 		if animated then
-			Tween(switch, "Reveal", {
-				BackgroundColor3 = on and CurrentTheme.Accent or CurrentTheme.SurfaceLight,
-			})
+			Tween(switch, "Reveal", { BackgroundColor3 = on and CurrentTheme.Accent or CurrentTheme.SurfaceLight })
 			Tween(stroke, "Reveal", {
 				Color = on and CurrentTheme.Accent or CurrentTheme.Stroke,
 				Transparency = (on and not dis) and 0 or 0.5,
 			})
-			Tween(knob, "Fast", {
-				Size = UO(20, 12),
-				Position = UN(0, on and (switchW - 23) or 1, 0.5, 0),
-			}, function()
-				Tween(knob, "Pop", {
-					Size = UO(16, 16),
-					Position = UN(0, knobX, 0.5, 0),
-				})
+			Tween(knob, "Fast", { Size = UO(20, 12), Position = UN(0, on and (switchW - 23) or 1, 0.5, 0) }, function()
+				Tween(knob, "Pop", { Size = UO(16, 16), Position = UN(0, knobX, 0.5, 0) })
 			end)
 		else
 			knob.Size = UO(16, 16)
@@ -3572,9 +3255,7 @@ function Elements.Toggle.new(tab, opts)
 	end
 
 	self._applyVisuals = applyVisuals
-	self.Maid:Give(Kailex.ThemeChanged:Connect(function()
-		applyVisuals(false)
-	end))
+	self.Maid:Give(Kailex.ThemeChanged:Connect(function() applyVisuals(false) end))
 	applyVisuals(false)
 
 	local overlay = U.Overlay(row, 0)
@@ -3596,9 +3277,7 @@ function Elements.Toggle.new(tab, opts)
 		end)
 	end
 
-	self.Maid:Give(function()
-		QuickWidgets.Destroy(self)
-	end)
+	self.Maid:Give(function() QuickWidgets.Destroy(self) end)
 
 	function self:Set(state, silent)
 		state = state == true
@@ -3607,16 +3286,14 @@ function Elements.Toggle.new(tab, opts)
 		applyVisuals(true)
 		SaveValue(saveKey, state)
 		self.Changed:Fire(state)
-		if not silent then
-			RunCallback(self.Callback, self.Title, state)
-		end
+		self:_emit(state, silent)
 	end
 
 	function self:Get() return self.State end
 	function self:CopyValue() return tostring(self.State) end
 
 	self:_saveAs(saveKey, "boolean")
-	self:_deferInit(opts.Default ~= nil or hadSaved, self.State)
+	self:_initSaved(saveKey, opts, self.State)
 	return self
 end
 
@@ -3634,9 +3311,7 @@ function Elements.Slider.new(tab, opts)
 	local saveKey = tab:GetSaveKey(opts)
 	local min = tonumber(opts.Min or opts.MinVal or 0) or 0
 	local max = tonumber(opts.Max or opts.MaxVal or 100) or 100
-	if max <= min then
-		max = min + 1
-	end
+	if max <= min then max = min + 1 end
 	local increment = tonumber(opts.Increment)
 	local default = tonumber(opts.Default or opts.Value or min) or min
 	local value = clamp(U.LoadNum(saveKey, default), min, max)
@@ -3773,6 +3448,20 @@ function Elements.Slider.new(tab, opts)
 		return clamp(RoundStep(v), min, max)
 	end
 
+	local function showBubble()
+		bubble.Visible = true
+		bubbleScale.Scale = 0.7
+		Tween(bubbleScale, "PopSoft", { Scale = 1 })
+	end
+
+	local function hideBubble()
+		Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
+			if not dragging and not self._destroyed then
+				bubble.Visible = false
+			end
+		end)
+	end
+
 	local hit = Hit({
 		AnchorPoint = V2(0, 1),
 		Position = UN(0, 0, 1, -4),
@@ -3815,31 +3504,21 @@ function Elements.Slider.new(tab, opts)
 		if math.abs(value - defaultValue) > 1e-6 then
 			Tap(resetBtn, "ToggleOn", 0.5)
 			self:Set(defaultValue)
-			bubble.Visible = true
 			bubble.Text = fmt(value)
-			bubbleScale.Scale = 0.7
-			Tween(bubbleScale, "PopSoft", { Scale = 1 })
+			showBubble()
 			task.delay(0.55, function()
 				if not dragging and not self._destroyed then
-					Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-						if not dragging and not self._destroyed then
-							bubble.Visible = false
-						end
-					end)
+					hideBubble()
 				end
 			end)
 		end
 	end
 	Click(self.Maid, resetBtn, resetToDefault)
 	self.Maid:Give(hit.MouseButton2Click:Connect(resetToDefault))
-	function self:Reset()
-		resetToDefault()
-	end
+	function self:Reset() resetToDefault() end
 
 	TrackInput(hit, {
-		Guard = function()
-			return not dragging and not self._disabled
-		end,
+		Guard = function() return not dragging and not self._disabled end,
 
 		Active = track,
 		Start = function()
@@ -3848,9 +3527,7 @@ function Elements.Slider.new(tab, opts)
 			tickSound()
 			Tween(knob, "Spring", { Size = UO(18, 18) })
 			Tween(knobStroke, "Fast", { Transparency = 0 })
-			bubble.Visible = true
-			bubbleScale.Scale = 0.7
-			Tween(bubbleScale, "PopSoft", { Scale = 1 })
+			showBubble()
 		end,
 		MoveNow = true,
 		Move = function(pos)
@@ -3871,11 +3548,7 @@ function Elements.Slider.new(tab, opts)
 			dragging = false
 			Tween(knob, "Spring", { Size = UO(14, 14) })
 			Tween(knobStroke, "Fast", { Transparency = 0.35 })
-			Tween(bubbleScale, "Vanish", { Scale = 0.7 }, function()
-				if not dragging and not self._destroyed then
-					bubble.Visible = false
-				end
-			end)
+			hideBubble()
 			SaveValue(saveKey, value)
 			if onRelease then
 				RunCallback(self.Callback, self.Title, value)
@@ -3883,17 +3556,11 @@ function Elements.Slider.new(tab, opts)
 		end,
 	})
 
-
-
 	track.MouseEnter:Connect(function()
-		if not dragging then
-			Tween(knob, "Fast", { Size = UO(16, 16) })
-		end
+		if not dragging then Tween(knob, "Fast", { Size = UO(16, 16) }) end
 	end)
 	track.MouseLeave:Connect(function()
-		if not dragging then
-			Tween(knob, "Fast", { Size = UO(14, 14) })
-		end
+		if not dragging then Tween(knob, "Fast", { Size = UO(14, 14) }) end
 	end)
 
 	self.Maid:Give(box.FocusLost:Connect(function()
@@ -3922,30 +3589,26 @@ function Elements.Slider.new(tab, opts)
 		end
 		apply(nv)
 		SaveValue(saveKey, value)
-		if not silent then
-			RunCallback(self.Callback, self.Title, value)
-		end
+		self:_emit(value, silent)
 	end
 
 	function self:Get() return value end
-	function self:CopyValue()
-		return string.format("%." .. math.max(decimals, 0) .. "f", value)
-	end
+	function self:CopyValue() return string.format("%." .. math.max(decimals, 0) .. "f", value) end
 
-    function self:HandleArrow(dir)
-        if self._destroyed or self._disabled then return end
-        local fine = UIS:IsKeyDown(EKC.LeftShift) or UIS:IsKeyDown(EKC.RightShift)
-        local before = value
-        self:Set(value + step * (fine and 0.2 or 1) * dir)
-        if value ~= before then
-            tickSound()
-        end
-    end
+	function self:HandleArrow(dir)
+		if self._destroyed or self._disabled then return end
+		local fine = UIS:IsKeyDown(EKC.LeftShift) or UIS:IsKeyDown(EKC.RightShift)
+		local before = value
+		self:Set(value + step * (fine and 0.2 or 1) * dir)
+		if value ~= before then
+			tickSound()
+		end
+	end
 
 	U.TrackHot(self, row)
 	self:_saveAs(saveKey, "number")
 	apply(value, true)
-	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, value)
+	self:_initSaved(saveKey, opts, value)
 	return self
 end
 
@@ -4009,9 +3672,7 @@ function Elements.Keybind.new(tab, opts)
 		end
 		refresh()
 	end
-	self._cancelListen = function()
-		setListening(false)
-	end
+	self._cancelListen = function() setListening(false) end
 
 	local function setBinding(b)
 		binding = b
@@ -4022,9 +3683,7 @@ function Elements.Keybind.new(tab, opts)
 		refresh()
 	end
 
-	self._getBinding = function()
-		return binding
-	end
+	self._getBinding = function() return binding end
 
 	self._handleInput = function(input, gp)
 		if self._destroyed then return end
@@ -4035,35 +3694,21 @@ function Elements.Keybind.new(tab, opts)
 				if input.KeyCode == EKC.Escape then
 					return
 				end
-				setBinding({
-					Kind = "Key",
-					Code = input.KeyCode,
-					Name = input.KeyCode.Name,
-				})
+				setBinding({ Kind = "Key", Code = input.KeyCode, Name = input.KeyCode.Name })
 				PlaySound("Click")
 			elseif opts.MouseButtons
-				and (input.UserInputType == EUT.MouseButton2
-					or input.UserInputType == EUT.MouseButton3) then
+				and (input.UserInputType == EUT.MouseButton2 or input.UserInputType == EUT.MouseButton3) then
 				listenToken += 1
 				setListening(false)
 				suppressClear = true
-				task.defer(function()
-					suppressClear = false
-				end)
-				setBinding({
-					Kind = "Mouse",
-					Code = input.UserInputType,
-					Name = input.UserInputType.Name,
-				})
+				task.defer(function() suppressClear = false end)
+				setBinding({ Kind = "Mouse", Code = input.UserInputType, Name = input.UserInputType.Name })
 				PlaySound("Click")
 			end
 			return
 		end
-		if ActiveKeybindListener ~= nil then return end
-		if gp then return end
-		if self._disabled then return end
-		if UIS:GetFocusedTextBox() ~= nil then return end
-		if not binding then return end
+		if ActiveKeybindListener ~= nil or gp or self._disabled
+			or UIS:GetFocusedTextBox() ~= nil or not binding then return end
 		if binding.Kind == "Key" and input.KeyCode == binding.Code then
 			RunCallback(self.Callback, self.Title, binding.Code)
 		elseif binding.Kind == "Mouse" and input.UserInputType == binding.Code
@@ -4072,9 +3717,7 @@ function Elements.Keybind.new(tab, opts)
 		end
 	end
 
-	local hook = AddInputHook(function()
-		return not self._destroyed
-	end, self._handleInput)
+	local hook = AddInputHook(function() return not self._destroyed end, self._handleInput)
 	self.Maid:Give(function()
 		RemoveInputHook(hook)
 		if listening then
@@ -4112,22 +3755,12 @@ function Elements.Keybind.new(tab, opts)
 		local b = ToBinding(v)
 		if not b then return end
 		setBinding(b)
-		if not silent then
-			RunCallback(self.Callback, self.Title, b.Code)
-		end
+		self:_emit(b.Code, silent)
 	end
 
-	function self:Get()
-		return binding and binding.Code or nil
-	end
-
-	function self:GetName()
-		return binding and binding.Name or "None"
-	end
-
-	function self:CopyValue()
-		return self:GetName()
-	end
+	function self:Get() return binding and binding.Code or nil end
+	function self:GetName() return binding and binding.Name or "None" end
+	function self:CopyValue() return self:GetName() end
 
 	self:_bindSave(saveKey, function(v)
 		local b = ToBinding(v)
@@ -4144,34 +3777,31 @@ end
 local DROP_VIRTUALIZE = 60
 local DROP_SEARCH_AT = 12
 
+local function NormOpts(list)
+	local out = {}
+	for _, v in ipairs(list or {}) do
+		if type(v) == "table" and v.Text ~= nil then
+			local val = (v.Value ~= nil) and v.Value or v.Text
+			out[#out + 1] = { Text = tostring(v.Text), Value = val, Key = tostring(val) }
+		else
+			out[#out + 1] = { Text = tostring(v), Value = v, Key = tostring(v) }
+		end
+	end
+	return out
+end
+
 Elements.Dropdown = MakeElementClass()
 
 function Elements.Dropdown.new(tab, opts)
 	opts = opts or {}
 	local saveKey = tab:GetSaveKey(opts)
 	local multi = opts.Multi == true
-
-	local function normalize(list)
-		local out = {}
-		for _, v in ipairs(list or {}) do
-			if type(v) == "table" and v.Text ~= nil then
-				local val = (v.Value ~= nil) and v.Value or v.Text
-				out[#out + 1] = { Text = tostring(v.Text), Value = val, Key = tostring(val) }
-			else
-				out[#out + 1] = { Text = tostring(v), Value = v, Key = tostring(v) }
-			end
-		end
-		return out
-	end
-	local options = normalize(opts.Options or opts.Items)
+	local options = NormOpts(opts.Options or opts.Items)
 
 	local function findOpt(key)
 		for _, o in ipairs(options) do
-			if o.Key == key then
-				return o
-			end
+			if o.Key == key then return o end
 		end
-		return nil
 	end
 
 	local selSet = {}
@@ -4336,12 +3966,7 @@ function Elements.Dropdown.new(tab, opts)
 	local virtualPool = {}
 	local expanded = false
 	local modalEntry
-	local selectOption
-	local closeFn
-	local setExpanded
-	local buildOptions
-	local refreshOptions
-	local refreshLabel
+	local selectOption, closeFn, setExpanded, buildOptions, refreshOptions, refreshLabel
 
 	local function paintRec(rec, opt)
 		local isSel = opt ~= nil and selSet[opt.Key] == true
@@ -4600,9 +4225,7 @@ function Elements.Dropdown.new(tab, opts)
 		end
 	end
 
-	closeFn = function()
-		setExpanded(false)
-	end
+	closeFn = function() setExpanded(false) end
 
 	selectOption = function(opt, rippleTarget)
 		if not opt then return end
@@ -4627,9 +4250,7 @@ function Elements.Dropdown.new(tab, opts)
 
 	local function clearButtons()
 		for _, rec in ipairs(optionButtons) do
-			if rec.Button then
-				rec.Button:Destroy()
-			end
+			if rec.Button then rec.Button:Destroy() end
 		end
 		table.clear(optionButtons)
 		for _, rec in pairs(virtualButtons) do
@@ -4700,18 +4321,12 @@ function Elements.Dropdown.new(tab, opts)
 			end
 			listCanvas.CanvasPosition = V2(0, 0)
 			buildOptions()
-			refreshOptions()
-			if expanded then
-				list.Size = UN(0, row.AbsoluteSize.X / GetScale(), 0, headerH + innerList)
-			end
 		end)
 	end
 
 	if allBtn then
 		allBtn.MouseButton1Click:Connect(function()
-			for _, o in ipairs(options) do
-				selSet[o.Key] = true
-			end
+			for _, o in ipairs(options) do selSet[o.Key] = true end
 			commitMulti()
 		end)
 	end
@@ -4723,20 +4338,14 @@ function Elements.Dropdown.new(tab, opts)
 	end
 
 	listCanvas:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-		if virtual and expanded then
-			updateVirtualWindow()
-		end
+		if virtual and expanded then updateVirtualWindow() end
 	end)
 	listCanvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		if virtual and expanded then
-			updateVirtualWindow()
-		end
+		if virtual and expanded then updateVirtualWindow() end
 	end)
 
 	catcher.MouseButton1Click:Connect(function()
-		if expanded then
-			setExpanded(false)
-		end
+		if expanded then setExpanded(false) end
 	end)
 
 	local overlay = Hit({
@@ -4757,12 +4366,8 @@ function Elements.Dropdown.new(tab, opts)
 			tab._openDropdown = nil
 		end
 		ModalManager.Remove(modalEntry)
-		if list and list.Parent then
-			list:Destroy()
-		end
-		if catcher and catcher.Parent then
-			catcher:Destroy()
-		end
+		if list and list.Parent then list:Destroy() end
+		if catcher and catcher.Parent then catcher:Destroy() end
 	end)
 
 	function self:Set(v, silent)
@@ -4781,15 +4386,11 @@ function Elements.Dropdown.new(tab, opts)
 		SaveValue(saveKey, multi and valuesOf(selectedOpts()) or (selectedOpts()[1] and selectedOpts()[1].Value or nil))
 		refreshOptions()
 		refreshLabel()
-		if not silent then
-			RunCallback(self.Callback, self.Title, self:Get())
-		end
+		self:_emit(self:Get(), silent)
 	end
 
 	function self:Get()
-		if multi then
-			return valuesOf(selectedOpts())
-		end
+		if multi then return valuesOf(selectedOpts()) end
 		local sel = selectedOpts()
 		return sel[1] and sel[1].Value or nil
 	end
@@ -4797,22 +4398,18 @@ function Elements.Dropdown.new(tab, opts)
 	function self:GetText()
 		if multi then
 			local out = {}
-			for _, o in ipairs(selectedOpts()) do
-				out[#out + 1] = o.Text
-			end
+			for _, o in ipairs(selectedOpts()) do out[#out + 1] = o.Text end
 			return out
 		end
 		local sel = selectedOpts()
 		return sel[1] and sel[1].Text or nil
 	end
 
-	function self:CopyValue()
-		return table.concat(self:GetText() or {}, ", ")
-	end
+	function self:CopyValue() return table.concat(self:GetText() or {}, ", ") end
 
 	function self:SetOptions(newOptions)
 		if self._destroyed then return end
-		options = normalize(newOptions)
+		options = NormOpts(newOptions)
 		local valid = {}
 		for _, opt in ipairs(options) do
 			valid[opt.Key] = true
@@ -4836,9 +4433,7 @@ function Elements.Dropdown.new(tab, opts)
 		refreshLabel()
 	end
 
-	self:_bindSave(saveKey, function(v)
-		self:Set(v, true)
-	end)
+	self:_bindSave(saveKey, function(v) self:Set(v, true) end)
 	self.Maid:Give(Kailex.ThemeChanged:Connect(function()
 		refreshLabel()
 		refreshOptions()
@@ -4922,9 +4517,7 @@ function Elements.TextInput.new(tab, opts)
 		lastFired = value
 		box.Text = value
 		SaveValue(saveKey, value)
-		if not silent then
-			RunCallback(self.Callback, self.Title, value)
-		end
+		self:_emit(value, silent)
 	end
 
 	function self:Get() return value end
@@ -4949,15 +4542,12 @@ function Elements.ColorPicker.new(tab, opts)
 		local sv = SaveManager:Get(saveKey, nil)
 		if type(sv) == "string" then
 			local c = HexToColor(sv)
-			if c then
-				return c
-			end
+			if c then return c end
 		end
 		return default
 	end
 
 	local color = loadColor()
-	local hadSaved = SaveManager:Get(saveKey, nil) ~= nil
 	local h, s, v = RGBtoHSV(color)
 
 	local self = ENew(Elements.ColorPicker, tab, opts, {
@@ -5009,9 +4599,7 @@ function Elements.ColorPicker.new(tab, opts)
 		pickerScale = UISC(popup)
 
 		catcher = U.Overlay(LayerOverlay, 29, false)
-		catcher.MouseButton1Click:Connect(function()
-			closePopup()
-		end)
+		catcher.MouseButton1Click:Connect(closePopup)
 
 		U.Txt(popup, {
 			Pos = UO(12, 10),
@@ -5048,39 +4636,27 @@ function Elements.ColorPicker.new(tab, opts)
 			Parent = popup,
 			Children = { Corner(8) },
 		})
-		Frm({
-			Size = US(1, 1),
-			BackgroundColor3 = CN(1, 1, 1),
-			ZIndex = 31,
-			Parent = square,
-			Children = {
-				Corner(8),
-				Create("UIGradient", {
-					Color = ColorSequence.new(CN(1, 1, 1), CN(1, 1, 1)),
-					Transparency = NumberSequence.new({
-						NumberSequenceKeypoint.new(0, 0),
-						NumberSequenceKeypoint.new(1, 1),
+		local function gradLayer(col, z, rot, t0, t1)
+			return Frm({
+				Size = US(1, 1),
+				BackgroundColor3 = col,
+				ZIndex = z,
+				Parent = square,
+				Children = {
+					Corner(8),
+					Create("UIGradient", {
+						Rotation = rot,
+						Color = ColorSequence.new(col, col),
+						Transparency = NumberSequence.new({
+							NumberSequenceKeypoint.new(0, t0),
+							NumberSequenceKeypoint.new(1, t1),
+						}),
 					}),
-				}),
-			},
-		})
-		Frm({
-			Size = US(1, 1),
-			BackgroundColor3 = CN(0, 0, 0),
-			ZIndex = 32,
-			Parent = square,
-			Children = {
-				Corner(8),
-				Create("UIGradient", {
-					Rotation = 90,
-					Color = ColorSequence.new(CN(0, 0, 0), CN(0, 0, 0)),
-					Transparency = NumberSequence.new({
-						NumberSequenceKeypoint.new(0, 1),
-						NumberSequenceKeypoint.new(1, 0),
-					}),
-				}),
-			},
-		})
+				},
+			})
+		end
+		gradLayer(CN(1, 1, 1), 31, 0, 0, 1)
+		gradLayer(CN(0, 0, 0), 32, 90, 1, 0)
 		svKnob = Frm({
 			AnchorPoint = V2(0.5, 0.5),
 			Size = UO(12, 12),
@@ -5166,12 +4742,8 @@ function Elements.ColorPicker.new(tab, opts)
 			TrackInput(handle, {
 				Active = handle,
 				MoveNow = true,
-				Move = function(pos)
-					onMove(pos)
-				end,
-				End = function()
-					SaveValue(saveKey, ColorToHex(color))
-				end,
+				Move = function(pos) onMove(pos) end,
+				End = function() SaveValue(saveKey, ColorToHex(color)) end,
 			})
 		end
 
@@ -5239,9 +4811,7 @@ function Elements.ColorPicker.new(tab, opts)
 		end
 	end)
 
-	local escHook = AddInputHook(function()
-		return not self._destroyed
-	end, function(input, gp)
+	local escHook = AddInputHook(function() return not self._destroyed end, function(input, gp)
 		if open ~= true then return end
 		if input.KeyCode ~= EKC.Escape then return end
 		if gp then
@@ -5253,39 +4823,27 @@ function Elements.ColorPicker.new(tab, opts)
 		end
 		closePopup()
 	end)
-	self.Maid:Give(function()
-		RemoveInputHook(escHook)
-	end)
-	self.Maid:Give(function()
-		ModalManager.Remove(modalEntry)
-	end)
+	self.Maid:Give(function() RemoveInputHook(escHook) end)
+	self.Maid:Give(function() ModalManager.Remove(modalEntry) end)
 	self.Maid:Give(tab.Page:GetPropertyChangedSignal("Visible"):Connect(function()
-		if not tab.Page.Visible then
-			closePopup()
-		end
+		if not tab.Page.Visible then closePopup() end
 	end))
 	if tab.Window and tab.Window.MinimizedChanged then
 		self.Maid:Give(tab.Window.MinimizedChanged:Connect(function(min)
-			if min then
-				closePopup()
-			end
+			if min then closePopup() end
 		end))
 	end
 
 	function self:Set(c, silent)
-		if self._destroyed then return end
-		if typeof(c) ~= "Color3" then return end
+		if self._destroyed or typeof(c) ~= "Color3" then return end
 		local rh, rs, rv = RGBtoHSV(c)
 		apply(rh, rs, rv, false)
 		SaveValue(saveKey, ColorToHex(color))
-		if not silent then
-			RunCallback(self.Callback, self.Title, color)
-		end
+		self:_emit(color, silent)
 	end
 
 	function self:SetDefault(c)
-		if self._destroyed then return end
-		if typeof(c) ~= "Color3" then return end
+		if self._destroyed or typeof(c) ~= "Color3" then return end
 		default = c
 	end
 
@@ -5302,7 +4860,7 @@ function Elements.ColorPicker.new(tab, opts)
 			end
 		end
 	end)
-	self:_deferInit(hadSaved or opts.Default ~= nil, color)
+	self:_initSaved(saveKey, opts, color)
 
 	return self
 end
@@ -5314,13 +4872,9 @@ function Elements.Stepper.new(tab, opts)
 	local saveKey = tab:GetSaveKey(opts)
 	local min = tonumber(opts.Min) or 0
 	local max = tonumber(opts.Max) or 10
-	if max <= min then
-		max = min + 1
-	end
+	if max <= min then max = min + 1 end
 	local step = tonumber(opts.Step) or 1
-	if step <= 0 then
-		step = 1
-	end
+	if step <= 0 then step = 1 end
 	local default = tonumber(opts.Default or min) or min
 	local value = clamp(U.LoadNum(saveKey, default), min, max)
 
@@ -5360,9 +4914,7 @@ function Elements.Stepper.new(tab, opts)
 	})
 	local plus = mkStepBtn("+", 3)
 
-	local function refreshLabel()
-		valLabel.Text = fmt(value)
-	end
+	local function refreshLabel() valLabel.Text = fmt(value) end
 	refreshLabel()
 
 	function self:Set(v, silent)
@@ -5374,21 +4926,15 @@ function Elements.Stepper.new(tab, opts)
 		value = n
 		refreshLabel()
 		SaveValue(saveKey, value)
-		if not silent then
-			RunCallback(self.Callback, self.Title, value)
-		end
+		self:_emit(value, silent)
 	end
 
 	function self:Get() return value end
-	function self:CopyValue()
-		return string.format("%." .. decimals .. "f", value)
-	end
+	function self:CopyValue() return string.format("%." .. decimals .. "f", value) end
 
 	local function bindHold(btn, dir)
 		TrackInput(btn, {
-			Guard = function()
-				return not self._disabled
-			end,
+			Guard = function() return not self._disabled end,
 			Active = btn,
 			Start = function(state)
 				ApplyRipple(btn)
@@ -5417,7 +4963,7 @@ function Elements.Stepper.new(tab, opts)
 
 	U.TrackHot(self, row)
 	self:_saveAs(saveKey, "number")
-	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, value)
+	self:_initSaved(saveKey, opts, value)
 
 	return self
 end
@@ -5427,15 +4973,7 @@ Elements.Segmented = MakeElementClass()
 function Elements.Segmented.new(tab, opts)
 	opts = opts or {}
 	local saveKey = tab:GetSaveKey(opts)
-
-	local options = {}
-	for _, v in ipairs(opts.Options or {}) do
-		if type(v) == "table" and v.Text ~= nil then
-			options[#options + 1] = { Text = tostring(v.Text), Value = (v.Value ~= nil) and v.Value or v.Text }
-		else
-			options[#options + 1] = { Text = tostring(v), Value = v }
-		end
-	end
+	local options = NormOpts(opts.Options)
 	local itemW = opts.ItemWidth or 56
 	local rightW = clamp(#options * (itemW + 4), 60, 280)
 	local selected = nil
@@ -5506,26 +5044,17 @@ function Elements.Segmented.new(tab, opts)
 					selected = o
 					paint()
 					SaveValue(saveKey, o.Value)
-					if not silent then
-						RunCallback(self.Callback, self.Title, o.Value)
-					end
+					self:_emit(o.Value, silent)
 				end
 				return
 			end
 		end
 	end
 
-	function self:Get()
-		return selected and selected.Value or nil
-	end
+	function self:Get() return selected and selected.Value or nil end
+	function self:CopyValue() return selected and tostring(selected.Value) or nil end
 
-	function self:CopyValue()
-		return selected and tostring(selected.Value) or nil
-	end
-
-	self:_bindSave(saveKey, function(v)
-		self:Set(v, true)
-	end)
+	self:_bindSave(saveKey, function(v) self:Set(v, true) end)
 	self.Maid:Give(Kailex.ThemeChanged:Connect(paint))
 	self:_deferInit(selected ~= nil, selected and selected.Value)
 
@@ -5582,8 +5111,7 @@ function Elements.Vector3Input.new(tab, opts)
 	end
 
 	function self:Set(v, silent)
-		if self._destroyed then return end
-		if typeof(v) ~= "Vector3" then return end
+		if self._destroyed or typeof(v) ~= "Vector3" then return end
 		value = v
 		for i = 1, 3 do
 			if not boxes[i]:IsFocused() then
@@ -5591,9 +5119,7 @@ function Elements.Vector3Input.new(tab, opts)
 			end
 		end
 		SaveValue(saveKey, { X = value.X, Y = value.Y, Z = value.Z })
-		if not silent then
-			RunCallback(self.Callback, self.Title, value)
-		end
+		self:_emit(value, silent)
 	end
 
 	function self:Get() return value end
@@ -5605,7 +5131,7 @@ function Elements.Vector3Input.new(tab, opts)
 		end
 	end)
 
-	self:_deferInit(opts.Default ~= nil or SaveManager:Get(saveKey, nil) ~= nil, value)
+	self:_initSaved(saveKey, opts, value)
 
 	return self
 end
@@ -5893,9 +5419,7 @@ end
 function TabClass:_track(el)
 	local opts = el._opts or {}
 	local span = tonumber(opts.Span) or 1
-	if span < 1 then
-		span = 1
-	end
+	if span < 1 then span = 1 end
 
 	local section = self.CurrentSection
 	local secCols = 1
@@ -5909,15 +5433,11 @@ function TabClass:_track(el)
 		local wf = tonumber(opts.Width)
 		if wf and wf > 0 and wf < 0.95 then
 			local wc = floor(1 / wf + 0.34)
-			if wc > 1 then
-				cols = wc
-			end
+			if wc > 1 then cols = wc end
 		end
 	end
 	if cols > 1 then
-		if span > cols then
-			span = cols
-		end
+		if span > cols then span = cols end
 		if not (self._autoRow and self._autoRow.Cols == cols) then
 			self._autoRow = setmetatable({ Tab = self, Cols = cols }, GridRow)
 			self._autoRow:_newFrame()
@@ -6062,12 +5582,8 @@ function TabClass:CountMatches(q)
 end
 
 function TabClass:SetFilterBadge(text)
-	if text and text ~= "" then
-		self.Badge.Text = text
-		self.Badge.Visible = true
-	else
-		self.Badge.Visible = false
-	end
+	self.Badge.Text = text or ""
+	self.Badge.Visible = text ~= nil and text ~= ""
 end
 
 function TabClass:GetSaveKey(opts)
@@ -6145,39 +5661,23 @@ local function BuildSettingsTab(win)
 	})
 	themeDrop:Set(Themes[Setting.Theme] and Setting.Theme or "Dark-Blue", true)
 
-	tab:Slider({
-		Name = "UI Scale",
-		Min = 0.8, Max = 1.3,
-		Default = tonumber(Setting.UIScale) or 1,
-		Increment = 0.05,
-		FireOnRelease = true,
-		Callback = function(v)
-			Setting.UIScale = v
-			SaveManager:Set("__scale", v)
-			UpdateViewport()
-		end,
-	})
-	tab:Slider({
-		Name = "Text Size",
-		Min = 0.85, Max = 1.4,
-		Default = tonumber(Setting.TextScale) or 1.1,
-		Increment = 0.05,
-		Callback = function(v)
-			Setting.TextScale = v
-			ApplyTextScale()
-			SaveManager:Set("__textScale", v)
-		end,
-	})
-	tab:Slider({
-		Name = "Animation Speed",
-		Min = 0.2, Max = 1,
-		Default = tonumber(Setting.MotionScale) or 1,
-		Increment = 0.05,
-		Callback = function(v)
-			Setting.MotionScale = v
-			SaveManager:Set("__motion", v)
-		end,
-	})
+	for _, s in ipairs({
+		{ "UI Scale", 0.8, 1.3, tonumber(Setting.UIScale) or 1, "__scale", true,
+			function(v) Setting.UIScale = v UpdateViewport() end },
+		{ "Text Size", 0.85, 1.4, tonumber(Setting.TextScale) or 1.1, "__textScale", false,
+			function(v) Setting.TextScale = v ApplyTextScale() end },
+		{ "Animation Speed", 0.2, 1, tonumber(Setting.MotionScale) or 1, "__motion", false,
+			function(v) Setting.MotionScale = v end },
+		}) do
+		tab:Slider({
+			Name = s[1], Min = s[2], Max = s[3], Default = s[4],
+			Increment = 0.05, FireOnRelease = s[6],
+			Callback = function(v)
+				s[7](v)
+				SaveManager:Set(s[5], v)
+			end,
+		})
+	end
 
 	tab:Section({ Name = "Colors", Columns = 2 })
 	local baseNow = BaseColors()
@@ -6213,24 +5713,20 @@ local function BuildSettingsTab(win)
 	})
 
 	tab:Section("Behavior")
-	tab:Toggle({
-		Name = "Interface Sounds",
-		Description = "Click and hover sound effects",
-		Default = Setting.Sounds == true,
-		Callback = function(v)
-			Setting.Sounds = v
-			SaveManager:Set("__sounds", v)
-		end,
-	})
-	tab:Toggle({
-		Name = "Visual Effects",
-		Description = "Ripple effects on click",
-		Default = Setting.Effects ~= false,
-		Callback = function(v)
-			Setting.Effects = v
-			SaveManager:Set("__effects", v)
-		end,
-	})
+	for _, t in ipairs({
+		{ "Interface Sounds", "Click and hover sound effects", "__sounds", "Sounds", Setting.Sounds == true },
+		{ "Visual Effects", "Ripple effects on click", "__effects", "Effects", Setting.Effects ~= false },
+		}) do
+		tab:Toggle({
+			Name = t[1],
+			Description = t[2],
+			Default = t[5],
+			Callback = function(v)
+				Setting[t[4]] = v
+				SaveManager:Set(t[3], v)
+			end,
+		})
+	end
 	tab:Keybind({
 		Name = "Show / Hide UI",
 		Default = Setting.ToggleUIKey,
@@ -6246,10 +5742,8 @@ local function BuildSettingsTab(win)
 	local function refreshProfiles()
 		profDrop:SetOptions(Configs:List())
 	end
-	tab:Button({
-		Name = "Save",
-		Width = 0.5,
-		Callback = function()
+	for _, b in ipairs({
+		{ "Save", 0.5, function()
 			local n = nameInput:Get()
 			if n == "" then
 				Note("Profiles", "Enter a profile name first.", "Warning")
@@ -6263,12 +5757,8 @@ local function BuildSettingsTab(win)
 			else
 				Note("Profiles", "Saving files is not supported here.", "Error")
 			end
-		end,
-	})
-	tab:Button({
-		Name = "Load",
-		Width = 0.5,
-		Callback = function()
+		end },
+		{ "Load", 0.5, function()
 			local n = profDrop:Get()
 			if not n then return end
 			if Configs:Load(n) then
@@ -6276,12 +5766,8 @@ local function BuildSettingsTab(win)
 			else
 				Note("Profiles", "Could not load that profile.", "Error")
 			end
-		end,
-	})
-	tab:Button({
-		Name = "Export",
-		Width = 0.5,
-		Callback = function()
+		end },
+		{ "Export", 0.5, function()
 			local payload
 			local n = profDrop:Get()
 			if n then
@@ -6306,25 +5792,17 @@ local function BuildSettingsTab(win)
 			end
 			pcall(setc, payload)
 			Note("Profiles", "Config copied to clipboard.", "Success")
-		end,
-	})
-	tab:Button({
-		Name = "Import",
-		Width = 0.5,
-		Callback = function()
-			local ok, gc = pcall(function()
-				return getclipboard
-			end)
-			if not (ok and type(gc) == "function") then
+		end },
+		{ "Import", 0.5, function()
+			local gc = Peek(function() return getclipboard end)
+			if type(gc) ~= "function" then
 				Note("Profiles", "Clipboard is not supported here.", "Error")
 				return
 			end
 			local ok2, text = pcall(gc)
 			local data
 			if ok2 and type(text) == "string" and text:match("%S") then
-				local ok3, res = pcall(function()
-					return HttpService:JSONDecode(text)
-				end)
+				local ok3, res = pcall(function() return HttpService:JSONDecode(text) end)
 				if ok3 and type(res) == "table" then
 					data = res
 				end
@@ -6346,11 +5824,8 @@ local function BuildSettingsTab(win)
 			SaveManager:Flush()
 			SaveManager.DataChanged:Fire()
 			Note("Profiles", "Config imported from clipboard.", "Success")
-		end,
-	})
-	tab:Button({
-		Name = "Delete",
-		Callback = function()
+		end },
+		{ "Delete", nil, function()
 			local n = profDrop:Get()
 			if not n then return end
 			Kailex:Confirm({
@@ -6361,8 +5836,10 @@ local function BuildSettingsTab(win)
 				refreshProfiles()
 				Note("Profiles", "Deleted \"" .. n .. "\".")
 			end)
-		end,
-	})
+		end },
+		}) do
+		tab:Button({ Name = b[1], Width = b[2], Callback = b[3] })
+	end
 
 	tab:Section("About")
 	tab:Paragraph({
@@ -6674,8 +6151,7 @@ function Kailex:Window(cfg)
 	end
 
 	titleBar.InputBegan:Connect(function(input)
-		if input.UserInputType == EUT.MouseButton1
-			or input.UserInputType == EUT.Touch then
+		if input.UserInputType == EUT.MouseButton1 or input.UserInputType == EUT.Touch then
 			KillIntroMotion()
 		end
 	end)
@@ -6701,9 +6177,7 @@ function Kailex:Window(cfg)
 				root.Position = UO(nx, ny)
 			end
 		end,
-		OnEnd = function()
-			self:SavePlacement()
-		end,
+		OnEnd = function() self:SavePlacement() end,
 	})
 
 	local titleLabel = U.Txt(titleBar, {
@@ -6785,16 +6259,12 @@ function Kailex:Window(cfg)
 			searchLine.Size = UN(0, 0, 0, 1)
 			Tween(searchBox, "Snappy", { Size = UN(0, 220, 0, 24) }, function()
 				if searchActive then
-					pcall(function()
-						searchBox:CaptureFocus()
-					end)
+					pcall(function() searchBox:CaptureFocus() end)
 				end
 			end)
 			Tween(searchLine, "Snappy", { Size = UN(0, 220, 0, 1) })
 		else
-			pcall(function()
-				searchBox:ReleaseFocus()
-			end)
+			pcall(function() searchBox:ReleaseFocus() end)
 			Tween(searchBox, "Fast", { Size = UN(0, 0, 0, 24) }, function()
 				if not searchActive then
 					searchBox.Visible = false
@@ -6810,8 +6280,7 @@ function Kailex:Window(cfg)
 	end
 
 	self.Maid:Give(UIS.InputBegan:Connect(function(input, gp)
-		if not searchActive then return end
-		if input.KeyCode ~= EKC.Escape then return end
+		if not searchActive or input.KeyCode ~= EKC.Escape then return end
 		if gp and UIS:GetFocusedTextBox() ~= searchBox then return end
 		setSearch(false)
 	end))
@@ -6918,9 +6387,7 @@ function Kailex:Window(cfg)
 	})
 
 	TrackInput(splitter, {
-		Guard = function()
-			return not self.Minimized
-		end,
+		Guard = function() return not self.Minimized end,
 		Active = splitter,
 		Start = function()
 			KillIntroMotion()
@@ -6932,9 +6399,7 @@ function Kailex:Window(cfg)
 			local rel = (m.X - body.AbsolutePosition.X) / sc + 4
 			self:SetSidebarWidth(rel)
 		end,
-		End = function()
-			SaveManager:Set("__sidebarWidth", self._sidebarWidth)
-		end,
+		End = function() SaveManager:Set("__sidebarWidth", self._sidebarWidth) end,
 	})
 
 	local grip = Hit({
@@ -6947,9 +6412,7 @@ function Kailex:Window(cfg)
 	self.ResizeGrip = grip
 
 	TrackInput(grip, {
-		Guard = function()
-			return not self.Maximized and not self.Minimized
-		end,
+		Guard = function() return not self.Maximized and not self.Minimized end,
 		Active = grip,
 		Start = function(state)
 			KillIntroMotion()
@@ -6985,8 +6448,7 @@ function Kailex:Window(cfg)
 
 	local lastClick = 0
 	titleBar.InputBegan:Connect(function(input)
-		if input.UserInputType ~= EUT.MouseButton1
-			and input.UserInputType ~= EUT.Touch then return end
+		if input.UserInputType ~= EUT.MouseButton1 and input.UserInputType ~= EUT.Touch then return end
 		BringToFront()
 		if Device.IsTouch then return end
 		local now = os.clock()
@@ -7397,9 +6859,7 @@ function Kailex:SetVisible(state)
 	end
 end
 
-function Kailex:IsVisible()
-	return uiVisible
-end
+function Kailex:IsVisible() return uiVisible end
 
 function Kailex:MobileButton()
 	if self._mobileButton then
@@ -7446,19 +6906,17 @@ function Kailex:KeySystem(options)
 	local duration = math.max(0, floor(tonumber(options.Expiry) or 86400))
 
 	local keySet, keyDur = {}, {}
-	if options.Key ~= nil then
-		if type(options.Key) == "table" then
-			for k, v in pairs(options.Key) do
-				if type(v) == "number" then
-					keySet[tostring(k)] = true
-					keyDur[tostring(k)] = math.max(0, floor(v))
-				else
-					keySet[tostring(v)] = true
-				end
+	if type(options.Key) == "table" then
+		for k, v in pairs(options.Key) do
+			if type(v) == "number" then
+				keySet[tostring(k)] = true
+				keyDur[tostring(k)] = math.max(0, floor(v))
+			else
+				keySet[tostring(v)] = true
 			end
-		else
-			keySet[tostring(options.Key)] = true
 		end
+	elseif options.Key ~= nil then
+		keySet[tostring(options.Key)] = true
 	end
 	local perKey = next(keyDur) ~= nil
 
@@ -7466,13 +6924,8 @@ function Kailex:KeySystem(options)
 	local desc = tostring(options.SubTitle or "Enter your key to continue.")
 	local link = options.Link
 
-	local function validateKey(key)
-		return keySet[tostring(key or "")] == true
-	end
-
-	local function keyDuration(key)
-		return keyDur[tostring(key)] or duration
-	end
+	local function validateKey(key) return keySet[tostring(key or "")] == true end
+	local function keyDuration(key) return keyDur[tostring(key)] or duration end
 
 	local function inList(list)
 		if type(list) == "table" then
@@ -7504,10 +6957,8 @@ function Kailex:KeySystem(options)
 	end
 
 	local function serverNow()
-		local ok, t = pcall(workspace.GetServerTimeNow, workspace)
-		if ok and type(t) == "number" and t > 1e9 then
-			return t
-		end
+		local t = Peek(function() return workspace:GetServerTimeNow() end)
+		if type(t) == "number" and t > 1e9 then return t end
 		return os.time()
 	end
 
@@ -7529,12 +6980,8 @@ function Kailex:KeySystem(options)
 
 	local function hashStr(str, method)
 		if method == "s" then
-			local ok, h = pcall(function()
-				return crypt.hash(str, "sha256")
-			end)
-			if ok and type(h) == "string" and #h > 0 then
-				return h
-			end
+			local h = Peek(function() return crypt.hash(str, "sha256") end)
+			if type(h) == "string" and #h > 0 then return h end
 			return nil
 		end
 		return digest(str)
@@ -7542,12 +6989,10 @@ function Kailex:KeySystem(options)
 
 	local bindId = tostring(lp and lp.UserId or 0) .. "|" .. tostring(game.GameId)
 	if options.BindHardware ~= false then
-		local ok, gh = pcall(function()
-			return gethwid or get_hwid
-		end)
-		if ok and type(gh) == "function" then
-			local ok2, hwid = pcall(gh)
-			if ok2 and type(hwid) == "string" and #hwid > 0 then
+		local gh = Peek(function() return gethwid or get_hwid end)
+		if type(gh) == "function" then
+			local hwid = Peek(gh)
+			if type(hwid) == "string" and #hwid > 0 then
 				bindId = bindId .. "|" .. digest(hwid)
 			end
 		end
@@ -7685,10 +7130,8 @@ function Kailex:KeySystem(options)
 			statusLabel.TextColor3 = CurrentTheme[statusKey] or CurrentTheme.SubText
 		end))
 
-		local okPaste, gc = pcall(function()
-			return getclipboard
-		end)
-		local hasPaste = okPaste and type(gc) == "function"
+		local gc = Peek(function() return getclipboard end)
+		local hasPaste = type(gc) == "function"
 
 		local inputBox = U.TxB(card, {
 			Pos = UO(18, 76),
@@ -7827,16 +7270,12 @@ function Kailex:KeySystem(options)
 				verify()
 			end
 		end))
-		local escHook = AddInputHook(function()
-			return alive
-		end, function(input)
+		local escHook = AddInputHook(function() return alive end, function(input)
 			if input.KeyCode == EKC.Escape then
 				declineNow()
 			end
 		end)
-		maid:Give(function()
-			RemoveInputHook(escHook)
-		end)
+		maid:Give(function() RemoveInputHook(escHook) end)
 		if linkBtn then
 			maid:Give(linkBtn.MouseButton1Click:Connect(function()
 				if not alive then return end
@@ -7867,9 +7306,7 @@ end
 
 function Kailex:Unload()
 	ModalManager.CloseAll()
-	pcall(function()
-		ContextMenu.Hide()
-	end)
+	pcall(ContextMenu.Hide)
 	for el in pairs(QuickWidgets.Active) do
 		QuickWidgets.Destroy(el)
 	end
@@ -7885,21 +7322,15 @@ function Kailex:Unload()
 	KeySystemLock = false
 	LibMaid:Destroy()
 	for _, s in ipairs(SoundInstances) do
-		pcall(function()
-			s:Destroy()
-		end)
+		pcall(s.Destroy, s)
 	end
 	table.clear(SoundInstances)
 	table.clear(SoundPool)
 	for _, r in ipairs(RipplePool) do
-		pcall(function()
-			r:Destroy()
-		end)
+		pcall(r.Destroy, r)
 	end
 	table.clear(RipplePool)
-	pcall(function()
-		ScreenGui:Destroy()
-	end)
+	pcall(ScreenGui.Destroy, ScreenGui)
 	local g = Getgenv()
 	if g and g.kailex == Kailex then
 		g.kailex = nil
@@ -7910,10 +7341,7 @@ local function ApplyPersisted()
 	local th
 	local cc = SaveManager:Get("__customColors", nil)
 	if type(cc) == "table" then
-		local bg = HexToColor(cc.Background)
-		local sf = HexToColor(cc.Surface)
-		local tx = HexToColor(cc.Text)
-		local ac = HexToColor(cc.Accent)
+		local bg, sf, tx, ac = HexToColor(cc.Background), HexToColor(cc.Surface), HexToColor(cc.Text), HexToColor(cc.Accent)
 		if bg and sf and tx and ac then
 			th = DeriveTheme({ Background = bg, Surface = sf, Text = tx, Accent = ac })
 		end
@@ -7929,9 +7357,7 @@ local function ApplyPersisted()
 		ApplyTheme(th)
 	end
 	local snd = SaveManager:Get("__sounds", nil)
-	if snd ~= nil then
-		Setting.Sounds = (snd == true)
-	end
+	if snd ~= nil then Setting.Sounds = (snd == true) end
 	local sc = SaveManager:Get("__scale", nil)
 	if type(sc) == "number" then
 		local ns = clamp(sc, 0.75, 1.5)
@@ -7946,17 +7372,11 @@ local function ApplyPersisted()
 		ApplyTextScale()
 	end
 	local mot = SaveManager:Get("__motion", nil)
-	if type(mot) == "number" then
-		Setting.MotionScale = clamp(mot, 0.1, 1)
-	end
+	if type(mot) == "number" then Setting.MotionScale = clamp(mot, 0.1, 1) end
 	local eff = SaveManager:Get("__effects", nil)
-	if eff ~= nil then
-		Setting.Effects = (eff == true)
-	end
+	if eff ~= nil then Setting.Effects = (eff == true) end
 	local tk = SaveManager:Get("__toggleKey", nil)
-	if tk ~= nil then
-		Setting.ToggleUIKey = ParseKey(tk)
-	end
+	if tk ~= nil then Setting.ToggleUIKey = ParseKey(tk) end
 end
 
 ApplyPersisted()
@@ -7966,14 +7386,11 @@ if Device.IsConsole then
 end
 UpdateViewport()
 
-LibMaid:Give(AddInputHook(function()
-	return true
-end, function(input, gp)
+LibMaid:Give(AddInputHook(function() return true end, function(input, gp)
 	if gp then return end
 	local code = input.KeyCode
 	if code == EKC.Unknown then return end
-	if ActiveKeybindListener ~= nil then return end
-	if UIS:GetFocusedTextBox() ~= nil then return end
+	if ActiveKeybindListener ~= nil or UIS:GetFocusedTextBox() ~= nil then return end
 
 	local key = Setting.ToggleUIKey
 	if key ~= nil and code == key then
@@ -8001,9 +7418,7 @@ end, function(input, gp)
 	end
 end))
 
-LibMaid:Give(SaveManager.DataChanged:Connect(function()
-	ApplyPersisted()
-end))
+LibMaid:Give(SaveManager.DataChanged:Connect(ApplyPersisted))
 
 if Device.IsTouch then
 	Kailex:MobileButton()
