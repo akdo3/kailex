@@ -2283,7 +2283,7 @@ local function CreateRow(parent, opts)
 		Font = EF.GothamMedium,
 		Ts = 13,
 		Align = ETA.Left,
-		Trunc = true,
+		Wrap = true,
 		Text = opts.Name or "",
 	})
 
@@ -2296,7 +2296,7 @@ local function CreateRow(parent, opts)
 			Color = "SubText",
 			Trans = 0.35,
 			Align = ETA.Left,
-			Trunc = true,
+			Wrap = true,
 			Text = desc,
 		})
 	end
@@ -2314,6 +2314,68 @@ local function CreateRow(parent, opts)
 		AddHover(row, { StrokeTransparency = 0.65 })
 	end
 	return row, title, right, leftFrame, descLabel
+end
+
+local function SetupRowFit(el, row, left, title, desc, reserve)
+	local baseH = row.Size.Y.Offset
+	local lastW = -1
+
+	local function setH(h)
+		if h == row.Size.Y.Offset then return end
+		row.Size = UN(row.Size.X.Scale, row.Size.X.Offset, 0, h)
+		local g = el._gridFrame
+		if g and g.Parent and g.AutomaticSize ~= AS.Y then
+			local gh = h
+			for _, ch in ipairs(g:GetChildren()) do
+				if ch:IsA("GuiObject") and ch:GetAttribute("__el") then
+					gh = math.max(gh, ch.Size.Y.Offset)
+				end
+			end
+			g.Size = UN(1, 0, 0, gh)
+		end
+	end
+
+	local function fit(force)
+		if el._destroyed or not title.Visible or not row.Parent then return end
+		local tw = floor(title.AbsoluteSize.X / GetScale() + 0.5)
+		if tw < 24 then
+			title.TextWrapped = false
+			title.TextTruncate = TTA
+			lastW = -1
+			setH(baseH)
+			return
+		end
+		if not force and tw == lastW then return end
+		lastW = tw
+		title.TextWrapped = true
+
+		local tH = 15
+		if title.Text ~= "" then
+			tH = TextService:GetTextSize(title.Text, title.TextSize, title.Font, V2(tw - 2, 4096)).Y
+		end
+		if title.Size.Y.Scale == 0 then
+			title.Size = UN(title.Size.X.Scale, title.Size.X.Offset, 0, tH)
+		end
+
+		local dH = 0
+		if desc and desc.Visible then
+			dH = (desc.Text ~= "")
+				and TextService:GetTextSize(desc.Text, desc.TextSize, desc.Font, V2(tw - 2, 4096)).Y or 13
+			desc.Position = UN(0, 0, 0, tH + 7)
+			desc.Size = UN(1, -4, 0, dH)
+		end
+
+		setH(math.max(baseH, tH + (dH > 0 and dH + 13 or 6) + (reserve or 0)))
+	end
+
+	el.Maid:Give(left:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit))
+	el.Maid:Give(title:GetPropertyChangedSignal("Text"):Connect(function() fit(true) end))
+	el.Maid:Give(title:GetPropertyChangedSignal("TextSize"):Connect(function() fit(true) end))
+	if desc then
+		el.Maid:Give(desc:GetPropertyChangedSignal("TextSize"):Connect(function() fit(true) end))
+	end
+	task.defer(fit)
+	task.delay(0.1, fit)
 end
 
 local Elements = {}
@@ -2362,6 +2424,7 @@ function Element:_row(tab, opts, rowOpts)
 	self._baseRightW = rowOpts.RightWidth or 0
 	self._width = rowOpts.RightWidth or 0
 	self.Callback = opts.Callback or function() end
+	SetupRowFit(self, row, left, title, descLabel, rowOpts.BottomReserve)
 	return row
 end
 
@@ -2621,16 +2684,18 @@ function Elements.Label.new(tab, opts)
 	local row = Frm({
 		BackgroundTransparency = 1,
 		Size = UN((opts.Width or 1), -3, 0, 20),
+		AutomaticSize = AS.Y,
 		Parent = tab.Content,
 		Children = { Pad(0, 0, 0, 0) },
 	})
 	local label = U.Txt(row, {
-		Size = UN(1, 0, 1, 0),
+		Size = UN(1, 0, 0, 20),
+		Auto = AS.Y,
 		Font = EF.GothamMedium,
 		Ts = 13,
 		Color = "SubText",
 		Align = ETA.Left,
-		Trunc = true,
+		Wrap = true,
 		Text = opts.Text or opts.Name or "Label",
 	})
 	local self = INew(Elements.Label, row, { Name = opts.Text or opts.Name, Width = opts.Width }, tab)
@@ -3332,6 +3397,7 @@ function Elements.Slider.new(tab, opts)
 		Name = opts.Name or "Slider",
 		Height = fullH,
 		RightWidth = 0,
+		BottomReserve = 20,
 	})
 
 	local row, left, title = self.Row, self.LeftFrame, self.TitleLabel
@@ -3378,7 +3444,7 @@ function Elements.Slider.new(tab, opts)
 
 	local bubble = U.Txt(left, {
 		Ap = V2(0.5, 1),
-		Pos = UN(0.5, 0, 0, fullH - 26),
+		Pos = UN(0.5, 0, 1, -26),
 		Size = UO(44, 16),
 		Bg = 0,
 		BgC = "SurfaceLight",
@@ -3427,7 +3493,7 @@ function Elements.Slider.new(tab, opts)
 		if trackW > 48 then
 			bx = clamp(frac * trackW, 24, trackW - 24) / trackW
 		end
-		bubble.Position = UN(bx, 0, 0, fullH - 26)
+		bubble.Position = UN(bx, 0, 1, -26)
 		bubble.Text = fmt(value)
 		if not box:IsFocused() then
 			box.Text = string.format("%." .. decimals .. "f", value)
@@ -3643,10 +3709,11 @@ function Elements.Keybind.new(tab, opts)
 	end)
 
 	local bindBtn = U.MkBtn(self.RightContainer, {
-		Size = UN(1, 0, 1, 0),
+		Size = UN(1, 0, 0, 26),
 		BgC = "SurfaceLight",
 		Text = "None",
 		Ts = 11,
+		Trunc = true,
 		Hover = { BaseKey = "SurfaceLight", HoverKey = "ElementHover" },
 	})
 	StrokeBind(1, "Stroke", 0.5, bindBtn)
@@ -4355,10 +4422,11 @@ function Elements.Dropdown.new(tab, opts)
 	end)
 
 	local overlay = Hit({
-		Size = UN(1, 0, 0, baseH),
+		Size = UN(1, 0, 1, 0),
 		ZIndex = 1,
 		Parent = row,
 	})
+
 	Click(self.Maid, overlay, function()
 		if self._disabled then return end
 		ApplyRipple(overlay)
@@ -4470,7 +4538,7 @@ function Elements.TextInput.new(tab, opts)
 	local validator = type(opts.Validator) == "function" and opts.Validator or nil
 
 	local box = U.TxB(self.RightContainer, {
-		Size = UN(1, 0, 1, 0),
+		Size = UN(1, 0, 0, 26),
 		Text = value,
 		Ph = opts.Placeholder or "",
 		Ts = 12,
@@ -5182,9 +5250,7 @@ function GridRow:Place(el, span)
 		self.Frame.AutomaticSize = AS.Y
 		self.AutoH = true
 	elseif not self.AutoH then
-		if sz.Y.Offset > self.FrameH then
-			self.FrameH = sz.Y.Offset
-		end
+		self.FrameH = math.max(self.FrameH, sz.Y.Offset, self.Frame.Size.Y.Offset)
 		self.Frame.Size = UN(1, 0, 0, self.FrameH)
 	end
 	self.Used += span
@@ -5520,6 +5586,8 @@ function TabClass:Toggle(opts)
 	end
 	local el = self:_track(Elements.Toggle.new(self, opts))
 	if quick and not Device.IsTouch then
+		local wf = tonumber(opts.Width) or 1
+		local narrow = wf < 0.95 or (self.CurrentSection and (self.CurrentSection.Columns or 1) > 1)
 		el.QuickKeybind = el:Extra("Keybind", {
 			Name = el.Title,
 			SaveKey = (opts.SaveKey ~= false) and (el.Title .. " Key") or false,
@@ -5528,7 +5596,7 @@ function TabClass:Toggle(opts)
 				PlaySound(el.State and "ToggleOff" or "ToggleOn")
 				el:Set(not el.State)
 			end,
-		}, { Height = 26 })
+		}, { Height = 26, Width = narrow and 40 or 54 })
 	end
 	return el
 end
