@@ -9,77 +9,68 @@ local SoundService, TextService = game:GetService("SoundService"), game:GetServi
 local TweenService, RunService = game:GetService("TweenService"), game:GetService("RunService")
 local HttpService, Workspace = game:GetService("HttpService"), game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-local RawUIS = game:GetService("UserInputService")
-local lastMouse = Vector2.new(0, 0)
-local TouchStub = setmetatable({}, { __len = function() return 1 end })
-
-local DummyConn = { Connected = false }
-DummyConn.Disconnect = function() end
-DummyConn.Destroy = DummyConn.Disconnect
-
-local DummySignal = {}
-DummySignal.Connect = function() return DummyConn end
-DummySignal.Destroy = function() end
-
-local DummyEvents = {
-	InputBegan = 1, InputChanged = 1, InputEnded = 1, InputStarted = 1,
-	TouchStarted = 1, TouchEnded = 1, TouchTap = 1, TouchTapInWorld = 1,
-	TouchSwipe = 1, TouchRotate = 1, TouchPan = 1, TouchPinch = 1,
-	TouchLongPress = 1, TouchMovementStarted = 1, TouchMovementEnded = 1,
-}
-
-local UISFallback = {
-	GetMouseLocation = function() return lastMouse end,
-	GetTouches = function() return TouchStub end,
-	GetMouseButtonsPressed = function() return {} end,
-	IsMouseButtonPressed = function() return true end,
-	IsKeyDown = function() return false end,
-	GetFocusedTextBox = function() return nil end,
-}
-
-local UICache = {}
 local UIS
-UIS = setmetatable({}, {
-	__index = function(_, k)
-		local c = UICache[k]
-		if c ~= nil then
-			return c
-		end
-		local ok, v = pcall(function() return RawUIS[k] end)
-		if ok and v ~= nil then
-			if type(v) == "function" then
-				local fn = v
-				v = function(a, ...)
-					local args = table.pack(a, ...)
-					if args[1] == UIS then
-						args[1] = RawUIS
-					end
-					local ok2, r = pcall(fn, table.unpack(args, 1, args.n))
-					if ok2 then
-						if k == "GetMouseLocation" and typeof(r) == "Vector2" then
-							lastMouse = r
+
+do
+	local Raw = game:GetService("UserInputService")
+	local lastMouse = Vector2.new(0, 0)
+	local touchStub = setmetatable({}, { __len = function() return 1 end })
+	local deadConn = { Connected = false }
+	deadConn.Disconnect = function() end
+	deadConn.Destroy = deadConn.Disconnect
+	local deadSignal = { Connect = function() return deadConn end }
+	deadSignal.Destroy = function() end
+	local Events = {
+		InputBegan = 1, InputChanged = 1, InputEnded = 1, InputStarted = 1,
+		TouchStarted = 1, TouchEnded = 1, TouchTap = 1, TouchTapInWorld = 1,
+		TouchSwipe = 1, TouchRotate = 1, TouchPan = 1, TouchPinch = 1,
+		TouchLongPress = 1, TouchMovementStarted = 1, TouchMovementEnded = 1,
+	}
+	local Fallback = {
+		GetMouseLocation = function() return lastMouse end,
+		GetTouches = function() return touchStub end,
+		GetMouseButtonsPressed = function() return {} end,
+		IsMouseButtonPressed = function() return true end,
+		IsKeyDown = function() return false end,
+		GetFocusedTextBox = function() return nil end,
+	}
+	local cache = {}
+	UIS = setmetatable({}, {
+		__index = function(_, k)
+			local c = cache[k]
+			if c ~= nil then return c end
+			local ok, v = pcall(function() return Raw[k] end)
+			if ok and v ~= nil then
+				if type(v) == "function" then
+					local fn = v
+					v = function(a, ...)
+						local args = table.pack(a, ...)
+						if args[1] == UIS then args[1] = Raw end
+						local ok2, r = pcall(fn, table.unpack(args, 1, args.n))
+						if ok2 then
+							if k == "GetMouseLocation" and typeof(r) == "Vector2" then lastMouse = r end
+							return r
 						end
-						return r
+						local fb = Fallback[k]
+						return fb and fb(a, ...) or nil
 					end
-					local fb = UISFallback[k]
-					return fb and fb(a, ...) or nil
 				end
+				cache[k] = v
+				return v
 			end
-			UICache[k] = v
-			return v
-		end
-		local fb = UISFallback[k]
-		if fb then
-			UICache[k] = fb
-			return fb
-		end
-		if DummyEvents[k] then
-			UICache[k] = DummySignal
-			return DummySignal
-		end
-		return nil
-	end,
-})
+			local fb = Fallback[k]
+			if fb then
+				cache[k] = fb
+				return fb
+			end
+			if Events[k] then
+				cache[k] = deadSignal
+				return deadSignal
+			end
+			return nil
+		end,
+	})
+end
 
 local V2 = Vector2.new
 local UO = UDim2.fromOffset
@@ -104,15 +95,6 @@ local ED = Enum.EasingDirection
 local clamp = math.clamp
 local floor = math.floor
 
-local Device = { IsTouch = UIS.TouchEnabled and not UIS.MouseEnabled }
-
-pcall(function()
-	Device.IsConsole = GuiService:IsTenFootInterface()
-end)
-
-local ROW_H = Device.IsTouch and 40 or 32
-local PILL = UD(1, 0)
-
 local function RemoveValue(t, v)
 	for i, x in ipairs(t) do
 		if x == v then return table.remove(t, i) end
@@ -132,16 +114,24 @@ local function Peek(fn)
 	if ok then return v end
 end
 
-local function Getgenv()
-	return Peek(function()
-		if type(getgenv) == "function" then
-			local g = getgenv()
-			if type(g) == "table" then return g end
-		end
-	end)
-end
+local Device = {
+	IsTouch = Peek(function() return UIS.TouchEnabled end) == true
+		and Peek(function() return UIS.MouseEnabled end) ~= true,
+}
 
-local genv = Getgenv()
+pcall(function()
+	Device.IsConsole = GuiService:IsTenFootInterface()
+end)
+
+local ROW_H = Device.IsTouch and 40 or 32
+local PILL = UD(1, 0)
+
+local genv = Peek(function()
+	if type(getgenv) == "function" then
+		local g = getgenv()
+		if type(g) == "table" then return g end
+	end
+end)
 
 if genv and genv.kailex then
 	pcall(function() genv.kailex:Unload() end)
@@ -158,23 +148,6 @@ local fs = {
 	delfile = delfile or removefile or function() end,
 	listfiles = listfiles or function() return {} end,
 }
-
-local SafeParent = Peek(function() return gethui and gethui() end)
-if not SafeParent then
-	local cg = Peek(function() return game:GetService("CoreGui") end)
-	if cg then
-		local test = Instance.new("Frame")
-		local okSet = pcall(function() test.Parent = cg end)
-		test:Destroy()
-		if okSet then SafeParent = cg end
-	end
-end
-SafeParent = SafeParent or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")) or game
-
-local protect_gui = Peek(function()
-	if type(protectgui) == "function" then return protectgui end
-	if type(syn) == "table" and type(syn.protect_gui) == "function" then return syn.protect_gui end
-end) or function() end
 
 local function Once(signal, fn)
 	local conn
@@ -776,30 +749,34 @@ do
 	end
 end
 
-local function Mk(class, base)
-	return function(p)
-		p = p or {}
-		for k, v in pairs(base) do
-			if p[k] == nil then p[k] = v end
-		end
-		return Create(class, p)
-	end
-end
+local Frm, Lbl, Hit, Btn, TBox, Grp, Scr
 
-local Frm = Mk("Frame", { BorderSizePixel = 0 })
-local Lbl = Mk("TextLabel", { BackgroundTransparency = 1 })
-local Hit = Mk("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, BorderSizePixel = 0 })
-local Btn = Mk("TextButton", { Text = "", AutoButtonColor = false, BorderSizePixel = 0 })
-local TBox = Mk("TextBox", { ClearTextOnFocus = false, PlaceholderColor3 = "SubText" })
-local Grp = Mk("CanvasGroup", { BorderSizePixel = 0 })
-local Scr = Mk("ScrollingFrame", {
-	BackgroundTransparency = 1,
-	CanvasSize = UN(),
-	AutomaticCanvasSize = AS.Y,
-	ScrollingDirection = ESD.Y,
-	ScrollBarThickness = 3,
-	BorderSizePixel = 0,
-})
+do
+	local function Mk(class, base)
+		return function(p)
+			p = p or {}
+			for k, v in pairs(base) do
+				if p[k] == nil then p[k] = v end
+			end
+			return Create(class, p)
+		end
+	end
+
+	Frm = Mk("Frame", { BorderSizePixel = 0 })
+	Lbl = Mk("TextLabel", { BackgroundTransparency = 1 })
+	Hit = Mk("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, BorderSizePixel = 0 })
+	Btn = Mk("TextButton", { Text = "", AutoButtonColor = false, BorderSizePixel = 0 })
+	TBox = Mk("TextBox", { ClearTextOnFocus = false, PlaceholderColor3 = "SubText" })
+	Grp = Mk("CanvasGroup", { BorderSizePixel = 0 })
+	Scr = Mk("ScrollingFrame", {
+		BackgroundTransparency = 1,
+		CanvasSize = UN(),
+		AutomaticCanvasSize = AS.Y,
+		ScrollingDirection = ESD.Y,
+		ScrollBarThickness = 3,
+		BorderSizePixel = 0,
+	})
+end
 
 local function UISC(parent, scale)
 	return Create("UIScale", { Scale = scale or 1, Parent = parent })
@@ -933,49 +910,58 @@ local Audio = {
 }
 Kailex.Audio = Audio
 
-local SoundPool = {}
-local SoundInstances = {}
+local PlaySound
 
-local function PlaySound(kind, scale, speed)
-	if not Setting.Sounds then return end
-	local a = Audio[kind]
-	if type(a) ~= "table" or a.Id == "" then return end
-	pcall(function()
-		local pool = SoundPool[a.Id]
-		if not pool then
-			pool = {}
-			SoundPool[a.Id] = pool
-		end
+do
+	local byId, live = {}, {}
 
-		local s
-		for i = 1, #pool do
-			if not pool[i].IsPlaying then
-				s = table.remove(pool, i)
-				break
+	function PlaySound(kind, scale, speed)
+		if not Setting.Sounds then return end
+		local a = Audio[kind]
+		if type(a) ~= "table" or a.Id == "" then return end
+		pcall(function()
+			local pool = byId[a.Id]
+			if not pool then
+				pool = {}
+				byId[a.Id] = pool
 			end
-		end
-		if not s then
-			s = Instance.new("Sound")
-			s.Parent = SoundService
-			table.insert(SoundInstances, s)
-			s.Ended:Connect(function()
-				task.defer(function()
-					if s.Parent ~= SoundService then return end
-					if #pool < 8 then
-						if not table.find(pool, s) then table.insert(pool, s) end
-					else
-						s:Destroy()
-						RemoveValue(SoundInstances, s)
-					end
-				end)
-			end)
-		end
 
-		s.SoundId = a.Id
-		s.PlaybackSpeed = speed or a.Speed or 1
-		s.Volume = clamp((a.Vol or 0.4) * (scale or 1) * (Audio.Master or 1), 0, 1)
-		s.TimePosition = 0
-		s:Play()
+			local s
+			for i = 1, #pool do
+				if not pool[i].IsPlaying then
+					s = table.remove(pool, i)
+					break
+				end
+			end
+			if not s then
+				s = Instance.new("Sound")
+				s.Parent = SoundService
+				table.insert(live, s)
+				s.Ended:Connect(function()
+					task.defer(function()
+						if s.Parent ~= SoundService then return end
+						if #pool < 8 then
+							if not table.find(pool, s) then table.insert(pool, s) end
+						else
+							s:Destroy()
+							RemoveValue(live, s)
+						end
+					end)
+				end)
+			end
+
+			s.SoundId = a.Id
+			s.PlaybackSpeed = speed or a.Speed or 1
+			s.Volume = clamp((a.Vol or 0.4) * (scale or 1) * (Audio.Master or 1), 0, 1)
+			s.TimePosition = 0
+			s:Play()
+		end)
+	end
+
+	LibMaid:Give(function()
+		for _, s in ipairs(live) do pcall(s.Destroy, s) end
+		table.clear(live)
+		table.clear(byId)
 	end)
 end
 
@@ -1243,32 +1229,52 @@ LibMaid:Give(SaveManager.DataChanged:Connect(function()
 	end
 end))
 
-local ScreenGui = Create("ScreenGui", {
-	Name = "KailexUI",
-	IgnoreGuiInset = true,
-	ResetOnSpawn = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	DisplayOrder = 100,
-})
-pcall(protect_gui, ScreenGui)
-ScreenGui.Parent = SafeParent
+local ScreenGui, Root, RootScale, LayerWindows, LayerOverlay, LayerNotify, LayerTooltip
 
-local Root = Frm({
-	Name = "Root",
-	BackgroundTransparency = 1,
-	Size = US(1, 1),
-	Parent = ScreenGui,
-})
-local RootScale = UISC(Root)
+do
+	local SafeParent = Peek(function() return gethui and gethui() end)
+	if not SafeParent then
+		local cg = Peek(function() return game:GetService("CoreGui") end)
+		if cg then
+			local test = Instance.new("Frame")
+			local okSet = pcall(function() test.Parent = cg end)
+			test:Destroy()
+			if okSet then SafeParent = cg end
+		end
+	end
+	SafeParent = SafeParent or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")) or game
+	local protect_gui = Peek(function()
+		if type(protectgui) == "function" then return protectgui end
+		if type(syn) == "table" and type(syn.protect_gui) == "function" then return syn.protect_gui end
+	end) or function() end
 
-local function Layer(name)
-	return Frm({ Name = name, BackgroundTransparency = 1, Size = US(1, 1), Parent = Root })
+	ScreenGui = Create("ScreenGui", {
+		Name = "KailexUI",
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = 100,
+	})
+	pcall(protect_gui, ScreenGui)
+	ScreenGui.Parent = SafeParent
+
+	Root = Frm({
+		Name = "Root",
+		BackgroundTransparency = 1,
+		Size = US(1, 1),
+		Parent = ScreenGui,
+	})
+	RootScale = UISC(Root)
+
+	local function Layer(name)
+		return Frm({ Name = name, BackgroundTransparency = 1, Size = US(1, 1), Parent = Root })
+	end
+
+	LayerWindows = Layer("Windows")
+	LayerOverlay = Layer("Overlay")
+	LayerNotify = Layer("Notify")
+	LayerTooltip = Layer("Tooltip")
 end
-
-local LayerWindows = Layer("Windows")
-local LayerOverlay = Layer("Overlay")
-local LayerNotify = Layer("Notify")
-local LayerTooltip = Layer("Tooltip")
 
 local Camera = Workspace.CurrentCamera
 local Viewport = V2(1920, 1080)
@@ -1312,31 +1318,31 @@ local function UpdateViewport()
 	end
 end
 
-local CameraConn = nil
+do
+	local conn
 
-local function BindCamera(cam)
-	if cam == Camera then return end
-	if CameraConn then
-		CameraConn:Disconnect()
-		CameraConn = nil
+	local function BindCamera(cam)
+		if cam == Camera then return end
+		if conn then
+			conn:Disconnect()
+			conn = nil
+		end
+		Camera = cam
+		if cam then
+			conn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateViewport)
+		end
 	end
-	Camera = cam
-	if cam then
-		CameraConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateViewport)
-	end
-end
 
-BindCamera(Workspace.CurrentCamera)
-
-LibMaid:Give(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 	BindCamera(Workspace.CurrentCamera)
-end))
 
-LibMaid:Give(function()
-	if CameraConn then
-		CameraConn:Disconnect()
-	end
-end)
+	LibMaid:Give(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		BindCamera(Workspace.CurrentCamera)
+	end))
+
+	LibMaid:Give(function()
+		if conn then conn:Disconnect() end
+	end)
+end
 
 local ModalManager = { Stack = {} }
 
@@ -1470,78 +1476,87 @@ UIS.InputEnded:Connect(function(input)
 	end
 end)
 
-local RipplePool = {}
+local ApplyRipple
 
-local function newRipple()
-	local r = Frm({
-		BackgroundColor3 = WHITE,
-		Visible = false,
-		AnchorPoint = V2(0.5, 0.5),
-		ZIndex = 50,
-		Children = { Corner(PILL) },
-	})
-	Once(r.Destroying, function()
-		RemoveValue(RipplePool, r)
-	end)
-	table.insert(RipplePool, r)
-	return r
-end
+do
+	local pool = {}
 
-local function ApplyRipple(target, inputPos)
-	if not Setting.Effects then return end
-	if not target or not target.Parent or Device.IsConsole then return end
-
-	local count = target:GetAttribute("__rpl")
-	if not count then
-		target:SetAttribute("__rplPrev", target.ClipsDescendants)
-	end
-	target.ClipsDescendants = true
-	count = (count or 0) + 1
-	target:SetAttribute("__rpl", count)
-
-	local mouse = inputPos or UIS:GetMouseLocation()
-	local s = GetScale()
-	local relX = (mouse.X - target.AbsolutePosition.X) / s
-	local relY = (mouse.Y - target.AbsolutePosition.Y) / s
-
-	local rpl
-	for _, r in ipairs(RipplePool) do
-		if not r.Visible and not r.Parent then
-			rpl = r
-			break
-		end
-	end
-	if not rpl then rpl = newRipple() end
-	if not pcall(function() rpl.Parent = target end) then
-		RemoveValue(RipplePool, rpl)
-		rpl = newRipple()
-		rpl.Parent = target
+	local function newRipple()
+		local r = Frm({
+			BackgroundColor3 = WHITE,
+			Visible = false,
+			AnchorPoint = V2(0.5, 0.5),
+			ZIndex = 50,
+			Children = { Corner(PILL) },
+		})
+		Once(r.Destroying, function()
+			RemoveValue(pool, r)
+		end)
+		table.insert(pool, r)
+		return r
 	end
 
-	rpl.Position = UO(relX, relY)
-	rpl.Size = UO(0, 0)
-	rpl.BackgroundColor3 = CurrentTheme.Ripple
-	rpl.BackgroundTransparency = 0.68
-	rpl.Visible = true
+	function ApplyRipple(target, inputPos)
+		if not Setting.Effects then return end
+		if not target or not target.Parent or Device.IsConsole then return end
 
-	local size = math.max(target.AbsoluteSize.X, target.AbsoluteSize.Y) * 1.2
-	local t = Tween(rpl, "Ripple", {
-		Size = UO(size / s, size / s),
-		BackgroundTransparency = 1,
-	})
-	Once(t.Completed, function()
-		if rpl.Visible then
-			rpl.Visible = false
-			rpl.Parent = nil
+		local count = target:GetAttribute("__rpl")
+		if not count then
+			target:SetAttribute("__rplPrev", target.ClipsDescendants)
 		end
-		local c = (target:GetAttribute("__rpl") or 1) - 1
-		if c > 0 then
-			target:SetAttribute("__rpl", c)
-		else
-			target:SetAttribute("__rpl", nil)
-			target.ClipsDescendants = target:GetAttribute("__rplPrev") == true
-			target:SetAttribute("__rplPrev", nil)
+		target.ClipsDescendants = true
+		count = (count or 0) + 1
+		target:SetAttribute("__rpl", count)
+
+		local mouse = inputPos or UIS:GetMouseLocation()
+		local s = GetScale()
+		local relX = (mouse.X - target.AbsolutePosition.X) / s
+		local relY = (mouse.Y - target.AbsolutePosition.Y) / s
+
+		local rpl
+		for _, r in ipairs(pool) do
+			if not r.Visible and not r.Parent then
+				rpl = r
+				break
+			end
 		end
+		if not rpl then rpl = newRipple() end
+		if not pcall(function() rpl.Parent = target end) then
+			RemoveValue(pool, rpl)
+			rpl = newRipple()
+			rpl.Parent = target
+		end
+
+		rpl.Position = UO(relX, relY)
+		rpl.Size = UO(0, 0)
+		rpl.BackgroundColor3 = CurrentTheme.Ripple
+		rpl.BackgroundTransparency = 0.68
+		rpl.Visible = true
+
+		local size = math.max(target.AbsoluteSize.X, target.AbsoluteSize.Y) * 1.2
+		local t = Tween(rpl, "Ripple", {
+			Size = UO(size / s, size / s),
+			BackgroundTransparency = 1,
+		})
+		Once(t.Completed, function()
+			if rpl.Visible then
+				rpl.Visible = false
+				rpl.Parent = nil
+			end
+			local c = (target:GetAttribute("__rpl") or 1) - 1
+			if c > 0 then
+				target:SetAttribute("__rpl", c)
+			else
+				target:SetAttribute("__rpl", nil)
+				target.ClipsDescendants = target:GetAttribute("__rplPrev") == true
+				target:SetAttribute("__rplPrev", nil)
+			end
+		end)
+	end
+
+	LibMaid:Give(function()
+		for _, r in ipairs(pool) do pcall(r.Destroy, r) end
+		table.clear(pool)
 	end)
 end
 
@@ -1684,292 +1699,294 @@ local function AddTooltip(obj, ref)
 	obj.Destroying:Connect(Tooltip.Hide)
 end
 
-local MAX_ACTIVE = Device.IsTouch and 3 or 5
-local POOL_CAP = MAX_ACTIVE + 3
-local TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" }
-local queue = {}
-local active = 0
-local pool = {}
+do
+	local MAX_ACTIVE = Device.IsTouch and 3 or 5
+	local POOL_CAP = MAX_ACTIVE + 3
+	local TypeColors = { info = "Accent", success = "Success", warning = "Warning", error = "Error" }
+	local queue = {}
+	local active = 0
+	local pool = {}
 
-local container = Frm({
-	BackgroundTransparency = 1,
-	AnchorPoint = V2(1, 1),
-	Position = UN(1, -14, 1, -14),
-	Size = UN(0, 320, 1, -28),
-	Parent = LayerNotify,
-	Children = { List(8, { VerticalAlignment = EVA.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) },
-})
-
-local process
-
-function U.ClearActions(actionsFrame)
-	for _, b in ipairs(actionsFrame:GetChildren()) do
-		if b:IsA("TextButton") then b:Destroy() end
-	end
-end
-
-local function newCard()
-	local card = Frm({
-		BackgroundColor3 = "Surface",
+	local container = Frm({
 		BackgroundTransparency = 1,
-		Size = UN(1, 0, 0, 0),
-		Visible = false,
-		Parent = container,
-		Children = { Corner(10) },
+		AnchorPoint = V2(1, 1),
+		Position = UN(1, -14, 1, -14),
+		Size = UN(0, 320, 1, -28),
+		Parent = LayerNotify,
+		Children = { List(8, { VerticalAlignment = EVA.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) },
 	})
-	local stroke = StrokeBind(1, "Stroke", 0.5, card)
-	local dot = Frm({
-		Size = UO(7, 7),
-		Position = UO(12, 11),
-		BackgroundColor3 = "Accent",
-		ZIndex = 2,
-		Parent = card,
-		Children = { Corner(PILL) },
-	})
-	local title = U.Txt(card, {
-		Pos = UO(26, 8),
-		Size = UN(1, -38, 0, 16),
-		Font = EF.GothamBold,
-		Ts = 13,
-		Align = ETA.Left,
-		Trunc = true,
-		Z = 2,
-	})
-	local body = U.Txt(card, {
-		Pos = UO(12, 26),
-		Size = UN(1, -24, 0, 0),
-		Ts = 12,
-		Color = "SubText",
-		Wrap = true,
-		Align = ETA.Left,
-		Val = ETY.Top,
-		Z = 2,
-	})
-	local actions = Frm({
-		BackgroundTransparency = 1,
-		Position = UN(0, 12, 1, -32),
-		Size = UN(1, -24, 0, 26),
-		ZIndex = 2,
-		Parent = card,
-		Children = { U.HL(6, Enum.HorizontalAlignment.Right) },
-	})
-	local progress = Frm({
-		AnchorPoint = V2(0, 1),
-		Position = UN(0, 12, 1, -5),
-		Size = UN(1, -24, 0, 2),
-		BackgroundColor3 = "Accent",
-		ZIndex = 1,
-		Parent = card,
-		Children = { Corner(PILL) },
-	})
-	local hit = U.Overlay(card, 3)
-	local meta = {
-		Card = card, Stroke = stroke, Dot = dot, Title = title,
-		Body = body, Actions = actions, Progress = progress, Hit = hit, InUse = false,
-		CardScale = UISC(card), DotScale = UISC(dot), ThemeKey = "Accent",
-	}
-	table.insert(pool, meta)
-	return meta
-end
 
-local function getFreeCard()
-	for _, m in ipairs(pool) do
-		if not m.InUse and not m.Card.Visible then return m end
-	end
-	if #pool < POOL_CAP then return newCard() end
-	return nil
-end
+	local process
 
-local function paintCard(m)
-	local c = CurrentTheme[m.ThemeKey or "Accent"]
-	m.Dot.BackgroundColor3 = c
-	m.Progress.BackgroundColor3 = c
-	m.Card.BackgroundColor3 = CurrentTheme.Surface
-	m.Stroke.Color = CurrentTheme.Stroke
-	m.Title.TextColor3 = CurrentTheme.Text
-	m.Body.TextColor3 = CurrentTheme.SubText
-end
-
-local function dismiss(meta)
-	if not meta.InUse then return end
-	meta.InUse = false
-	active = math.max(0, active - 1)
-	if meta.DelayThread then
-		pcall(task.cancel, meta.DelayThread)
-		meta.DelayThread = nil
-	end
-	if meta.ProgressTween then
-		pcall(function() meta.ProgressTween:Cancel() end)
-		meta.ProgressTween = nil
-	end
-	if meta.Maid then
-		meta.Maid:Destroy()
-		meta.Maid = nil
-	end
-
-	Tween(meta.Card, "Fast", { BackgroundTransparency = 1 })
-	Tween(meta.Stroke, "Fast", { Transparency = 1 })
-	Tween(meta.Title, "Fast", { TextTransparency = 1 })
-	Tween(meta.Body, "Fast", { TextTransparency = 1 })
-	Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
-	U.ClearActions(meta.Actions)
-	if meta.CardScale then
-		Tween(meta.CardScale, "Vanish", { Scale = 0.88 })
-	end
-	Tween(meta.Card, "Snappy", { Size = UN(1, 0, 0, 0) }, function()
-		if not meta.InUse then meta.Card.Visible = false end
-		process()
-	end)
-	process()
-end
-
-process = function()
-	while active < MAX_ACTIVE and #queue > 0 do
-		local item = table.remove(queue, 1)
-		local meta = getFreeCard()
-		if not meta then
-			table.insert(queue, 1, item)
-			break
+	function U.ClearActions(actionsFrame)
+		for _, b in ipairs(actionsFrame:GetChildren()) do
+			if b:IsA("TextButton") then b:Destroy() end
 		end
-		active += 1
-		meta.InUse = true
+	end
 
-		meta.ThemeKey = TypeColors[item.Type] or "Accent"
-		meta.Card.Visible = true
-		paintCard(meta)
-		meta.Title.Text = item.Title
-		meta.Body.Text = item.Text
+	local function newCard()
+		local card = Frm({
+			BackgroundColor3 = "Surface",
+			BackgroundTransparency = 1,
+			Size = UN(1, 0, 0, 0),
+			Visible = false,
+			Parent = container,
+			Children = { Corner(10) },
+		})
+		local stroke = StrokeBind(1, "Stroke", 0.5, card)
+		local dot = Frm({
+			Size = UO(7, 7),
+			Position = UO(12, 11),
+			BackgroundColor3 = "Accent",
+			ZIndex = 2,
+			Parent = card,
+			Children = { Corner(PILL) },
+		})
+		local title = U.Txt(card, {
+			Pos = UO(26, 8),
+			Size = UN(1, -38, 0, 16),
+			Font = EF.GothamBold,
+			Ts = 13,
+			Align = ETA.Left,
+			Trunc = true,
+			Z = 2,
+		})
+		local body = U.Txt(card, {
+			Pos = UO(12, 26),
+			Size = UN(1, -24, 0, 0),
+			Ts = 12,
+			Color = "SubText",
+			Wrap = true,
+			Align = ETA.Left,
+			Val = ETY.Top,
+			Z = 2,
+		})
+		local actions = Frm({
+			BackgroundTransparency = 1,
+			Position = UN(0, 12, 1, -32),
+			Size = UN(1, -24, 0, 26),
+			ZIndex = 2,
+			Parent = card,
+			Children = { U.HL(6, Enum.HorizontalAlignment.Right) },
+		})
+		local progress = Frm({
+			AnchorPoint = V2(0, 1),
+			Position = UN(0, 12, 1, -5),
+			Size = UN(1, -24, 0, 2),
+			BackgroundColor3 = "Accent",
+			ZIndex = 1,
+			Parent = card,
+			Children = { Corner(PILL) },
+		})
+		local hit = U.Overlay(card, 3)
+		local meta = {
+			Card = card, Stroke = stroke, Dot = dot, Title = title,
+			Body = body, Actions = actions, Progress = progress, Hit = hit, InUse = false,
+			CardScale = UISC(card), DotScale = UISC(dot), ThemeKey = "Accent",
+		}
+		table.insert(pool, meta)
+		return meta
+	end
 
-		local textH = 0
-		if item.Text ~= "" then
-			local b = TextService:GetTextSize(item.Text, TS(12), EF.Gotham, V2(296, 400))
-			textH = math.min(b.Y, 120)
-			meta.Body.Size = UN(1, -24, 0, textH)
-			meta.Body.Visible = true
-		else
-			meta.Body.Visible = false
+	local function getFreeCard()
+		for _, m in ipairs(pool) do
+			if not m.InUse and not m.Card.Visible then return m end
 		end
+		if #pool < POOL_CAP then return newCard() end
+		return nil
+	end
 
-		local actCount = 0
-		U.ClearActions(meta.Actions)
-		if type(item.Actions) == "table" then
-			local cardMaid = Maid.new()
-			meta.Maid = cardMaid
-			for i = 1, math.min(#item.Actions, 3) do
-				local a = item.Actions[i]
-				local b = U.MkBtn(meta.Actions, {
-					Size = UO(64, 24),
-					Text = tostring(a.Text or "OK"),
-					Ts = 11,
-					Order = i,
-					Z = 3,
-				})
-				actCount += 1
-				cardMaid:Give(b.MouseButton1Click:Connect(function()
-					if not meta.InUse then return end
-					dismiss(meta)
-					if type(a.Callback) == "function" then
-						SafeCall(a.Callback)
-					end
-				end))
-			end
-		end
+	local function paintCard(m)
+		local c = CurrentTheme[m.ThemeKey or "Accent"]
+		m.Dot.BackgroundColor3 = c
+		m.Progress.BackgroundColor3 = c
+		m.Card.BackgroundColor3 = CurrentTheme.Surface
+		m.Stroke.Color = CurrentTheme.Stroke
+		m.Title.TextColor3 = CurrentTheme.Text
+		m.Body.TextColor3 = CurrentTheme.SubText
+	end
 
-		local cardH = 38 + textH + (actCount > 0 and 30 or 0)
-		meta.Card.BackgroundTransparency = 1
-		meta.Stroke.Transparency = 1
-		meta.Title.TextTransparency = 1
-		meta.Body.TextTransparency = 1
-		meta.Progress.BackgroundTransparency = 1
-		meta.Progress.Size = UN(1, -24, 0, 2)
-		meta.Card.Size = UN(1, 0, 0, 0)
-		if meta.CardScale then meta.CardScale.Scale = 0.9 end
-		if meta.DotScale then meta.DotScale.Scale = 0 end
-		if not meta.Maid then meta.Maid = Maid.new() end
-
-		Tween(meta.Card, "Snappy", { Size = UN(1, 0, 0, cardH) })
-		Tween(meta.Card, "Snappy", { BackgroundTransparency = 0.04 })
-		Tween(meta.Stroke, "Snappy", { Transparency = 0.5 })
-		Tween(meta.Title, "Snappy", { TextTransparency = 0 })
-		if textH > 0 then
-			Tween(meta.Body, "Snappy", { TextTransparency = 0 })
-		end
-		Tween(meta.Progress, "Snappy", { BackgroundTransparency = 0 })
-		if meta.CardScale then Tween(meta.CardScale, "PopSoft", { Scale = 1 }) end
-		if meta.DotScale then Tween(meta.DotScale, "Pop", { Scale = 1 }) end
-
-		local duration = math.max(0.5, tonumber(item.Duration) or 4)
-		local remaining = duration
-		local startedAt = os.clock()
-		meta.DelayThread = task.delay(duration, function()
+	local function dismiss(meta)
+		if not meta.InUse then return end
+		meta.InUse = false
+		active = math.max(0, active - 1)
+		if meta.DelayThread then
+			pcall(task.cancel, meta.DelayThread)
 			meta.DelayThread = nil
-			dismiss(meta)
-		end)
-		meta.ProgressTween = Tween(meta.Progress, TweenInfo.new(duration, E.Linear), { Size = UN(0, 0, 0, 2) })
+		end
+		if meta.ProgressTween then
+			pcall(function() meta.ProgressTween:Cancel() end)
+			meta.ProgressTween = nil
+		end
+		if meta.Maid then
+			meta.Maid:Destroy()
+			meta.Maid = nil
+		end
 
-		meta.Maid:Give(meta.Hit.MouseEnter:Connect(function()
-			if not meta.InUse then return end
-			if meta.ProgressTween then
-				pcall(meta.ProgressTween.Pause, meta.ProgressTween)
+		Tween(meta.Card, "Fast", { BackgroundTransparency = 1 })
+		Tween(meta.Stroke, "Fast", { Transparency = 1 })
+		Tween(meta.Title, "Fast", { TextTransparency = 1 })
+		Tween(meta.Body, "Fast", { TextTransparency = 1 })
+		Tween(meta.Progress, "Fast", { BackgroundTransparency = 1 })
+		U.ClearActions(meta.Actions)
+		if meta.CardScale then
+			Tween(meta.CardScale, "Vanish", { Scale = 0.88 })
+		end
+		Tween(meta.Card, "Snappy", { Size = UN(1, 0, 0, 0) }, function()
+			if not meta.InUse then meta.Card.Visible = false end
+			process()
+		end)
+		process()
+	end
+
+	process = function()
+		while active < MAX_ACTIVE and #queue > 0 do
+			local item = table.remove(queue, 1)
+			local meta = getFreeCard()
+			if not meta then
+				table.insert(queue, 1, item)
+				break
 			end
-			if meta.DelayThread then
-				pcall(task.cancel, meta.DelayThread)
-				remaining = math.max(0.05, remaining - (os.clock() - startedAt))
-				meta.DelayThread = nil
+			active += 1
+			meta.InUse = true
+
+			meta.ThemeKey = TypeColors[item.Type] or "Accent"
+			meta.Card.Visible = true
+			paintCard(meta)
+			meta.Title.Text = item.Title
+			meta.Body.Text = item.Text
+
+			local textH = 0
+			if item.Text ~= "" then
+				local b = TextService:GetTextSize(item.Text, TS(12), EF.Gotham, V2(296, 400))
+				textH = math.min(b.Y, 120)
+				meta.Body.Size = UN(1, -24, 0, textH)
+				meta.Body.Visible = true
+			else
+				meta.Body.Visible = false
 			end
-		end))
-		meta.Maid:Give(meta.Hit.MouseLeave:Connect(function()
-			if not meta.InUse then return end
-			startedAt = os.clock()
-			if meta.ProgressTween then
-				pcall(meta.ProgressTween.Cancel, meta.ProgressTween)
-				meta.ProgressTween = Tween(meta.Progress,
-					TweenInfo.new(math.max(0.05, remaining), E.Linear),
-					{ Size = UN(0, 0, 0, 2) })
+
+			local actCount = 0
+			U.ClearActions(meta.Actions)
+			if type(item.Actions) == "table" then
+				local cardMaid = Maid.new()
+				meta.Maid = cardMaid
+				for i = 1, math.min(#item.Actions, 3) do
+					local a = item.Actions[i]
+					local b = U.MkBtn(meta.Actions, {
+						Size = UO(64, 24),
+						Text = tostring(a.Text or "OK"),
+						Ts = 11,
+						Order = i,
+						Z = 3,
+					})
+					actCount += 1
+					cardMaid:Give(b.MouseButton1Click:Connect(function()
+						if not meta.InUse then return end
+						dismiss(meta)
+						if type(a.Callback) == "function" then
+							SafeCall(a.Callback)
+						end
+					end))
+				end
 			end
-			meta.DelayThread = task.delay(remaining, function()
+
+			local cardH = 38 + textH + (actCount > 0 and 30 or 0)
+			meta.Card.BackgroundTransparency = 1
+			meta.Stroke.Transparency = 1
+			meta.Title.TextTransparency = 1
+			meta.Body.TextTransparency = 1
+			meta.Progress.BackgroundTransparency = 1
+			meta.Progress.Size = UN(1, -24, 0, 2)
+			meta.Card.Size = UN(1, 0, 0, 0)
+			if meta.CardScale then meta.CardScale.Scale = 0.9 end
+			if meta.DotScale then meta.DotScale.Scale = 0 end
+			if not meta.Maid then meta.Maid = Maid.new() end
+
+			Tween(meta.Card, "Snappy", { Size = UN(1, 0, 0, cardH) })
+			Tween(meta.Card, "Snappy", { BackgroundTransparency = 0.04 })
+			Tween(meta.Stroke, "Snappy", { Transparency = 0.5 })
+			Tween(meta.Title, "Snappy", { TextTransparency = 0 })
+			if textH > 0 then
+				Tween(meta.Body, "Snappy", { TextTransparency = 0 })
+			end
+			Tween(meta.Progress, "Snappy", { BackgroundTransparency = 0 })
+			if meta.CardScale then Tween(meta.CardScale, "PopSoft", { Scale = 1 }) end
+			if meta.DotScale then Tween(meta.DotScale, "Pop", { Scale = 1 }) end
+
+			local duration = math.max(0.5, tonumber(item.Duration) or 4)
+			local remaining = duration
+			local startedAt = os.clock()
+			meta.DelayThread = task.delay(duration, function()
 				meta.DelayThread = nil
 				dismiss(meta)
 			end)
-		end))
-		meta.Maid:Give(meta.Hit.MouseButton1Click:Connect(function()
-			dismiss(meta)
-		end))
-	end
-end
+			meta.ProgressTween = Tween(meta.Progress, TweenInfo.new(duration, E.Linear), { Size = UN(0, 0, 0, 2) })
 
-LibMaid:Give(Kailex.ThemeChanged:Connect(function()
-	for _, m in ipairs(pool) do
-		if m.InUse then
-			paintCard(m)
+			meta.Maid:Give(meta.Hit.MouseEnter:Connect(function()
+				if not meta.InUse then return end
+				if meta.ProgressTween then
+					pcall(meta.ProgressTween.Pause, meta.ProgressTween)
+				end
+				if meta.DelayThread then
+					pcall(task.cancel, meta.DelayThread)
+					remaining = math.max(0.05, remaining - (os.clock() - startedAt))
+					meta.DelayThread = nil
+				end
+			end))
+			meta.Maid:Give(meta.Hit.MouseLeave:Connect(function()
+				if not meta.InUse then return end
+				startedAt = os.clock()
+				if meta.ProgressTween then
+					pcall(meta.ProgressTween.Cancel, meta.ProgressTween)
+					meta.ProgressTween = Tween(meta.Progress,
+						TweenInfo.new(math.max(0.05, remaining), E.Linear),
+						{ Size = UN(0, 0, 0, 2) })
+				end
+				meta.DelayThread = task.delay(remaining, function()
+					meta.DelayThread = nil
+					dismiss(meta)
+				end)
+			end))
+			meta.Maid:Give(meta.Hit.MouseButton1Click:Connect(function()
+				dismiss(meta)
+			end))
 		end
 	end
-end))
 
-function Kailex:Notify(data)
-	if type(data) == "string" then data = { Text = data } end
-	data = data or {}
-	local t = string.lower(tostring(data.Type or "info"))
-	if not TypeColors[t] then t = "info" end
-
-	local actions
-	if type(data.Actions) == "table" then
-		actions = {}
-		for _, a in ipairs(data.Actions) do
-			if type(a) == "table" and a.Text then
-				actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
+	LibMaid:Give(Kailex.ThemeChanged:Connect(function()
+		for _, m in ipairs(pool) do
+			if m.InUse then
+				paintCard(m)
 			end
 		end
-	end
+	end))
 
-	table.insert(queue, {
-		Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
-		Text = tostring(data.Text or data.Description or ""),
-		Duration = data.Duration,
-		Type = t,
-		Actions = actions,
-	})
-	process()
+	function Kailex:Notify(data)
+		if type(data) == "string" then data = { Text = data } end
+		data = data or {}
+		local t = string.lower(tostring(data.Type or "info"))
+		if not TypeColors[t] then t = "info" end
+
+		local actions
+		if type(data.Actions) == "table" then
+			actions = {}
+			for _, a in ipairs(data.Actions) do
+				if type(a) == "table" and a.Text then
+					actions[#actions + 1] = { Text = a.Text, Callback = a.Callback }
+				end
+			end
+		end
+
+		table.insert(queue, {
+			Title = data.Title or (t == "info" and "Notice" or (t:sub(1, 1):upper() .. t:sub(2))),
+			Text = tostring(data.Text or data.Description or ""),
+			Duration = data.Duration,
+			Type = t,
+			Actions = actions,
+		})
+		process()
+	end
 end
 
 local function RunCallback(fn, ctxName, ...)
@@ -1978,7 +1995,7 @@ local function RunCallback(fn, ctxName, ...)
 	task.spawn(function()
 		local ok, err = pcall(fn, table.unpack(args, 1, args.n))
 		if not ok then
-			ReportError("Callback error" .. (ctxName and (" - " .. ctxName) or ""), err)
+			ReportError("Callback error" .. (ctxName and (" - " + ctxName) or ""), err)
 		end
 	end)
 end
@@ -1998,123 +2015,125 @@ local function CopyToClipboard(text)
 	end
 end
 
-local ModalActive = false
+do
+	local modalActive = false
 
-function Kailex:Confirm(data, onAccept)
-	if ModalActive then return nil end
-	if type(data) == "string" then data = { Text = data } end
-	data = data or {}
-	if type(onAccept) == "function" then
-		data.OnAccept = onAccept
-	end
-
-	for _, w in ipairs(Kailex.Windows) do
-		if not w._destroyed and w._closeDropdowns then
-			w:_closeDropdowns()
+	function Kailex:Confirm(data, onAccept)
+		if modalActive then return nil end
+		if type(data) == "string" then data = { Text = data } end
+		data = data or {}
+		if type(onAccept) == "function" then
+			data.OnAccept = onAccept
 		end
-	end
 
-	ModalActive = true
-	local maid = Maid.new()
-	maid:Give(function() ModalActive = false end)
+		for _, w in ipairs(Kailex.Windows) do
+			if not w._destroyed and w._closeDropdowns then
+				w:_closeDropdowns()
+			end
+		end
 
-	local dimmer = U.Overlay(LayerOverlay, 300, nil, CN(0, 0, 0))
-	maid:Give(dimmer)
-	maid:Link(dimmer)
+		modalActive = true
+		local maid = Maid.new()
+		maid:Give(function() modalActive = false end)
 
-	local card = U.ModalCard(LayerOverlay, 301, 360, 200, 12, 0.4)
-	Pad(18, 18, 16, 16, card)
-	maid:Give(card)
+		local dimmer = U.Overlay(LayerOverlay, 300, nil, CN(0, 0, 0))
+		maid:Give(dimmer)
+		maid:Link(dimmer)
 
-	U.Txt(card, {
-		Size = UN(1, 0, 0, 18),
-		Font = EF.GothamBold,
-		Ts = 15,
-		Align = ETA.Left,
-		Trunc = true,
-		Text = data.Title or "Are you sure?",
-	})
+		local card = U.ModalCard(LayerOverlay, 301, 360, 200, 12, 0.4)
+		Pad(18, 18, 16, 16, card)
+		maid:Give(card)
 
-	local bodyText = tostring(data.Text or data.Description or "")
-	local b = TextService:GetTextSize(bodyText, TS(13), EF.Gotham, V2(324, 300))
-	local bodyH = math.min(b.Y, 140)
-	U.Txt(card, {
-		Pos = UO(0, 24),
-		Size = UN(1, 0, 0, bodyH),
-		Ts = 13,
-		Color = "SubText",
-		Wrap = true,
-		Align = ETA.Left,
-		Val = ETY.Top,
-		Text = bodyText,
-	})
+		U.Txt(card, {
+			Size = UN(1, 0, 0, 18),
+			Font = EF.GothamBold,
+			Ts = 15,
+			Align = ETA.Left,
+			Trunc = true,
+			Text = data.Title or "Are you sure?",
+		})
 
-	local btnRow = Frm({
-		BackgroundTransparency = 1,
-		AnchorPoint = V2(0, 1),
-		Position = UN(0, 0, 1, 0),
-		Size = UN(1, 0, 0, 34),
-		Parent = card,
-	})
+		local bodyText = tostring(data.Text or data.Description or "")
+		local b = TextService:GetTextSize(bodyText, TS(13), EF.Gotham, V2(324, 300))
+		local bodyH = math.min(b.Y, 140)
+		U.Txt(card, {
+			Pos = UO(0, 24),
+			Size = UN(1, 0, 0, bodyH),
+			Ts = 13,
+			Color = "SubText",
+			Wrap = true,
+			Align = ETA.Left,
+			Val = ETY.Top,
+			Text = bodyText,
+		})
 
-	local decline = U.MkBtn(btnRow, {
-		Pos = UN(0, 0, 0, 0),
-		Size = UN(0.48, -4, 1, 0),
-		Text = data.DeclineText or data.CancelText or "Cancel",
-		Ts = 13,
-	})
-	local accept = U.MkBtn(btnRow, {
-		Pos = UN(0.52, 0, 0, 0),
-		Size = UN(0.48, -4, 1, 0),
-		Text = data.AcceptText or data.ConfirmText or "Confirm",
-		Ts = 13,
-		Accent = true,
-	})
+		local btnRow = Frm({
+			BackgroundTransparency = 1,
+			AnchorPoint = V2(0, 1),
+			Position = UN(0, 0, 1, 0),
+			Size = UN(1, 0, 0, 34),
+			Parent = card,
+		})
 
-	card.Size = UO(360, 16 + 18 + 6 + bodyH + 14 + 34 + 16)
-	local scale = UISC(card, 0.88)
+		local decline = U.MkBtn(btnRow, {
+			Pos = UN(0, 0, 0, 0),
+			Size = UN(0.48, -4, 1, 0),
+			Text = data.DeclineText or data.CancelText or "Cancel",
+			Ts = 13,
+		})
+		local accept = U.MkBtn(btnRow, {
+			Pos = UN(0.52, 0, 0, 0),
+			Size = UN(0.48, -4, 1, 0),
+			Text = data.AcceptText or data.ConfirmText or "Confirm",
+			Ts = 13,
+			Accent = true,
+		})
 
-	local closed = false
-	local modalEntry
+		card.Size = UO(360, 16 + 18 + 6 + bodyH + 14 + 34 + 16)
+		local scale = UISC(card, 0.88)
 
-	local function close(accepted)
-		if closed then return end
-		closed = true
-		ModalManager.Remove(modalEntry)
-		Tween(dimmer, "Fast", { BackgroundTransparency = 1 })
-		Tween(scale, "Vanish", { Scale = 0.92 })
-		Tween(card, "Fast", { GroupTransparency = 1 })
-		if accepted and data.OnAccept then SafeCall(data.OnAccept, true) end
-		if not accepted and data.OnDecline then SafeCall(data.OnDecline, false) end
-		task.delay(0.2, function() maid:Destroy() end)
-	end
+		local closed = false
+		local modalEntry
 
-	modalEntry = ModalManager.Push(nil, function() close(false) end)
+		local function close(accepted)
+			if closed then return end
+			closed = true
+			ModalManager.Remove(modalEntry)
+			Tween(dimmer, "Fast", { BackgroundTransparency = 1 })
+			Tween(scale, "Vanish", { Scale = 0.92 })
+			Tween(card, "Fast", { GroupTransparency = 1 })
+			if accepted and data.OnAccept then SafeCall(data.OnAccept, true) end
+			if not accepted and data.OnDecline then SafeCall(data.OnDecline, false) end
+			task.delay(0.2, function() maid:Destroy() end)
+		end
 
-	Click(maid, accept, function()
-		close(true)
-		Tap(accept)
-	end)
-	Click(maid, decline, function()
-		close(false)
-		Tap(decline)
-	end)
-	Click(maid, dimmer, function() close(false) end)
+		modalEntry = ModalManager.Push(nil, function() close(false) end)
 
-	local hook = AddInputHook(function() return not closed end, function(input, gp)
-		if gp then return end
-		if input.KeyCode == EKC.Return or input.KeyCode == EKC.KeypadEnter then
+		Click(maid, accept, function()
 			close(true)
-		elseif input.KeyCode == EKC.Escape then
+			Tap(accept)
+		end)
+		Click(maid, decline, function()
 			close(false)
-		end
-	end)
-	maid:Give(function() RemoveInputHook(hook) end)
+			Tap(decline)
+		end)
+		Click(maid, dimmer, function() close(false) end)
 
-	Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
-	Tween(card, "Snappy", { GroupTransparency = 0 })
-	Tween(scale, "Pop", { Scale = 1 })
-	return card
+		local hook = AddInputHook(function() return not closed end, function(input, gp)
+			if gp then return end
+			if input.KeyCode == EKC.Return or input.KeyCode == EKC.KeypadEnter then
+				close(true)
+			elseif input.KeyCode == EKC.Escape then
+				close(false)
+			end
+		end)
+		maid:Give(function() RemoveInputHook(hook) end)
+
+		Tween(dimmer, "Normal", { BackgroundTransparency = 0.5 })
+		Tween(card, "Snappy", { GroupTransparency = 0 })
+		Tween(scale, "Pop", { Scale = 1 })
+		return card
+	end
 end
 
 local QuickWidgets = { Active = {} }
@@ -2219,99 +2238,102 @@ table.insert(ViewportHooks, function()
 end)
 
 local ContextMenu = {}
-local ctxFrame, ctxCatcher
-local ctxEntry = nil
-local ctxToken = 0
 
-local function buildCtx()
-	ctxFrame = Frm({
-		BackgroundColor3 = "SurfaceLight",
-		Visible = false,
-		ZIndex = 320,
-		Parent = LayerOverlay,
-		Children = {
-			Corner(10), StrokeBind(1, "Stroke", 0.25), List(2), Pad(6, 6, 6, 6),
-		},
-	})
-	ctxCatcher = U.Overlay(LayerOverlay, 310, false)
-	ctxCatcher.MouseButton1Click:Connect(ContextMenu.Hide)
-end
+do
+	local frame, catcher
+	local entry = nil
+	local token = 0
 
-function ContextMenu.Show(items, x, y)
-	if not items or #items == 0 then return end
-	if not ctxFrame then buildCtx() end
-	ctxToken += 1
+	local function build()
+		frame = Frm({
+			BackgroundColor3 = "SurfaceLight",
+			Visible = false,
+			ZIndex = 320,
+			Parent = LayerOverlay,
+			Children = {
+				Corner(10), StrokeBind(1, "Stroke", 0.25), List(2), Pad(6, 6, 6, 6),
+			},
+		})
+		catcher = U.Overlay(LayerOverlay, 310, false)
+		catcher.MouseButton1Click:Connect(ContextMenu.Hide)
+	end
 
-	for _, ch in ipairs(ctxFrame:GetChildren()) do
-		if ch:IsA("TextButton") or (ch:IsA("Frame") and ch.Name == "__sep") then
-			ch:Destroy()
+	function ContextMenu.Show(items, x, y)
+		if not items or #items == 0 then return end
+		if not frame then build() end
+		token += 1
+
+		for _, ch in ipairs(frame:GetChildren()) do
+			if ch:IsA("TextButton") or (ch:IsA("Frame") and ch.Name == "__sep") then
+				ch:Destroy()
+			end
 		end
-	end
 
-	local width = 140
-	local totalH = 12
-	for i, item in ipairs(items) do
-		if item.Separator then
-			Frm({
-				Name = "__sep",
-				BackgroundColor3 = "Stroke",
-				BackgroundTransparency = 0.4,
-				Size = UN(1, 0, 0, 1),
-				LayoutOrder = i,
-				Parent = ctxFrame,
-			})
-			totalH += 3
-		else
-			local text = tostring(item.Text or "")
-			local b = TextService:GetTextSize(text, TS(12), EF.Gotham, V2(400, 20))
-			if b.X + 26 > width then width = b.X + 26 end
-			local btn = U.MkBtn(ctxFrame, {
-				Size = UN(1, 0, 0, 26),
-				Trans = 1,
-				Text = text,
-				Font = EF.Gotham,
-				Ts = 12,
-				Color = item.Danger and "Error" or "Text",
-				Align = ETA.Left,
-				Order = i,
-				Hover = { BaseTransparency = 1, HoverTransparency = 0.85 },
-			})
-			btn.MouseButton1Click:Connect(function()
-				ContextMenu.Hide()
-				if type(item.Callback) == "function" then
-					task.defer(function() SafeCall(item.Callback) end)
-				end
-			end)
-			totalH += 28
+		local width = 140
+		local totalH = 12
+		for i, item in ipairs(items) do
+			if item.Separator then
+				Frm({
+					Name = "__sep",
+					BackgroundColor3 = "Stroke",
+					BackgroundTransparency = 0.4,
+					Size = UN(1, 0, 0, 1),
+					LayoutOrder = i,
+					Parent = frame,
+				})
+				totalH += 3
+			else
+				local text = tostring(item.Text or "")
+				local b = TextService:GetTextSize(text, TS(12), EF.Gotham, V2(400, 20))
+				if b.X + 26 > width then width = b.X + 26 end
+				local btn = U.MkBtn(frame, {
+					Size = UN(1, 0, 0, 26),
+					Trans = 1,
+					Text = text,
+					Font = EF.Gotham,
+					Ts = 12,
+					Color = item.Danger and "Error" or "Text",
+					Align = ETA.Left,
+					Order = i,
+					Hover = { BaseTransparency = 1, HoverTransparency = 0.85 },
+				})
+				btn.MouseButton1Click:Connect(function()
+					ContextMenu.Hide()
+					if type(item.Callback) == "function" then
+						task.defer(function() SafeCall(item.Callback) end)
+					end
+				end)
+				totalH += 28
+			end
 		end
+
+		frame.Size = UO(width, totalH)
+		local s = GetScale()
+		local px = ClampEdge(x, width * s, Viewport.X, 8) / s
+		local py = ClampEdge(y, totalH * s, Viewport.Y, 8) / s
+		frame.Position = UO(px, py)
+		frame.Visible = true
+		catcher.Visible = true
+
+		ModalManager.Remove(entry)
+		local tk = token
+		entry = ModalManager.Push(nil, function()
+			if token == tk then ContextMenu.Hide() end
+		end)
 	end
 
-	ctxFrame.Size = UO(width, totalH)
-	local s = GetScale()
-	local px = ClampEdge(x, width * s, Viewport.X, 8) / s
-	local py = ClampEdge(y, totalH * s, Viewport.Y, 8) / s
-	ctxFrame.Position = UO(px, py)
-	ctxFrame.Visible = true
-	ctxCatcher.Visible = true
-
-	ModalManager.Remove(ctxEntry)
-	local tk = ctxToken
-	ctxEntry = ModalManager.Push(nil, function()
-		if ctxToken == tk then ContextMenu.Hide() end
-	end)
-end
-
-function ContextMenu.Hide()
-	if ctxFrame and ctxFrame.Visible then
-		ctxToken += 1
-		ctxFrame.Visible = false
-		ctxCatcher.Visible = false
+	function ContextMenu.Hide()
+		if frame and frame.Visible then
+			token += 1
+			frame.Visible = false
+			catcher.Visible = false
+		end
+		ModalManager.Remove(entry)
+		entry = nil
 	end
-	ModalManager.Remove(ctxEntry)
-	ctxEntry = nil
-end
 
-LibMaid:Give(ContextMenu.Hide)
+	LibMaid:Give(ContextMenu.Hide)
+end
 
 local ActiveKeybindListener = nil
 local HotElement = nil
@@ -2531,12 +2553,12 @@ function Element:_initSaved(saveKey, opts, v)
 end
 
 function Element:_emit(v, silent)
-    if silent then return end
-    if self.AttachedToggle then
-        RunCallback(self.Callback, self.Title, v, self.AttachedToggle:Get() == true)
-    else
-        RunCallback(self.Callback, self.Title, v)
-    end
+	if silent then return end
+	if self.AttachedToggle then
+		RunCallback(self.Callback, self.Title, v, self.AttachedToggle:Get() == true)
+	else
+		RunCallback(self.Callback, self.Title, v)
+	end
 end
 
 function Element:SetTitle(text)
@@ -2654,24 +2676,24 @@ function Element:Extra(className, opts, size)
 end
 
 function Element:Toggle(opts)
-    if self._destroyed then return nil end
-    if self.AttachedToggle then return self.AttachedToggle end
-    opts = type(opts) == "table" and opts or {}
-    if opts.Name == nil then opts.Name = self.Title end
-    local tg = self:Extra("Toggle", opts)
-    if not tg then return nil end
-    self.AttachedToggle = tg
-    self.Enabled = tg.Changed
-    function self:IsEnabled() return tg:Get() == true end
-    function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
-    if self.Get then
-        self.Maid:Give(tg.Changed:Connect(function()
-            if not self._destroyed then
-                self:_emit(self:Get())
-            end
-        end))
-    end
-    return tg
+	if self._destroyed then return nil end
+	if self.AttachedToggle then return self.AttachedToggle end
+	opts = type(opts) == "table" and opts or {}
+	if opts.Name == nil then opts.Name = self.Title end
+	local tg = self:Extra("Toggle", opts)
+	if not tg then return nil end
+	self.AttachedToggle = tg
+	self.Enabled = tg.Changed
+	function self:IsEnabled() return tg:Get() == true end
+	function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
+	if self.Get then
+		self.Maid:Give(tg.Changed:Connect(function()
+			if not self._destroyed then
+				self:_emit(self:Get())
+			end
+		end))
+	end
+	return tg
 end
 
 function Element:_contextItems()
@@ -2874,301 +2896,305 @@ function Elements.Divider.new(tab, opts)
 	return INew(Elements.Divider, row, { Name = opts.Text, Width = opts.Width }, tab)
 end
 
-local SCH = TI(0.3, E.Quart, ED.InOut)
-local SCF = TI(0.2, E.Quad, ED.Out)
-local SOH = TI(0.34, E.Back, ED.Out)
-local SOF = TI(0.26, E.Quint, ED.Out)
+local secAnim, secStatic, finAnim
 
-local function sfade(root, list)
-	local function sc(i)
-		if i:IsA("GuiObject") then
-			if i.BackgroundTransparency < 0.995 then
-				list[#list + 1] = { i, "BackgroundTransparency", i.BackgroundTransparency }
+do
+	local SCH = TI(0.3, E.Quart, ED.InOut)
+	local SCF = TI(0.2, E.Quad, ED.Out)
+	local SOH = TI(0.34, E.Back, ED.Out)
+	local SOF = TI(0.26, E.Quint, ED.Out)
+
+	local function sfade(root, list)
+		local function sc(i)
+			if i:IsA("GuiObject") then
+				if i.BackgroundTransparency < 0.995 then
+					list[#list + 1] = { i, "BackgroundTransparency", i.BackgroundTransparency }
+				end
+				local p = (i:IsA("TextLabel") or i:IsA("TextButton") or i:IsA("TextBox")) and "TextTransparency"
+					or ((i:IsA("ImageLabel") or i:IsA("ImageButton")) and "ImageTransparency")
+				if p and i[p] < 0.995 then
+					list[#list + 1] = { i, p, i[p] }
+				end
+			elseif i:IsA("UIStroke") and i.Transparency < 0.995 then
+				list[#list + 1] = { i, "Transparency", i.Transparency }
 			end
-			local p = (i:IsA("TextLabel") or i:IsA("TextButton") or i:IsA("TextBox")) and "TextTransparency"
-				or ((i:IsA("ImageLabel") or i:IsA("ImageButton")) and "ImageTransparency")
-			if p and i[p] < 0.995 then
-				list[#list + 1] = { i, p, i[p] }
-			end
-		elseif i:IsA("UIStroke") and i.Transparency < 0.995 then
-			list[#list + 1] = { i, "Transparency", i.Transparency }
+		end
+		sc(root)
+		for _, d in ipairs(root:GetDescendants()) do
+			sc(d)
 		end
 	end
-	sc(root)
-	for _, d in ipairs(root:GetDescendants()) do
-		sc(d)
-	end
-end
 
-local function gfshow(f)
-	for _, ch in ipairs(f:GetChildren()) do
-		if ch:IsA("GuiObject") and ch:GetAttribute("__el") and ch.Visible then
-			return true
+	local function gfshow(f)
+		for _, ch in ipairs(f:GetChildren()) do
+			if ch:IsA("GuiObject") and ch:GetAttribute("__el") and ch.Visible then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function secvis(sec, el)
+		if sec.Collapsed then return false end
+		local win = sec.Tab and sec.Tab.Window
+		local q = win and win._filterQuery or ""
+		if q ~= "" then
+			local ql = q:lower()
+			if sec.Title:lower():find(ql, 1, true) then return true end
+			return el.SearchText:find(ql, 1, true) ~= nil
+		end
+		return el._manualVisible ~= false
+	end
+
+	function finAnim(a)
+		if not a or a.done then return end
+		a.done = true
+		local sec = a.sec
+		if sec and sec._anim == a then
+			sec._anim = nil
+		end
+		if not sec or sec._destroyed then return end
+		local tab = sec.Tab
+		local win = tab and tab.Window
+		if not win or win._filterQuery == a.q then
+			for _, r in ipairs(a.els) do
+				local el = r[1]
+				if not el._destroyed and el.Row and el.Row.Parent then
+					el.Row.Visible = r[2]
+				end
+			end
+			if tab and not tab._destroyed then
+				pcall(tab._syncGridFrames, tab)
+			end
+		end
+		for _, u in ipairs(a.units) do
+			local o = u.obj
+			if o and o.Parent then
+				pcall(function()
+					o.Size = u.sz
+					o.AutomaticSize = u.au
+					o.ClipsDescendants = u.cl
+				end)
+				for _, f in ipairs(u.fd) do
+					pcall(function() f[1][f[2]] = f[3] end)
+				end
+			end
 		end
 	end
-	return false
-end
 
-local function secvis(sec, el)
-	if sec.Collapsed then return false end
-	local win = sec.Tab and sec.Tab.Window
-	local q = win and win._filterQuery or ""
-	if q ~= "" then
-		local ql = q:lower()
-		if sec.Title:lower():find(ql, 1, true) then return true end
-		return el.SearchText:find(ql, 1, true) ~= nil
-	end
-	return el._manualVisible ~= false
-end
-
-local function finAnim(a)
-	if not a or a.done then return end
-	a.done = true
-	local sec = a.sec
-	if sec and sec._anim == a then
-		sec._anim = nil
-	end
-	if not sec or sec._destroyed then return end
-	local tab = sec.Tab
-	local win = tab and tab.Window
-	if not win or win._filterQuery == a.q then
-		for _, r in ipairs(a.els) do
-			local el = r[1]
+	function secStatic(sec)
+		if sec._anim then
+			finAnim(sec._anim)
+		end
+		for _, el in ipairs(sec.Elements) do
 			if not el._destroyed and el.Row and el.Row.Parent then
-				el.Row.Visible = r[2]
+				el.Row.Visible = secvis(sec, el)
 			end
 		end
+		local tab = sec.Tab
 		if tab and not tab._destroyed then
 			pcall(tab._syncGridFrames, tab)
 		end
 	end
-	for _, u in ipairs(a.units) do
-		local o = u.obj
-		if o and o.Parent then
-			pcall(function()
-				o.Size = u.sz
-				o.AutomaticSize = u.au
-				o.ClipsDescendants = u.cl
-			end)
-			for _, f in ipairs(u.fd) do
-				pcall(function() f[1][f[2]] = f[3] end)
+
+	local function secAnimOK(sec)
+		if Setting.Effects == false or Device.IsConsole then return false end
+		local tab = sec.Tab
+		if not tab or tab._destroyed then return false end
+		local win = tab.Window
+		if not win or win._destroyed or win.Minimized or win._hidden then return false end
+		if tab.Page and not tab.Page.Visible then return false end
+		if win._introT0 and (os.clock() - win._introT0) < 1.25 then return false end
+		return #sec.Elements <= 80
+	end
+
+	function secAnim(sec)
+		if not secAnimOK(sec) then
+			secStatic(sec)
+			return
+		end
+		local tab = sec.Tab
+		if sec._anim then
+			finAnim(sec._anim)
+		end
+
+		local els = {}
+		for _, el in ipairs(sec.Elements) do
+			if not el._destroyed and el.Row and el.Row.Parent then
+				els[#els + 1] = { el, secvis(sec, el) }
 			end
 		end
-	end
-end
 
-local function secStatic(sec)
-	if sec._anim then
-		finAnim(sec._anim)
-	end
-	for _, el in ipairs(sec.Elements) do
-		if not el._destroyed and el.Row and el.Row.Parent then
-			el.Row.Visible = secvis(sec, el)
-		end
-	end
-	local tab = sec.Tab
-	if tab and not tab._destroyed then
-		pcall(tab._syncGridFrames, tab)
-	end
-end
-
-local function secAnimOK(sec)
-	if Setting.Effects == false or Device.IsConsole then return false end
-	local tab = sec.Tab
-	if not tab or tab._destroyed then return false end
-	local win = tab.Window
-	if not win or win._destroyed or win.Minimized or win._hidden then return false end
-	if tab.Page and not tab.Page.Visible then return false end
-	if win._introT0 and (os.clock() - win._introT0) < 1.25 then return false end
-	return #sec.Elements <= 80
-end
-
-local function secAnim(sec)
-	local tab = sec.Tab
-	if not tab or tab._destroyed then
-		secStatic(sec)
-		return
-	end
-	if sec._anim then
-		finAnim(sec._anim)
-	end
-
-	local els = {}
-	for _, el in ipairs(sec.Elements) do
-		if not el._destroyed and el.Row and el.Row.Parent then
-			els[#els + 1] = { el, secvis(sec, el) }
-		end
-	end
-
-	local units, fm = {}, {}
-	for _, r in ipairs(els) do
-		local el, vis = r[1], r[2]
-		local g = el._gridFrame
-		if g and g.Parent then
-			local u = fm[g]
-			if not u then
-				u = { obj = g, isf = true, vis = false, ord = g.LayoutOrder }
-				fm[g] = u
-				units[#units + 1] = u
-			end
-			if vis then
-				u.vis = true
-			end
-		else
-			units[#units + 1] = { obj = el.Row, isf = false, vis = vis, ord = el.Row.LayoutOrder }
-		end
-	end
-
-	local au = {}
-	for _, u in ipairs(units) do
-		local showing = u.isf and gfshow(u.obj) or u.obj.Visible
-		if u.vis ~= showing then
-			local o = u.obj
-			u.sz, u.au = o.Size, o.AutomaticSize
-			local cl = o.ClipsDescendants
-			if o:GetAttribute("__rpl") and o:GetAttribute("__rplPrev") ~= nil then
-				cl = o:GetAttribute("__rplPrev") == true
-			end
-			u.cl = cl
-			u.fd = {}
-			sfade(o, u.fd)
-			au[#au + 1] = u
-		end
-	end
-
-	if #au == 0 then
+		local units, fm = {}, {}
 		for _, r in ipairs(els) do
-			if r[1].Row and r[1].Row.Parent then
-				r[1].Row.Visible = r[2]
+			local el, vis = r[1], r[2]
+			local g = el._gridFrame
+			if g and g.Parent then
+				local u = fm[g]
+				if not u then
+					u = { obj = g, isf = true, vis = false, ord = g.LayoutOrder }
+					fm[g] = u
+					units[#units + 1] = u
+				end
+				if vis then
+					u.vis = true
+				end
+			else
+				units[#units + 1] = { obj = el.Row, isf = false, vis = vis, ord = el.Row.LayoutOrder }
 			end
 		end
-		pcall(tab._syncGridFrames, tab)
-		return
-	end
 
-	table.sort(au, function(x, y) return (x.ord or 0) < (y.ord or 0) end)
-
-	local a = { sec = sec, els = els, units = au, q = (tab.Window and tab.Window._filterQuery) or "" }
-	sec._anim = a
-	local m = tonumber(Setting.MotionScale) or 1
-	local s = GetScale()
-	local n = #au
-
-	local function finale(stag, total, extra, last)
-		task.delay(((n - 1) * stag + total) * m + extra, function() finAnim(a) end)
-		if last then
-			Once(last.Completed, function() finAnim(a) end)
+		local au = {}
+		for _, u in ipairs(units) do
+			local showing = u.isf and gfshow(u.obj) or u.obj.Visible
+			if u.vis ~= showing then
+				local o = u.obj
+				u.sz, u.au = o.Size, o.AutomaticSize
+				local cl = o.ClipsDescendants
+				if o:GetAttribute("__rpl") and o:GetAttribute("__rplPrev") ~= nil then
+					cl = o:GetAttribute("__rplPrev") == true
+				end
+				u.cl = cl
+				u.fd = {}
+				sfade(o, u.fd)
+				au[#au + 1] = u
+			end
 		end
-	end
 
-	if sec.Collapsed then
-		local stag = math.min(0.02, 0.26 / math.max(1, n - 1))
-		local last
-		for i, u in ipairs(au) do
-			local d = (i - 1) * stag
-			local o = u.obj
-			local h = o.Parent and math.max(0, o.AbsoluteSize.Y / s) or 0
-			if h >= 1 then
-				o.AutomaticSize = AS.None
-				o.ClipsDescendants = true
-				o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, h)
-				local tw = Tween(o, SCH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0) }, nil, d)
-				if tw then
-					Once(tw.Completed, function()
-						if not a.done and o.Parent then
-							o.Visible = false
-						end
-					end)
-					last = tw
+		if #au == 0 then
+			for _, r in ipairs(els) do
+				if r[1].Row and r[1].Row.Parent then
+					r[1].Row.Visible = r[2]
 				end
 			end
-			for _, f in ipairs(u.fd) do
-				Tween(f[1], SCF, { [f[2]] = 1 }, nil, d)
-			end
+			pcall(tab._syncGridFrames, tab)
+			return
 		end
-		finale(stag, 0.3, 0.08, last)
-	else
-		local defer = false
-		for _, u in ipairs(au) do
-			if u.au == AS.Y or u.au == AS.XY or u.sz.Y.Scale ~= 0 then
-				u.m = true
-				defer = true
-			end
-		end
-		for _, u in ipairs(au) do
-			for _, f in ipairs(u.fd) do
-				f[1][f[2]] = 1
-			end
-			u.obj.Visible = true
-			if not u.m and u.obj.Parent then
-				local h = math.max(0, u.sz.Y.Offset)
-				if h >= 1 then
-					u.nh = h
-					u.obj.AutomaticSize = AS.None
-					u.obj.ClipsDescendants = true
-					u.obj.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
-				else
-					u.skip = true
-				end
-			end
-		end
-		for _, r in ipairs(els) do
-			if r[2] and r[1].Row and r[1].Row.Parent then
-				r[1].Row.Visible = true
+
+		table.sort(au, function(x, y) return (x.ord or 0) < (y.ord or 0) end)
+
+		local a = { sec = sec, els = els, units = au, q = (tab.Window and tab.Window._filterQuery) or "" }
+		sec._anim = a
+		local m = tonumber(Setting.MotionScale) or 1
+		local s = GetScale()
+		local n = #au
+
+		local function finale(stag, total, extra, last)
+			task.delay(((n - 1) * stag + total) * m + extra, function() finAnim(a) end)
+			if last then
+				Once(last.Completed, function() finAnim(a) end)
 			end
 		end
 
-		local stag = math.min(0.028, 0.26 / math.max(1, n - 1))
-
-		local function begin()
-			if a.done or sec._anim ~= a or sec._destroyed then return end
+		if sec.Collapsed then
+			local stag = math.min(0.02, 0.26 / math.max(1, n - 1))
 			local last
-			for _, u in ipairs(au) do
-				if u.m and not u.skip and u.obj.Parent then
-					local o = u.obj
-					local h = math.max(0, o.AbsoluteSize.Y / s)
-					if h < 1 then
-						h = math.max(0, u.sz.Y.Offset)
+			for i, u in ipairs(au) do
+				local d = (i - 1) * stag
+				local o = u.obj
+				local h = o.Parent and math.max(0, o.AbsoluteSize.Y / s) or 0
+				if h >= 1 then
+					o.AutomaticSize = AS.None
+					o.ClipsDescendants = true
+					o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, h)
+					local tw = Tween(o, SCH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0) }, nil, d)
+					if tw then
+						Once(tw.Completed, function()
+							if not a.done and o.Parent then
+								o.Visible = false
+							end
+						end)
+						last = tw
 					end
+				end
+				for _, f in ipairs(u.fd) do
+					Tween(f[1], SCF, { [f[2]] = 1 }, nil, d)
+				end
+			end
+			finale(stag, 0.3, 0.08, last)
+		else
+			local defer = false
+			for _, u in ipairs(au) do
+				if u.au == AS.Y or u.au == AS.XY or u.sz.Y.Scale ~= 0 then
+					u.m = true
+					defer = true
+				end
+			end
+			for _, u in ipairs(au) do
+				for _, f in ipairs(u.fd) do
+					f[1][f[2]] = 1
+				end
+				u.obj.Visible = true
+				if not u.m and u.obj.Parent then
+					local h = math.max(0, u.sz.Y.Offset)
 					if h >= 1 then
 						u.nh = h
-						o.AutomaticSize = AS.None
-						o.ClipsDescendants = true
-						o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
+						u.obj.AutomaticSize = AS.None
+						u.obj.ClipsDescendants = true
+						u.obj.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
 					else
 						u.skip = true
 					end
 				end
 			end
-			for i, u in ipairs(au) do
-				local d = (i - 1) * stag
-				if not u.skip then
-					last = Tween(u.obj, SOH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, u.nh) }, nil, d)
-				end
-				for _, f in ipairs(u.fd) do
-					Tween(f[1], SOF, { [f[2]] = f[3] }, nil, d + 0.02)
+			for _, r in ipairs(els) do
+				if r[2] and r[1].Row and r[1].Row.Parent then
+					r[1].Row.Visible = true
 				end
 			end
-			finale(stag, 0.34, 0.1, last)
-		end
 
-		if defer then
-			task.spawn(function()
-				for _ = 1, 3 do
-					task.wait()
-					local bad = false
-					for _, u in ipairs(au) do
-						if u.m and u.obj.Parent and u.obj.AbsoluteSize.Y < 1 then
-							bad = true
-							break
+			local stag = math.min(0.028, 0.26 / math.max(1, n - 1))
+
+			local function begin()
+				if a.done or sec._anim ~= a or sec._destroyed then return end
+				local last
+				for _, u in ipairs(au) do
+					if u.m and not u.skip and u.obj.Parent then
+						local o = u.obj
+						local h = math.max(0, o.AbsoluteSize.Y / s)
+						if h < 1 then
+							h = math.max(0, u.sz.Y.Offset)
+						end
+						if h >= 1 then
+							u.nh = h
+							o.AutomaticSize = AS.None
+							o.ClipsDescendants = true
+							o.Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, 0)
+						else
+							u.skip = true
 						end
 					end
-					if not bad then break end
 				end
+				for i, u in ipairs(au) do
+					local d = (i - 1) * stag
+					if not u.skip then
+						last = Tween(u.obj, SOH, { Size = UN(u.sz.X.Scale, u.sz.X.Offset, 0, u.nh) }, nil, d)
+					end
+					for _, f in ipairs(u.fd) do
+						Tween(f[1], SOF, { [f[2]] = f[3] }, nil, d + 0.02)
+					end
+				end
+				finale(stag, 0.34, 0.1, last)
+			end
+
+			if defer then
+				task.spawn(function()
+					for _ = 1, 3 do
+						task.wait()
+						local bad = false
+						for _, u in ipairs(au) do
+							if u.m and u.obj.Parent and u.obj.AbsoluteSize.Y < 1 then
+								bad = true
+								break
+							end
+						end
+						if not bad then break end
+					end
+					begin()
+				end)
+			else
 				begin()
-			end)
-		else
-			begin()
+			end
 		end
 	end
 end
@@ -3247,11 +3273,7 @@ function Elements.Section:SetCollapsed(collapsed)
 			BackgroundTransparency = collapsed and 0.45 or 0,
 		})
 	end
-	if secAnimOK(self) then
-		secAnim(self)
-	else
-		secStatic(self)
-	end
+	secAnim(self)
 end
 
 Elements.Button = MakeElementClass()
@@ -7548,17 +7570,13 @@ function Kailex:Unload()
 	ActiveKeybindListener = nil
 	KeySystemLock = false
 	LibMaid:Destroy()
-	for _, s in ipairs(SoundInstances) do
-		pcall(s.Destroy, s)
-	end
-	table.clear(SoundInstances)
-	table.clear(SoundPool)
-	for _, r in ipairs(RipplePool) do
-		pcall(r.Destroy, r)
-	end
-	table.clear(RipplePool)
 	pcall(ScreenGui.Destroy, ScreenGui)
-	local g = Getgenv()
+	local g = Peek(function()
+		if type(getgenv) == "function" then
+			local t = getgenv()
+			if type(t) == "table" then return t end
+		end
+	end)
 	if g and g.kailex == Kailex then
 		g.kailex = nil
 	end
