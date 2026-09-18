@@ -9,7 +9,77 @@ local SoundService, TextService = game:GetService("SoundService"), game:GetServi
 local TweenService, RunService = game:GetService("TweenService"), game:GetService("RunService")
 local HttpService, Workspace = game:GetService("HttpService"), game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-local UIS = game:GetService("UserInputService")
+local RawUIS = game:GetService("UserInputService")
+local lastMouse = Vector2.new(0, 0)
+local TouchStub = setmetatable({}, { __len = function() return 1 end })
+
+local DummyConn = { Connected = false }
+DummyConn.Disconnect = function() end
+DummyConn.Destroy = DummyConn.Disconnect
+
+local DummySignal = {}
+DummySignal.Connect = function() return DummyConn end
+DummySignal.Destroy = function() end
+
+local DummyEvents = {
+	InputBegan = 1, InputChanged = 1, InputEnded = 1, InputStarted = 1,
+	TouchStarted = 1, TouchEnded = 1, TouchTap = 1, TouchTapInWorld = 1,
+	TouchSwipe = 1, TouchRotate = 1, TouchPan = 1, TouchPinch = 1,
+	TouchLongPress = 1, TouchMovementStarted = 1, TouchMovementEnded = 1,
+}
+
+local UISFallback = {
+	GetMouseLocation = function() return lastMouse end,
+	GetTouches = function() return TouchStub end,
+	GetMouseButtonsPressed = function() return {} end,
+	IsMouseButtonPressed = function() return true end,
+	IsKeyDown = function() return false end,
+	GetFocusedTextBox = function() return nil end,
+}
+
+local UICache = {}
+local UIS
+UIS = setmetatable({}, {
+	__index = function(_, k)
+		local c = UICache[k]
+		if c ~= nil then
+			return c
+		end
+		local ok, v = pcall(function() return RawUIS[k] end)
+		if ok and v ~= nil then
+			if type(v) == "function" then
+				local fn = v
+				v = function(a, ...)
+					local args = table.pack(a, ...)
+					if args[1] == UIS then
+						args[1] = RawUIS
+					end
+					local ok2, r = pcall(fn, table.unpack(args, 1, args.n))
+					if ok2 then
+						if k == "GetMouseLocation" and typeof(r) == "Vector2" then
+							lastMouse = r
+						end
+						return r
+					end
+					local fb = UISFallback[k]
+					return fb and fb(a, ...) or nil
+				end
+			end
+			UICache[k] = v
+			return v
+		end
+		local fb = UISFallback[k]
+		if fb then
+			UICache[k] = fb
+			return fb
+		end
+		if DummyEvents[k] then
+			UICache[k] = DummySignal
+			return DummySignal
+		end
+		return nil
+	end,
+})
 
 local V2 = Vector2.new
 local UO = UDim2.fromOffset
