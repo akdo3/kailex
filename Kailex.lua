@@ -920,7 +920,7 @@ local function AddHover(obj, opts)
 	local baseKey = opts.BaseKey or "Element"
 
 	obj.MouseEnter:Connect(function()
-		if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") then return end
+		if obj:GetAttribute("NoHoverFX") or obj:GetAttribute("Disabled") or obj:GetAttribute("ActiveFX") then return end
 		PlaySound("Hover", 0.12)
 		Tween(obj, "HoverIn", { BackgroundColor3 = CurrentTheme[hoverKey], BackgroundTransparency = hoverT })
 		local stroke = obj:FindFirstChildOfClass("UIStroke")
@@ -928,7 +928,9 @@ local function AddHover(obj, opts)
 			Tween(stroke, "HoverIn", { Color = CurrentTheme.StrokeBright, Transparency = 0.25 })
 		end
 	end)
+
 	obj.MouseLeave:Connect(function()
+		if obj:GetAttribute("ActiveFX") then return end
 		Tween(obj, "HoverOut", { BackgroundColor3 = CurrentTheme[baseKey], BackgroundTransparency = baseT })
 		local stroke = obj:FindFirstChildOfClass("UIStroke")
 		if stroke and not opts.IgnoreStroke then
@@ -1535,8 +1537,8 @@ do
 		if not text or text == "" then return end
 		hideToken += 1
 		label.Text = text
-		local bounds = TextService:GetTextSize(text, TS(12), EF.Gotham, V2(340, 1000))
-		tipW = math.min(bounds.X + 18, 358)
+		local bounds = TextService:GetTextSize(text, TS(12), EF.Gotham, V2(332, 1000))
+		tipW = math.min(bounds.X + 24, 358)
 		tipH = clamp(bounds.Y + 10, 24, 92)
 		frame.Size = UO(tipW, tipH)
 		frame.Visible = true
@@ -2449,7 +2451,7 @@ function Element:_deferInit(cond, value)
 	if not cond then return end
 	task.defer(function()
 		if not self._destroyed then
-			RunCallback(self.Callback, self.Title, value)
+			self:_emit(value)
 		end
 	end)
 end
@@ -2459,7 +2461,12 @@ function Element:_initSaved(saveKey, opts, v)
 end
 
 function Element:_emit(v, silent)
-	if not silent then RunCallback(self.Callback, self.Title, v) end
+    if silent then return end
+    if self.AttachedToggle then
+        RunCallback(self.Callback, self.Title, v, self.AttachedToggle:Get() == true)
+    else
+        RunCallback(self.Callback, self.Title, v)
+    end
 end
 
 function Element:SetTitle(text)
@@ -2512,7 +2519,7 @@ function Element:IsDisabled() return self._disabled == true end
 
 function Element:RecalcWidth()
 	if not self.RightContainer then return end
-	local w = (self._baseRightW or 0) + (self._extraW or 0)
+	local w = (self._baseRightW or 0) + (self._extraW or 0) + (#self._extras > 0 and 12 or 0)
 	self.RightContainer.Size = UN(0, w, 1, -4)
 	if self.LeftFrame then
 		self.LeftFrame.Size = UN(1, -w, 1, 0)
@@ -2577,15 +2584,24 @@ function Element:Extra(className, opts, size)
 end
 
 function Element:Toggle(opts)
-	if self._destroyed then return nil end
-	if self.AttachedToggle then return self.AttachedToggle end
-	local tg = self:Extra("Toggle", opts)
-	if not tg then return nil end
-	self.AttachedToggle = tg
-	self.Enabled = tg.Changed
-	function self:IsEnabled() return tg:Get() == true end
-	function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
-	return tg
+    if self._destroyed then return nil end
+    if self.AttachedToggle then return self.AttachedToggle end
+    opts = type(opts) == "table" and opts or {}
+    if opts.Name == nil then opts.Name = self.Title end
+    local tg = self:Extra("Toggle", opts)
+    if not tg then return nil end
+    self.AttachedToggle = tg
+    self.Enabled = tg.Changed
+    function self:IsEnabled() return tg:Get() == true end
+    function self:SetEnabled(v, silent) tg:Set(v == true, silent) end
+    if self.Get then
+        self.Maid:Give(tg.Changed:Connect(function()
+            if not self._destroyed then
+                self:_emit(self:Get())
+            end
+        end))
+    end
+    return tg
 end
 
 function Element:_contextItems()
@@ -3223,13 +3239,18 @@ function Elements.Button.new(tab, opts)
 	local function fire()
 		if self._busy or self._disabled then return end
 		Tap(overlay)
-		if opts.Confirm then
-			Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, function()
+		local function run()
+			if self.AttachedToggle then
+				RunCallback(self.Callback, self.Title, self:IsEnabled())
+			else
 				RunCallback(self.Callback, self.Title)
-			end)
+			end
+		end
+		if opts.Confirm then
+			Kailex:Confirm({ Title = "Confirm", Text = tostring(opts.Confirm) }, run)
 			return
 		end
-		RunCallback(self.Callback, self.Title)
+		run()
 	end
 
 	Click(self.Maid, overlay, fire)
@@ -3611,7 +3632,7 @@ function Elements.Slider.new(tab, opts)
 				apply(v)
 				tickSound()
 				if not onRelease then
-					RunCallback(self.Callback, self.Title, value)
+					self:_emit(value)
 				end
 			end
 		end,
@@ -3623,7 +3644,7 @@ function Elements.Slider.new(tab, opts)
 			hideBubble()
 			SaveValue(saveKey, value)
 			if onRelease then
-				RunCallback(self.Callback, self.Title, value)
+				self:_emit(value)
 			end
 		end,
 	})
@@ -3694,7 +3715,11 @@ function Elements.Keybind.new(tab, opts)
 		RightWidth = 96,
 	})
 
-	local binding = ToBinding(SaveManager:Get(saveKey, nil)) or ToBinding(opts.Default)
+	local savedBind = SaveManager:Get(saveKey, nil)
+	local binding
+	if savedBind ~= "__none" then
+		binding = ToBinding(savedBind) or ToBinding(opts.Default)
+	end
 	local listening = false
 	local suppressClear = false
 	local listenToken = 0
@@ -3717,8 +3742,11 @@ function Elements.Keybind.new(tab, opts)
 		Hover = { BaseKey = "SurfaceLight", HoverKey = "ElementHover" },
 	})
 	StrokeBind(1, "Stroke", 0.5, bindBtn)
+	AddTooltip(bindBtn, { Text = "Click to change - right-click or Esc to unbind" })
 
 	local function refresh()
+		bindBtn:SetAttribute("ActiveFX", listening or nil)
+		CancelTweenProp(bindBtn, "BackgroundColor3")
 		if listening then
 			bindBtn.BackgroundColor3 = CurrentTheme.Accent
 			bindBtn.TextColor3 = CurrentTheme.OnAccent
@@ -3756,6 +3784,12 @@ function Elements.Keybind.new(tab, opts)
 		refresh()
 	end
 
+	local function clearBinding(silent)
+		if not binding then return end
+		setBinding(nil)
+		self:_emit(nil, silent)
+	end
+
 	self._getBinding = function() return binding end
 
 	self._handleInput = function(input, gp)
@@ -3765,6 +3799,7 @@ function Elements.Keybind.new(tab, opts)
 				listenToken += 1
 				setListening(false)
 				if input.KeyCode == EKC.Escape then
+					clearBinding()
 					return
 				end
 				setBinding({ Kind = "Key", Code = input.KeyCode, Name = input.KeyCode.Name })
@@ -3821,10 +3856,14 @@ function Elements.Keybind.new(tab, opts)
 
 	self.Maid:Give(bindBtn.MouseButton2Click:Connect(function()
 		if suppressClear or listening then return end
-		setBinding(nil)
+		clearBinding()
 	end))
 
 	function self:Set(v, silent)
+		if v == nil then
+			clearBinding(silent)
+			return
+		end
 		local b = ToBinding(v)
 		if not b then return end
 		setBinding(b)
@@ -3836,6 +3875,10 @@ function Elements.Keybind.new(tab, opts)
 	function self:CopyValue() return self:GetName() end
 
 	self:_bindSave(saveKey, function(v)
+		if v == "__none" then
+			setBinding(nil)
+			return
+		end
 		local b = ToBinding(v)
 		if b then
 			setBinding(b)
@@ -4213,7 +4256,7 @@ function Elements.Dropdown.new(tab, opts)
 		refreshOptions()
 		refreshLabel()
 		SaveValue(saveKey, valuesOf(selectedOpts()))
-		RunCallback(self.Callback, self.Title, self:Get())
+		self:_emit(self:Get())
 	end
 
 	setExpanded = function(state)
@@ -4317,7 +4360,7 @@ function Elements.Dropdown.new(tab, opts)
 			refreshLabel()
 			SaveValue(saveKey, opt.Value)
 			setExpanded(false)
-			RunCallback(self.Callback, self.Title, self:Get())
+			self:_emit(self:Get())
 		end
 	end
 
@@ -4576,7 +4619,7 @@ function Elements.TextInput.new(tab, opts)
 		end
 		if value ~= lastFired or enter then
 			lastFired = value
-			RunCallback(self.Callback, self.Title, value)
+			self:_emit(value)
 		end
 	end))
 	self.Maid:Give(Kailex.ThemeChanged:Connect(function()
@@ -4657,7 +4700,7 @@ function Elements.ColorPicker.new(tab, opts)
 			end
 		end
 		if notify then
-			RunCallback(self.Callback, self.Title, color)
+			self:_emit(color)
 		end
 	end
 
@@ -5091,7 +5134,7 @@ function Elements.Segmented.new(tab, opts)
 				selected = opt
 				paint()
 				SaveValue(saveKey, opt.Value)
-				RunCallback(self.Callback, self.Title, opt.Value)
+				self:_emit(opt.Value)
 			end
 		end)
 	end
@@ -5522,6 +5565,10 @@ function TabClass:_track(el)
 
 	self.Window:_introElement(el)
 
+	if opts.Toggle and el.RightContainer and not el.AttachedToggle then
+		el:Toggle(type(opts.Toggle) == "table" and opts.Toggle or {})
+	end
+
 	local win, tab = self.Window, self
 	el.Maid:Give(function()
 		if win and not win._destroyed and win.CurrentTab == tab and not tab._destroyed then
@@ -5580,7 +5627,9 @@ end
 
 function TabClass:Toggle(opts)
 	opts = opts or {}
+	opts.Toggle = nil
 	local quick = self.Window.QuickMode == true
+
 	if quick and Device.IsTouch and opts.Pin ~= false then
 		opts.Pin = true
 	end
