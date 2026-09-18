@@ -1301,11 +1301,7 @@ local function UpdateViewport()
 	if not Camera then return end
 	Viewport = Camera.ViewportSize
 	local short = math.min(Viewport.X, Viewport.Y)
-	local s = clamp(short / 880, 0.85, 1.1)
-	if Device.IsTouch then
-		s = math.max(s, 1)
-	end
-	s = s * (tonumber(Setting.UIScale) or 1)
+	local s = clamp(short / 880, 0.85, 1.1) * (tonumber(Setting.UIScale) or 1)
 	RootScale.Scale = s
 	Root.Size = US(1 / s, 1 / s)
 	for _, win in ipairs(Kailex.Windows) do
@@ -1710,8 +1706,8 @@ do
 	local container = Frm({
 		BackgroundTransparency = 1,
 		AnchorPoint = V2(1, 1),
-		Position = UN(1, -14, 1, -14),
-		Size = UN(0, 320, 1, -28),
+		Position = UN(1, -14, 1, Device.IsTouch and -66 or -14),
+		Size = UN(0, 320, 1, Device.IsTouch and -80 or -28),
 		Parent = LayerNotify,
 		Children = { List(8, { VerticalAlignment = EVA.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) },
 	})
@@ -1995,7 +1991,7 @@ local function RunCallback(fn, ctxName, ...)
 	task.spawn(function()
 		local ok, err = pcall(fn, table.unpack(args, 1, args.n))
 		if not ok then
-			ReportError("Callback error" .. (ctxName and (" - " + ctxName) or ""), err)
+			ReportError("Callback error" .. (ctxName and (" - " .. ctxName) or ""), err)
 		end
 	end)
 end
@@ -4837,10 +4833,11 @@ function Elements.ColorPicker.new(tab, opts)
 			SaveValue(saveKey, ColorToHex(color))
 		end)
 
-		square = Frm({
+		square = Hit({
 			Position = UO(12, 32),
 			Size = UO(216, 120),
 			BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+			BackgroundTransparency = 0,
 			ZIndex = 31,
 			Parent = popup,
 			Children = { Corner(8) },
@@ -4878,10 +4875,11 @@ function Elements.ColorPicker.new(tab, opts)
 			},
 		})
 
-		hueBar = Frm({
+		hueBar = Hit({
 			Position = UO(12, 158),
 			Size = UO(216, 12),
 			BackgroundColor3 = CN(1, 1, 1),
+			BackgroundTransparency = 0,
 			ZIndex = 31,
 			Parent = popup,
 			Children = {
@@ -6290,12 +6288,12 @@ function Kailex:Window(cfg)
 
 	local s = GetScale()
 	local vw, vh = Viewport.X / s, Viewport.Y / s
+	local maxW, maxH = vw - 12, vh - 12
 	if Device.IsTouch then
-		defW = math.min(defW, vw - 16)
-		defH = math.min(defH, vh - 16)
+		maxW, maxH = vw * 0.92, vh * 0.88
 	end
-	defW = clamp(defW, math.min(MIN_W, vw - 12), vw - 12)
-	defH = clamp(defH, math.min(MIN_H, vh - 12), vh - 12)
+	defW = clamp(math.min(defW, maxW), math.min(MIN_W, maxW), maxW)
+	defH = clamp(math.min(defH, maxH), math.min(MIN_H, maxH), maxH)
 
 	local px, py
 	if self._remember then
@@ -6303,8 +6301,8 @@ function Kailex:Window(cfg)
 		if type(sp) == "table" then
 			local sx, sy, sw, sh = tonumber(sp.X), tonumber(sp.Y), tonumber(sp.W), tonumber(sp.H)
 			if sx and sy and sw and sh then
-				defW = clamp(sw, math.min(MIN_W, vw - 12), vw - 12)
-				defH = clamp(sh, math.min(MIN_H, vh - 12), vh - 12)
+				defW = clamp(sw, math.min(MIN_W, maxW), maxW)
+				defH = clamp(sh, math.min(MIN_H, maxH), maxH)
 				px = ClampEdge(sx, defW, vw, 8)
 				py = ClampEdge(sy, defH, vh, 8)
 			end
@@ -6340,10 +6338,9 @@ function Kailex:Window(cfg)
 	local TITLE_FINAL = UN(0, 0, 0, 0)
 	local BODY_FINAL = UN(0, 0, 0, 56)
 
-	local titleBar = Frm({
+	local titleBar = Hit({
 		Position = TITLE_FINAL,
 		Size = UN(1, 0, 0, 46),
-		BackgroundTransparency = 1,
 		Parent = self.Root,
 	})
 	self.TitleBar = titleBar
@@ -6983,15 +6980,17 @@ function Kailex:Window(cfg)
 		ModalManager.CloseAll(self)
 		local sc = GetScale()
 		local vw2, vh2 = Viewport.X / sc, Viewport.Y / sc
-		local minW = math.min(MIN_W, math.max(200, vw2 - 12))
-		local minH = math.min(MIN_H, math.max(160, vh2 - 12))
+		local maxW, maxH = vw2 - 12, vh2 - 12
+		if Device.IsTouch then
+			maxW, maxH = vw2 * 0.92, vh2 * 0.88
+		end
+		local minW = math.min(MIN_W, maxW)
+		local minH = math.min(MIN_H, maxH)
 		if self.Maximized then
 			self.Root.Size = UO(vw2 - 16, vh2 - 16)
 			self.Root.Position = UO(8, 8)
 		else
-			local w = clamp(self.Root.Size.X.Offset, minW, math.max(minW, vw2 - 12))
-			local h = clamp(self.Root.Size.Y.Offset, minH, math.max(minH, vh2 - 12))
-			self.Root.Size = UO(w, h)
+			self.Root.Size = UO(clamp(self.Root.Size.X.Offset, minW, maxW), clamp(self.Root.Size.Y.Offset, minH, maxH))
 			ClampToScreen(self.Root)
 		end
 		self:UpdateLayout()
@@ -7099,7 +7098,6 @@ function Kailex:SetVisible(state)
 	uiVisible = state
 	LayerWindows.Visible = state and not KeySystemLock
 	LayerOverlay.Visible = state
-	LayerNotify.Visible = state or KeySystemLock
 	LayerTooltip.Visible = state
 	if not state then
 		Tooltip.Hide()
